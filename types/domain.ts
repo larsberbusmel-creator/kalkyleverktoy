@@ -32,6 +32,7 @@ export type MenuLine = {
   inputUnit?: string;
   materialUnit?: string;
   material?: Material;
+  recipe?: Recipe;
 };
 
 export type Menu = {
@@ -39,4 +40,11 @@ export type Menu = {
   name: string;
   lines: MenuLine[];
   guests?: number;
+};
+export type Recipe = {
+  id: string;
+  name: string;
+  lines?: any[];
+  yieldAmount?: number;
+  yieldUnit?: string;
 };
