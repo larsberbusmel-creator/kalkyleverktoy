@@ -28,7 +28,9 @@ export type MenuLine = {
   itemId: string;
   itemType: "material" | "recipe" | "product";
   amount: number;
+  quantityPerPerson: number;
   inputUnit?: string;
+  materialUnit?: string;
 };
 
 export type Menu = {
