@@ -8,6 +8,7 @@ export type Material = {
   packageSize: number;
   packagePrice: number;
   pricePerUnit: number;
+  unitPrice: number;
   retailPrice?: number;
   isForResale?: boolean;
   allergens: string[];
