@@ -40,6 +40,7 @@ export type Menu = {
   name: string;
   lines: MenuLine[];
   guests?: number;
+  minGuests?: number;
 };
 export type Recipe = {
   id: string;
