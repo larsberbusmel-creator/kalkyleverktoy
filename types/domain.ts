@@ -31,6 +31,7 @@ export type MenuLine = {
   quantityPerPerson: number;
   inputUnit?: string;
   materialUnit?: string;
+  material?: Material;
 };
 
 export type Menu = {
