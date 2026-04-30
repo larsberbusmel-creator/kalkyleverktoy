@@ -1,0 +1,8 @@
+import type { Nutrition, Recipe } from "@/types/domain";
+export const blankNutrition: Nutrition = { kcal:0,kj:0,fat:0,saturatedFat:0,fiber:0,carbs:0,sugars:0,addedSugar:0,protein:0,salt:0 };
+export function recipeTotalKg(recipe: Recipe){ return recipe.lines.reduce((sum,line)=>sum+Number(line.quantity||0),0); }
+export function recipeCost(recipe: Recipe){ return recipe.lines.reduce((sum,line)=>{ const m=line.material; return m ? sum + Number(line.quantity||0)*m.unitPrice*(1+m.wastePercent/100) : sum; },0); }
+export function recipeNutritionTotal(recipe: Recipe): Nutrition { const total={...blankNutrition}; for(const line of recipe.lines){ const m=line.material; if(!m?.nutrition) continue; const grams=Number(line.quantity||0)*1000; for(const key of Object.keys(total) as Array<keyof Nutrition>){ total[key]+=(grams/100)*Number(m.nutrition[key]||0); } } return total; }
+export function recipeNutritionPer100g(recipe: Recipe): Nutrition { const total=recipeNutritionTotal(recipe); const grams=recipeTotalKg(recipe)*1000; if(grams<=0) return {...blankNutrition}; const result={...blankNutrition}; for(const key of Object.keys(result) as Array<keyof Nutrition>){ result[key]=(total[key]/grams)*100; } return result; }
+export function recipeCoarseness(recipe: Recipe){ let flourKg=0, wholegrainKg=0; for(const line of recipe.lines){ const m=line.material; if(!m?.isFlour) continue; const q=Number(line.quantity||0); flourKg+=q; wholegrainKg+=q*(m.flourWholegrainPercent/100); } return flourKg>0 ? (wholegrainKg/flourKg)*100 : null; }
+export function recipeKgFromUnits(recipe: Recipe, units:number){ return recipe.unitSizeKg>0 ? Number(units||0)*recipe.unitSizeKg : 0; }
