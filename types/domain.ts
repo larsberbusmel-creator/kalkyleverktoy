@@ -23,3 +23,17 @@ export type Material = {
   addedSugar: number;
   salt: number;
 };
+export type MenuLine = {
+  id: string;
+  itemId: string;
+  itemType: "material" | "recipe" | "product";
+  amount: number;
+  inputUnit?: string;
+};
+
+export type Menu = {
+  id: string;
+  name: string;
+  lines: MenuLine[];
+  guests?: number;
+};
