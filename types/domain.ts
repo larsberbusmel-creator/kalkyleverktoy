@@ -54,7 +54,7 @@ export type RecipeLine = {
 export type Recipe = {
   id: string;
   name: string;
-  lines?: RecipeLine[];
+  lines: RecipeLine[];
   yieldAmount?: number;
   yieldUnit?: string;
   allergens?: string[];
