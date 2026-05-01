@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
 
 type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings";
 type Unit = "kg" | "liter" | "stk";
@@ -14,7 +12,6 @@ type Material = {
   id: string;
   name: string;
   category: string;
-  supplier?: string;
   unit: Unit;
   packageSize: number;
   packagePrice: number;
@@ -114,7 +111,7 @@ type Order = {
   dietOther?: string;
 };
 
-type RentalExtraLine = { text: string; amount: number };
+type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
 type RentalProductLine = { productId: string; guests: number };
 
 type RentalOffer = {
@@ -147,6 +144,8 @@ type InventoryMonthData = {
   items: Record<string, InventoryCount>;
 };
 
+type RentalAddon = { id: string; name: string; price: number };
+
 type AppData = {
   materials: Material[];
   recipes: Recipe[];
@@ -156,6 +155,7 @@ type AppData = {
   rental: RentalOffer;
   venues: Venue[];
   packaging: Packaging[];
+  rentalAddons: RentalAddon[];
   menuCategories: string[];
   productCategories: string[];
   materialCategories: string[];
@@ -168,6 +168,13 @@ const defaultAllergens = ["Gluten", "Hvete", "Rug", "Spelt", "Bygg", "Egg", "Mel
 const defaultMaterialCategories = ["Mat", "Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjølevarer", "Frysevare", "Frukt og grønt", "Krydder", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
 const defaultMenuCategories = ["Catering", "Selskap", "Bryllup", "Konfirmasjon", "Firma"];
 const defaultProductCategories = ["Grunnoppskrift", "Brød", "Søtbakst", "Cateringmeny", "Påsmurt", "Egenprodusert"];
+const defaultRentalAddons: RentalAddon[] = [
+  { id: "bar-oppsett", name: "Oppsett av bar", price: 5000 },
+  { id: "toyservietter", name: "Tøyservietter", price: 35 },
+  { id: "vinpakke-3-glass", name: "Vinpakke 3 glass", price: 345 },
+  { id: "alkoholfri-3-glass", name: "Alkoholfri drikkepakke 3 glass", price: 255 },
+  { id: "rigg-vielse-utendors", name: "Rigg Vielse utendørs", price: 3500 },
+];
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -251,6 +258,7 @@ const initialData: AppData = {
   rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterHours: 0, waiterAfterMidnightHours: 0, productLines: [{ productId: "", guests: 0 }], extraLines: [{ text: "", amount: 0 }] },
   venues: [{ id: "kafeen", name: "Kaféen", price: 11000 }, { id: "oscarshall", name: "Oscarshall", price: 18000 }, { id: "gammelfloya", name: "Gammelfløya", price: 18000 }, { id: "bodogaard", name: "Bodøgaard hel helg", price: 24000 }],
   packaging: [{ id: "glass", name: "Glass", price: 8 }, { id: "brodpose", name: "Brødpose", price: 2.5 }, { id: "aluminiumsbakke", name: "Aluminiumsbakke", price: 12 }],
+  rentalAddons: defaultRentalAddons,
   menuCategories: defaultMenuCategories,
   productCategories: defaultProductCategories,
   materialCategories: defaultMaterialCategories,
@@ -293,6 +301,7 @@ function migrateData(raw: Partial<AppData>): AppData {
     rental: { ...initialData.rental, ...(raw.rental || {}) },
     venues: raw.venues || initialData.venues,
     packaging: raw.packaging || initialData.packaging,
+    rentalAddons: (raw as any).rentalAddons || defaultRentalAddons,
     menuCategories: raw.menuCategories || defaultMenuCategories,
     productCategories: raw.productCategories || defaultProductCategories,
     materialCategories: raw.materialCategories || defaultMaterialCategories,
@@ -355,8 +364,13 @@ export default function Page() {
     }, 0);
   }
 
+  function recipeTotalAmount(recipe: Recipe) {
+    const total = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    return total > 0 ? total : Math.max(recipe.yieldAmount || 1, 1);
+  }
+
   function recipeUnitCost(recipe: Recipe, visited: string[] = []) {
-    return recipeCost(recipe, visited) / Math.max(recipe.yieldAmount || 1, 1);
+    return recipeCost(recipe, visited) / Math.max(recipeTotalAmount(recipe), 1);
   }
 
   function recipeAllergens(recipe: Recipe, visited: string[] = []): string[] {
@@ -425,63 +439,24 @@ export default function Page() {
   return (
     <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
       <div style={{ maxWidth: 1250, margin: "0 auto" }}>
-       <header className="card">
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-
-    {/* VENSTRE SIDE */}
-    <div>
-      <img
-        src="/logo.png"
-        alt="Brødrene Berbusmel"
-        style={{
-          height: 140,
-          width: "auto",
-          objectFit: "contain",
-          marginBottom: 20,
-        }}
-      />
-
-      <h1>Kalkyleverktøy</h1>
-      <p>Råvarer, grunnoppskrifter, produkter, ordre, produksjon, varetelling og lokaleleie.</p>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-        <button className="btn active" onClick={exportData}>
-          Eksporter database
-        </button>
-
-        <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}>
-          Importer database
-          <input
-            type="file"
-            accept="application/json"
-            style={{ display: "none" }}
-            onChange={(e) => importData(e.target.files?.[0] || null)}
+        <header className="card">
+          <img
+            src="/logo.png"
+            alt="Logo"
+            style={{
+              height: 140,
+              width: "auto",
+              objectFit: "contain",
+              marginBottom: 16,
+            }}
           />
-        </label>
-      </div>
-    </div>
-
-    {/* HØYRE SIDE */}
-    <button
-      onClick={async () => {
-        await supabase.auth.signOut();
-        window.location.href = "/login";
-      }}
-      style={{
-        background: "#dc2626",
-        color: "white",
-        border: "none",
-        borderRadius: 10,
-        padding: "10px 16px",
-        fontWeight: 700,
-        cursor: "pointer",
-      }}
-    >
-      Logg ut
-    </button>
-
-  </div>
-</header>
+          <h1>Kalkyleverktøy</h1>
+          <p>Råvarer, grunnoppskrifter, produkter, ordre, produksjon, varetelling og lokaleleie.</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            <button className="btn active" onClick={exportData}>Eksporter database</button>
+            <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Importer database<input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => importData(e.target.files?.[0] || null)} /></label>
+          </div>
+        </header>
 
         <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "18px 0" }}>
           {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
@@ -489,7 +464,7 @@ export default function Page() {
 
         {tab === "dashboard" && <DashboardTab data={data} productCost={productCost} setTab={setTab} />}
         {tab === "materials" && <MaterialsTab data={data} updateData={updateData} />}
-        {tab === "recipes" && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeAllergens={recipeAllergens} />}
+        {tab === "recipes" && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products" && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders" && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "production" && <ProductionTab data={data} />}
@@ -505,17 +480,24 @@ export default function Page() {
 function DashboardTab({ data, productCost, setTab }: { data: AppData; productCost: (p: Product) => number; setTab: (tab: Tab) => void }) {
   const todaysOrders = data.orders.filter((o) => o.date === today()).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   const todaysProduction = todaysOrders.flatMap((o) => o.orderLines.map((l) => ({ order: o, product: data.products.find((p) => p.id === l.productId), quantity: l.quantity })));
+  const todaysRevenue = todaysOrders.reduce((sum, order) => {
+    const subtotal = order.orderLines.reduce((lineSum, line) => {
+      const product = data.products.find((p) => p.id === line.productId);
+      return lineSum + (product?.customerPrice || 0) * Number(line.quantity || 0);
+    }, 0);
+    const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
+    return sum + subtotal - discount;
+  }, 0);
   const recentMaterials = [...data.materials].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")).slice(0, 6);
 
   return (
     <section>
       <div className="card">
         <h2 className="today-title">I dag</h2>
-        <div className="metric-row">
+        <div className="metric-row three-metrics">
           <Metric label="Ordre i dag" value={String(todaysOrders.length)} dark />
           <Metric label="Produksjonslinjer" value={String(todaysProduction.length)} />
-          <Metric label="Råvarer" value={String(data.materials.length)} />
-          <Metric label="Produkter" value={String(data.products.length)} />
+          <Metric label="Total omsetning i dag" value={currency(todaysRevenue)} />
         </div>
         <div className="grid two">
           <div>
@@ -658,7 +640,7 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
 })}</tbody></table><div className="pager"><button className="btn" disabled={materialPage <= 1} onClick={() => setMaterialPage(materialPage - 1)}>Forrige</button><span>Side {materialPage} av {totalPages}</span><button className="btn" disabled={materialPage >= totalPages} onClick={() => setMaterialPage(materialPage + 1)}>Neste</button></div></section>;
 }
 
-function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[] }) {
+function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[] }) {
   const [selectedId, setSelectedId] = useState(data.recipes[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
@@ -756,16 +738,29 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeAllerg
     setDraftLines((prev) => prev.map((l, i) => i === index ? { ...l, ...partial } : l));
   }
 
+  function printRecipe(recipe: Recipe) {
+    const rows = recipe.lines.map((l) => {
+      const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
+      return `<tr><td>${l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>${name}</td><td>${num(l.amount, 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
+    }).join("");
+    const allergens = recipeAllergens(recipe).join(", ") || "Ingen registrert";
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${recipe.name}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">GRUNNOPPSKRIFT</div><h1>${recipe.name}</h1><p>${recipe.category}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(recipeCost(recipe))}</b></div><div class="metric">Totalvekt / yield<b>${num(recipeTotalAmount(recipe), 3)} ${recipe.yieldUnit}</b></div><div class="metric">Pris per ${recipe.yieldUnit}<b>${currency(recipeUnitCost(recipe))}</b></div><div class="metric">Allergener<b>${allergens}</b></div></div><h2>Ingredienser</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
   if (mode !== "view") {
     return <section className="card product-editor-page"><div className="between"><h1>{mode === "edit" ? "Rediger grunnoppskrift" : "Ny grunnoppskrift"}</h1><div><button className="btn active" onClick={saveRecipe}>{mode === "edit" ? "Lagre endringer" : "Lagre grunnoppskrift"}</button><button className="btn" onClick={cancelEdit}>Avbryt</button></div></div>
       <div className="form-grid four"><label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label><label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /></label><label>Kategori<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Kategori" /></label><label>Gir<input type="number" value={form.yieldAmount} onChange={(e) => setForm({ ...form, yieldAmount: e.target.value })} /></label><label>Enhet<select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></label></div>
-      {activeRecipe && <div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(activeRecipe))} dark /><Metric label={`Kost per ${form.yieldUnit}`} value={currency(recipeUnitCost(activeRecipe))} /><Metric label="Yield" value={`${num(Number(form.yieldAmount) || 1)} ${form.yieldUnit}`} /><Metric label="Allergener" value={recipeAllergens(activeRecipe).join(", ") || "Ingen"} /></div>}
+      {activeRecipe && <div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(activeRecipe))} dark /><Metric label="Totalvekt / yield" value={`${num(recipeTotalAmount(activeRecipe), 3)} ${form.yieldUnit}`} /><Metric label={`Pris per ${form.yieldUnit}`} value={currency(recipeUnitCost(activeRecipe))} dark /><Metric label="Allergener" value={recipeAllergens(activeRecipe).join(", ") || "Ingen"} /></div>}
       <div className="soft-box"><h2>Ingredienser</h2><div className="form-grid four"><select value={line.itemType} onChange={(e) => { setLine({ ...line, itemType: e.target.value as RecipeLine["itemType"], itemId: "" }); setLineSearch(""); }}><option value="material">Råvare</option><option value="recipe">Annen grunnoppskrift</option></select><div className="search-picker"><input value={lineSearch || lineItemName(line.itemType, line.itemId)} onChange={(e) => { setLineSearch(e.target.value); setLine({ ...line, itemId: "" }); }} placeholder="Søk og velg" />{lineSearch && <div className="search-dropdown inline">{lineOptions(line.itemType, lineSearch).map((item) => <button key={item.id} type="button" className="search-result" onClick={() => { setLine({ ...line, itemId: item.id }); setLineSearch(item.name); }}><b>{item.name}</b><small>{item.subtitle}</small></button>)}</div>}</div><input type="number" value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" /><button className="btn" onClick={addLine}>Legg til</button></div>
       <table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th><th></th></tr></thead><tbody>{draftLines.map((l, i) => <tr key={i}><td><select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as RecipeLine["itemType"], itemId: "" })}><option value="material">Råvare</option><option value="recipe">Grunnoppskrift</option></select></td><td><select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}><option value="">Velg</option>{l.itemType === "material" ? data.materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>) : data.recipes.filter((r) => r.id !== selected?.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></td><td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td><td>{currency(lineCost(l))}</td><td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td></tr>)}</tbody></table></div>
     </section>;
   }
 
-  return <section className="grid two"><div className="card"><div className="between"><h2>Grunnoppskrifter</h2><button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button></div><input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />{filteredRecipes.map((r) => <div key={r.id} className={selectedId === r.id ? "list active-list" : "list"}><button className="plain" onClick={() => setSelectedId(r.id)}><b>{r.name}</b><br /><small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small></button><button className="link" onClick={() => editRecipe(r)}>Rediger</button><button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button></div>)}</div><div className="card">{!selected ? <p>Velg eller opprett en grunnoppskrift.</p> : <><div className="between"><div><h2>{selected.name}</h2><p>{selected.category} · gir {num(selected.yieldAmount)} {selected.yieldUnit}</p></div><button className="btn" onClick={() => editRecipe(selected)}>Rediger</button></div><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(selected))} dark /><Metric label={`Kost per ${selected.yieldUnit}`} value={currency(recipeUnitCost(selected))} /><Metric label="Yield" value={`${num(selected.yieldAmount)} ${selected.yieldUnit}`} /><Metric label="Allergener" value={recipeAllergens(selected).join(", ") || "Ingen"} /></div><h3>Ingredienser</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>{selected.lines.map((l, i) => <tr key={i}><td>{l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>{lineItemName(l.itemType, l.itemId)}</td><td>{num(l.amount)}</td><td>{currency(lineCost(l))}</td></tr>)}</tbody></table></>}</div></section>;
+  return <section className="grid two"><div className="card"><div className="between"><h2>Grunnoppskrifter</h2><button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button></div><input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />{filteredRecipes.map((r) => <div key={r.id} className={selectedId === r.id ? "list active-list" : "list"}><button className="plain" onClick={() => setSelectedId(r.id)}><b>{r.name}</b><br /><small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small></button><button className="link" onClick={() => editRecipe(r)}>Rediger</button><button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button></div>)}</div><div className="card">{!selected ? <p>Velg eller opprett en grunnoppskrift.</p> : <><div className="between"><div><h2>{selected.name}</h2><p>{selected.category} · totalvekt {num(recipeTotalAmount(selected), 3)} {selected.yieldUnit}</p></div><div><button className="btn" onClick={() => editRecipe(selected)}>Rediger</button><button className="btn" onClick={() => printRecipe(selected)}>Print</button></div></div><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(selected))} dark /><Metric label="Totalvekt / yield" value={`${num(recipeTotalAmount(selected), 3)} ${selected.yieldUnit}`} /><Metric label={`Pris per ${selected.yieldUnit}`} value={currency(recipeUnitCost(selected))} dark /><Metric label="Allergener" value={recipeAllergens(selected).join(", ") || "Ingen"} /></div><h3>Ingredienser</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>{selected.lines.map((l, i) => <tr key={i}><td>{l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>{lineItemName(l.itemType, l.itemId)}</td><td>{num(l.amount)}</td><td>{currency(lineCost(l))}</td></tr>)}</tbody></table></>}</div></section>;
 }
 
 function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
@@ -862,6 +857,24 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
     if (!packLine.packagingId) return;
     setDraftPackaging((prev) => [...prev, { packagingId: packLine.packagingId, quantity: Number(packLine.quantity) || 0 }]);
     setPackLine({ packagingId: "", quantity: "1" });
+  }
+
+  function printProduct(product: Product) {
+    const rows = product.lines.map((l) => {
+      const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
+      return `<tr><td>${l.itemType}</td><td>${name}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`;
+    }).join("");
+    const packagingRows = product.packaging.map((p) => {
+      const pack = data.packaging.find((x) => x.id === p.packagingId);
+      return `<tr><td>${pack?.name || "Ukjent"}</td><td>${p.quantity}</td><td>${currency((pack?.price || 0) * p.quantity)}</td></tr>`;
+    }).join("");
+    const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+    const priceExVat = exVatFromIncVat(product.customerPrice, data.settings.foodVat);
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${product.name}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">PRODUKTKALKYLE</div><h1>${product.name}</h1><p>${product.type} · ${product.category}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(productCost(product))}</b></div><div class="metric">Kost per ${product.yieldUnit}<b>${currency(productUnitCost(product))}</b></div><div class="metric">Kundepris inkl. mva<b>${currency(product.customerPrice)}</b></div><div class="metric">Varekost / margin<b>${num(foodCostPercentFrom(priceExVat, productUnitCost(product)), 1)}% / ${num(marginPercentFrom(priceExVat, productUnitCost(product)), 1)}%</b></div></div><p><b>Allergener:</b> ${allergens}</p><h2>Innhold</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table>${packagingRows ? `<h2>Emballasje</h2><table><thead><tr><th>Navn</th><th>Antall</th><th>Kost</th></tr></thead><tbody>${packagingRows}</tbody></table>` : ""}</body></html>`);
+    w.document.close();
+    w.focus();
   }
 
   function lineCost(l: ProductLine) {
@@ -965,7 +978,7 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
     );
   }
 
-  return <section className="grid two"><div className="card"><div className="between"><h2>Produkter</h2><button className="btn active" onClick={startNewProduct}>Nytt produkt</button></div><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Søk produkt" /><div className="chips">{["Alle", ...data.productCategories, "grunnoppskrift", "bakst", "cateringmeny", "pasmuurt", "egenprodusert"].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat)}>{cat}</button>)}</div>{filtered.map((p) => <button key={p.id} className={selectedId === p.id ? "list active-list" : "list"} onClick={() => { setSelectedId(p.id); setMode("view"); }}><b>{p.name}</b><br /><small>{p.type} · {p.category} · {currency(productUnitCost(p))}/{p.yieldUnit}</small></button>)}</div><div className="card">{!selected ? <p>Velg eller opprett et produkt.</p> : <><div className="between"><div><h2>{selected.name}</h2><p>{selected.type} · {selected.category} · gir {num(selected.yieldAmount)} {selected.yieldUnit}{selected.portionsPerWhole ? ` · deles på ${selected.portionsPerWhole}` : ""}</p></div><div><button className="btn" onClick={() => editProduct(selected)}>Rediger</button><button className="btn" onClick={() => { const copy = { ...selected, id: `${selected.id}-copy-${Date.now()}`, name: `${selected.name} - kopi` }; updateData({ products: [copy, ...data.products] }); setSelectedId(copy.id); }}>Kopier</button></div></div><h3>Kalkyle eks. mva</h3><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(productCost(selected))} /><Metric label={`Kost per ${selected.yieldUnit}`} value={currency(productUnitCost(selected))} dark /><Metric label="Anbefalt pris 70% inkl. mva" value={currency(recommendedPriceIncVat(productUnitCost(selected), 70))} dark /><Metric label="Allergener" value={productAllergens(selected).join(", ") || "Ingen"} /></div><div className="metric-row"><Metric label="Valgt pris inkl. mva" value={currency(selected.customerPrice)} dark /><Metric label="Valgt pris eks. mva" value={currency(exVatFromIncVat(selected.customerPrice, data.settings.foodVat))} /><Metric label="Endelig varekost" value={`${num(foodCostPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)), 1)} %`} /><Metric label="Endelig margin" value={`${num(marginPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)), 1)} %`} tone={marginTone(marginPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)))} /></div><div className="soft-box"><h3>Test annen margin</h3><div className="form-grid three"><label>Margin %<input type="number" value={testMargin} onChange={(e) => setTestMargin(e.target.value)} /></label><Metric label="Testpris inkl. mva" value={currency(recommendedPriceIncVat(productUnitCost(selected), Number(testMargin) || 0))} /><button className="btn active" onClick={() => updateSelected({ customerPrice: recommendedPriceIncVat(productUnitCost(selected), Number(testMargin) || 0), targetMargin: Number(testMargin) || selected.targetMargin })}>Bruk testpris</button></div></div><h3>Produktinnhold</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th></tr></thead><tbody>{selected.lines.map((l, i) => { const m = l.itemType === "material" ? data.materials.find((x) => x.id === l.itemId) : undefined; const r = l.itemType === "recipe" ? data.recipes.find((x) => x.id === l.itemId) : undefined; const p = l.itemType === "product" ? data.products.find((x) => x.id === l.itemId) : undefined; return <tr key={i}><td>{l.itemType}</td><td>{m?.name || r?.name || p?.name}</td><td>{num(l.amount)}</td><td>{l.unit}</td><td>{currency(lineCost(l))}</td></tr>; })}</tbody></table></>}</div></section>;
+  return <section className="grid two"><div className="card"><div className="between"><h2>Produkter</h2><button className="btn active" onClick={startNewProduct}>Nytt produkt</button></div><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Søk produkt" /><div className="chips">{["Alle", ...data.productCategories, "grunnoppskrift", "bakst", "cateringmeny", "pasmuurt", "egenprodusert"].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat)}>{cat}</button>)}</div>{filtered.map((p) => <button key={p.id} className={selectedId === p.id ? "list active-list" : "list"} onClick={() => { setSelectedId(p.id); setMode("view"); }}><b>{p.name}</b><br /><small>{p.type} · {p.category} · {currency(productUnitCost(p))}/{p.yieldUnit}</small></button>)}</div><div className="card">{!selected ? <p>Velg eller opprett et produkt.</p> : <><div className="between"><div><h2>{selected.name}</h2><p>{selected.type} · {selected.category} · gir {num(selected.yieldAmount)} {selected.yieldUnit}{selected.portionsPerWhole ? ` · deles på ${selected.portionsPerWhole}` : ""}</p></div><div><button className="btn" onClick={() => editProduct(selected)}>Rediger</button><button className="btn" onClick={() => printProduct(selected)}>Print</button><button className="btn" onClick={() => { const copy = { ...selected, id: `${selected.id}-copy-${Date.now()}`, name: `${selected.name} - kopi` }; updateData({ products: [copy, ...data.products] }); setSelectedId(copy.id); }}>Kopier</button></div></div><h3>Kalkyle eks. mva</h3><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(productCost(selected))} /><Metric label={`Kost per ${selected.yieldUnit}`} value={currency(productUnitCost(selected))} dark /><Metric label="Anbefalt pris 70% inkl. mva" value={currency(recommendedPriceIncVat(productUnitCost(selected), 70))} dark /><Metric label="Allergener" value={productAllergens(selected).join(", ") || "Ingen"} /></div><div className="metric-row"><Metric label="Valgt pris inkl. mva" value={currency(selected.customerPrice)} dark /><Metric label="Valgt pris eks. mva" value={currency(exVatFromIncVat(selected.customerPrice, data.settings.foodVat))} /><Metric label="Endelig varekost" value={`${num(foodCostPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)), 1)} %`} /><Metric label="Endelig margin" value={`${num(marginPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)), 1)} %`} tone={marginTone(marginPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)))} /></div><div className="soft-box"><h3>Test annen margin</h3><div className="form-grid three"><label>Margin %<input type="number" value={testMargin} onChange={(e) => setTestMargin(e.target.value)} /></label><Metric label="Testpris inkl. mva" value={currency(recommendedPriceIncVat(productUnitCost(selected), Number(testMargin) || 0))} /><button className="btn active" onClick={() => updateSelected({ customerPrice: recommendedPriceIncVat(productUnitCost(selected), Number(testMargin) || 0), targetMargin: Number(testMargin) || selected.targetMargin })}>Bruk testpris</button></div></div><h3>Produktinnhold</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th></tr></thead><tbody>{selected.lines.map((l, i) => { const m = l.itemType === "material" ? data.materials.find((x) => x.id === l.itemId) : undefined; const r = l.itemType === "recipe" ? data.recipes.find((x) => x.id === l.itemId) : undefined; const p = l.itemType === "product" ? data.products.find((x) => x.id === l.itemId) : undefined; return <tr key={i}><td>{l.itemType}</td><td>{m?.name || r?.name || p?.name}</td><td>{num(l.amount)}</td><td>{l.unit}</td><td>{currency(lineCost(l))}</td></tr>; })}</tbody></table></>}</div></section>;
 }
 
 function formatTimeInput(value: string) {
@@ -1392,6 +1405,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
   const [inventorySearch, setInventorySearch] = useState("");
   const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState("Alle");
   const [inventoryPage, setInventoryPage] = useState(1);
+  const [showInventoryStats, setShowInventoryStats] = useState(false);
   const pageSize = 50;
 
   const countsByMonth = data.inventoryCounts || {};
@@ -1402,6 +1416,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
   const accountingBuckets = ["Mat", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
   const internalBuckets = ["Alle", "Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
+  const statsBuckets = ["Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
   const drinkBuckets = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
 
   function updateCount(materialId: string, packages: number, loose: number) {
@@ -1446,8 +1461,8 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
   function belongsToBucket(m: Material, bucket: string) {
     if (bucket === "Alle") return true;
-    if (bucket === "Mat") return !drinkBuckets.includes(m.category);
     if (bucket === "Deli") return m.category === "Deli";
+    if (bucket === "Mat") return !drinkBuckets.includes(m.category) && m.category !== "Deli";
     return m.category === bucket;
   }
 
@@ -1519,18 +1534,23 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
     URL.revokeObjectURL(url);
   }
 
+  function valueForBucketInMonth(monthKey: string, bucket: string) {
+    const monthData = countsByMonth[monthKey];
+    const items = monthData?.items || {};
+    return data.materials.reduce((sum, m) => {
+      if (!belongsToBucket(m, bucket)) return sum;
+      const c = items[m.id] || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
+      return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit);
+    }, 0);
+  }
+
   const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
     const monthData = countsByMonth[monthKey];
-    const items = monthData.items || {};
-    function valueForBucket(bucket: string) {
-      return data.materials.reduce((sum, m) => {
-        if (!belongsToBucket(m, bucket)) return sum;
-        const c = items[m.id] || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
-        return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit);
-      }, 0);
-    }
-    return { monthKey, total: accountingBuckets.reduce((sum, b) => sum + valueForBucket(b), 0), wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) };
+    const totalValue = statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0);
+    return { monthKey, total: totalValue, wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) };
   }).slice(-12);
+
+  const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
 
   return (
     <section className="card">
@@ -1561,9 +1581,11 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
       </div>
 
       <div className="soft-box">
-        <h3>Historikk siste 12 registrerte måneder</h3>
+        <div className="between"><h3>Historikk siste 12 registrerte måneder</h3><button className={showInventoryStats ? "btn active" : "btn"} onClick={() => setShowInventoryStats(!showInventoryStats)}>{showInventoryStats ? "Skjul grafisk statistikk" : "Vis grafisk statistikk"}</button></div>
         <table><thead><tr><th>Måned</th><th>Varebeholdning</th><th>Svinn</th></tr></thead><tbody>{inventoryHistory.map((h) => <tr key={h.monthKey}><td>{h.monthKey}</td><td>{currency(h.total)}</td><td>{currency(h.wasteTotal)}</td></tr>)}</tbody></table>
       </div>
+
+      {showInventoryStats && <div className="soft-box"><h3>Grafisk statistikk måned for måned</h3><p style={{ color: "#64748b" }}>Oversikt over total varebeholdning og fordeling per kategori.</p><div className="inventory-chart">{inventoryHistory.map((h) => <div key={h.monthKey} className="inventory-month"><div className="between"><b>{h.monthKey}</b><b>{currency(h.total)}</b></div><div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.max(4, (h.total / maxInventoryValue) * 100)}%` }} /></div><div className="inventory-breakdown">{statsBuckets.map((bucket) => { const value = valueForBucketInMonth(h.monthKey, bucket); return <div key={bucket} className="breakdown-row"><span>{bucket}</span><span>{currency(value)}</span></div>; })}</div></div>)}</div></div>}
 
       <button className="btn" onClick={() => updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: !isLocked, items: counts } } })}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>
       <button className="btn active" onClick={exportInventoryCsv}>Eksporter CSV</button>
@@ -1595,11 +1617,49 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
   const rental = data.rental;
   function setRental(next: RentalOffer) { updateData({ rental: next }); }
+
+  const addonLines = rental.extraLines || [];
+  const addonTotal = addonLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
   const food = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0);
   const waiters = rental.waiters * (rental.waiterHours * data.settings.waiterRate + rental.waiterAfterMidnightHours * data.settings.waiterAfterMidnightRate);
-  const extras = rental.extraLines.reduce((s, l) => s + Number(l.amount || 0), 0);
-  const total = rental.venuePrice + food + waiters + extras;
-  return <section className="grid two"><div className="card"><h2>Leie av lokale</h2><input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kunde" /><select value={rental.venue} onChange={(e) => { const v = data.venues.find((x) => x.name === e.target.value)!; setRental({ ...rental, venue: v.name, venuePrice: v.price }); }}>{data.venues.map((v) => <option key={v.id}>{v.name}</option>)}</select><input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /><h3>Produkter/menyer</h3>{rental.productLines.map((l, i) => <div className="form-grid three" key={i}><select value={l.productId} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, productId: e.target.value } : x) })}><option value="">Velg produkt</option>{data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></div>)}<button className="btn" onClick={() => setRental({ ...rental, productLines: [...rental.productLines, { productId: "", guests: 0 }] })}>+ Produkt</button><h3>Servitører</h3><div className="form-grid three"><input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} placeholder="Antall" /><input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} placeholder="Timer" /><input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} placeholder="Etter midnatt" /></div></div><div className="card"><h2>Tilbud</h2><p>Leie {rental.venue}: <b>{currency(rental.venuePrice)}</b></p><p>Mat/produkter: <b>{currency(food)}</b></p><p>Servitører: <b>{currency(waiters)}</b></p><p>Tillegg: <b>{currency(extras)}</b></p><h2>Total: {currency(total)}</h2></div></section>;
+  const total = rental.venuePrice + food + waiters + addonTotal;
+
+  const quantityAddons = ["Tøyservietter", "Vinpakke 3 glass", "Alkoholfri drikkepakke 3 glass"];
+  const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
+
+  function addonUsesQuantity(addonName: string) {
+    return quantityAddons.includes(addonName);
+  }
+
+  function isAddonSelected(addon: RentalAddon) {
+    return addonLines.some((line) => line.text === addon.name);
+  }
+
+  function toggleAddon(addon: RentalAddon) {
+    if (isAddonSelected(addon)) {
+      setRental({ ...rental, extraLines: addonLines.filter((line) => line.text !== addon.name) });
+      return;
+    }
+    const usesQty = addonUsesQuantity(addon.name);
+    setRental({ ...rental, extraLines: [...addonLines, { text: addon.name, unitPrice: addon.price, quantity: usesQty ? 1 : undefined, amount: addon.price }] });
+  }
+
+  function updateAddonQuantity(addonName: string, quantity: number) {
+    setRental({
+      ...rental,
+      extraLines: addonLines.map((line) => {
+        if (line.text !== addonName) return line;
+        const unitPrice = Number(line.unitPrice ?? line.amount ?? 0);
+        return { ...line, quantity, unitPrice, amount: quantity * unitPrice };
+      }),
+    });
+  }
+
+  function updateAddonAmount(addonName: string, amount: number) {
+    setRental({ ...rental, extraLines: addonLines.map((line) => line.text === addonName ? { ...line, amount, unitPrice: addonUsesQuantity(line.text) ? Number(line.unitPrice ?? amount) : undefined } : line) });
+  }
+
+  return <section className="grid two"><div className="card"><h2>Leie av lokale</h2><label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kunde" /></label><label>Lokale<select value={rental.venue} onChange={(e) => { const v = data.venues.find((x) => x.name === e.target.value)!; setRental({ ...rental, venue: v.name, venuePrice: v.price }); }}>{data.venues.map((v) => <option key={v.id}>{v.name}</option>)}</select></label><label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label><h3>Produkter/menyer</h3>{rental.productLines.map((l, i) => <div className="form-grid three" key={i}><label>Produkt<select value={l.productId} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, productId: e.target.value } : x) })}><option value="">Velg produkt</option>{data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Antall gjester / porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label><button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button></div>)}<button className="btn" onClick={() => setRental({ ...rental, productLines: [...rental.productLines, { productId: "", guests: 0 }] })}>+ Produkt</button><h3>Servitører</h3><div className="form-grid three"><label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label><label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label><label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label></div><h3>Tillegg</h3><div className="soft-box">{data.rentalAddons.map((addon) => { const selected = isAddonSelected(addon); const line = addonLines.find((x) => x.text === addon.name); const usesQty = addonUsesQuantity(addon.name); return <div key={addon.id} className="editable-row"><label className="check"><input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} /> {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : ""}</label>{selected && usesQty && <label>Antall<input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} /></label>}{selected && !usesQty && <label>Pris<input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} /></label>}{selected && usesQty && <b>{currency(line?.amount || 0)}</b>}</div>; })}</div></div><div className="card"><h2>Tilbud</h2><div className="soft-box"><h3>Prisen inkluderer</h3><p>{includedText}</p></div><p>Leie {rental.venue}: <b>{currency(rental.venuePrice)}</b></p><p>Mat/produkter: <b>{currency(food)}</b></p><p>Servitører: <b>{currency(waiters)}</b></p><p>Tillegg: <b>{currency(addonTotal)}</b></p>{addonLines.length > 0 && <table><thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead><tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody></table>}<h2>Total: {currency(total)}</h2></div></section>;
 }
 
 function SettingsTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
@@ -1609,10 +1669,11 @@ function SettingsTab({ data, updateData }: { data: AppData; updateData: (p: Part
   const [newMenuCategory, setNewMenuCategory] = useState("");
   const [newVenue, setNewVenue] = useState({ name: "", price: "0" });
   const [newPackaging, setNewPackaging] = useState({ name: "", price: "0" });
+  const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0" });
   const s = data.settings;
   const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) => <div className="settings-section"><button className="settings-toggle" onClick={() => setOpen(open === id ? "" : id)}>{title}<span>{open === id ? "−" : "+"}</span></button>{open === id && <div className="settings-content">{children}</div>}</div>;
 
-  return <section className="card"><h2>Innstillinger</h2><Section id="personell" title="Personell"><div className="form-grid"><label>MVA mat<input type="number" value={s.foodVat} onChange={(e) => updateData({ settings: { ...s, foodVat: Number(e.target.value) } })} /></label><label>Kostnad kokker/time<input type="number" value={s.chefHourlyRate} onChange={(e) => updateData({ settings: { ...s, chefHourlyRate: Number(e.target.value) } })} /></label><label>Grunntid kokker/min<input type="number" value={s.chefBaseMinutes} onChange={(e) => updateData({ settings: { ...s, chefBaseMinutes: Number(e.target.value) } })} /></label><label>Tillegg min pr 10 pers<input type="number" value={s.chefExtraMinutesPer10} onChange={(e) => updateData({ settings: { ...s, chefExtraMinutesPer10: Number(e.target.value) } })} /></label><label>2 kokker over antall<input type="number" value={s.twoChefsOverGuests} onChange={(e) => updateData({ settings: { ...s, twoChefsOverGuests: Number(e.target.value) } })} /></label><label>Servitør/time<input type="number" value={s.waiterRate} onChange={(e) => updateData({ settings: { ...s, waiterRate: Number(e.target.value) } })} /></label><label>Servitør etter midnatt<input type="number" value={s.waiterAfterMidnightRate} onChange={(e) => updateData({ settings: { ...s, waiterAfterMidnightRate: Number(e.target.value) } })} /></label></div></Section><Section id="venues" title="Leie av lokaler, priser"><div>{data.venues.map((v, i) => <div key={v.id} className="editable-row"><input value={v.name} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={v.price} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ venues: data.venues.filter((x) => x.id !== v.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} /><input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newVenue.name.trim()) return; updateData({ venues: [...data.venues, { id: `${idFromName(newVenue.name)}-${Date.now()}`, name: newVenue.name.trim(), price: Number(newVenue.price) || 0 }] }); setNewVenue({ name: "", price: "0" }); }}>Legg til</button></div></Section><Section id="materialCats" title="Kategorier for råvarer"><CategoryEditor values={data.materialCategories} newValue={newMaterialCategory} setNewValue={setNewMaterialCategory} onSave={(next) => updateData({ materialCategories: next })} /></Section><Section id="productCats" title="Kategorier for produkter/menyer"><h3>Produktkategorier</h3><CategoryEditor values={data.productCategories} newValue={newProductCategory} setNewValue={setNewProductCategory} onSave={(next) => updateData({ productCategories: next })} /><h3>Menykategorier</h3><CategoryEditor values={data.menuCategories} newValue={newMenuCategory} setNewValue={setNewMenuCategory} onSave={(next) => updateData({ menuCategories: next })} /></Section><Section id="packaging" title="Priser på emballasje"><div>{data.packaging.map((p, i) => <div key={p.id} className="editable-row"><input value={p.name} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={p.price} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ packaging: data.packaging.filter((x) => x.id !== p.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} /><input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newPackaging.name.trim()) return; updateData({ packaging: [...data.packaging, { id: `${idFromName(newPackaging.name)}-${Date.now()}`, name: newPackaging.name.trim(), price: Number(newPackaging.price) || 0 }] }); setNewPackaging({ name: "", price: "0" }); }}>Legg til</button></div></Section></section>;
+  return <section className="card"><h2>Innstillinger</h2><Section id="personell" title="Personell"><div className="form-grid"><label>MVA mat<input type="number" value={s.foodVat} onChange={(e) => updateData({ settings: { ...s, foodVat: Number(e.target.value) } })} /></label><label>Kostnad kokker/time<input type="number" value={s.chefHourlyRate} onChange={(e) => updateData({ settings: { ...s, chefHourlyRate: Number(e.target.value) } })} /></label><label>Grunntid kokker/min<input type="number" value={s.chefBaseMinutes} onChange={(e) => updateData({ settings: { ...s, chefBaseMinutes: Number(e.target.value) } })} /></label><label>Tillegg min pr 10 pers<input type="number" value={s.chefExtraMinutesPer10} onChange={(e) => updateData({ settings: { ...s, chefExtraMinutesPer10: Number(e.target.value) } })} /></label><label>2 kokker over antall<input type="number" value={s.twoChefsOverGuests} onChange={(e) => updateData({ settings: { ...s, twoChefsOverGuests: Number(e.target.value) } })} /></label><label>Servitør/time<input type="number" value={s.waiterRate} onChange={(e) => updateData({ settings: { ...s, waiterRate: Number(e.target.value) } })} /></label><label>Servitør etter midnatt<input type="number" value={s.waiterAfterMidnightRate} onChange={(e) => updateData({ settings: { ...s, waiterAfterMidnightRate: Number(e.target.value) } })} /></label></div></Section><Section id="venues" title="Leie av lokaler, priser"><div>{data.venues.map((v, i) => <div key={v.id} className="editable-row"><input value={v.name} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={v.price} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ venues: data.venues.filter((x) => x.id !== v.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} /><input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newVenue.name.trim()) return; updateData({ venues: [...data.venues, { id: `${idFromName(newVenue.name)}-${Date.now()}`, name: newVenue.name.trim(), price: Number(newVenue.price) || 0 }] }); setNewVenue({ name: "", price: "0" }); }}>Legg til</button></div></Section><Section id="rentalAddons" title="Leie av lokale, tillegg"><div>{data.rentalAddons.map((addon, i) => <div key={addon.id} className="editable-row"><input value={addon.name} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={addon.price} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ rentalAddons: data.rentalAddons.filter((x) => x.id !== addon.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} /><input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newRentalAddon.name.trim()) return; updateData({ rentalAddons: [...data.rentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0 }] }); setNewRentalAddon({ name: "", price: "0" }); }}>Legg til</button></div></Section><Section id="materialCats" title="Kategorier for råvarer"><CategoryEditor values={data.materialCategories} newValue={newMaterialCategory} setNewValue={setNewMaterialCategory} onSave={(next) => updateData({ materialCategories: next })} /></Section><Section id="productCats" title="Kategorier for produkter/menyer"><h3>Produktkategorier</h3><CategoryEditor values={data.productCategories} newValue={newProductCategory} setNewValue={setNewProductCategory} onSave={(next) => updateData({ productCategories: next })} /><h3>Menykategorier</h3><CategoryEditor values={data.menuCategories} newValue={newMenuCategory} setNewValue={setNewMenuCategory} onSave={(next) => updateData({ menuCategories: next })} /></Section><Section id="packaging" title="Priser på emballasje"><div>{data.packaging.map((p, i) => <div key={p.id} className="editable-row"><input value={p.name} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={p.price} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ packaging: data.packaging.filter((x) => x.id !== p.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} /><input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newPackaging.name.trim()) return; updateData({ packaging: [...data.packaging, { id: `${idFromName(newPackaging.name)}-${Date.now()}`, name: newPackaging.name.trim(), price: Number(newPackaging.price) || 0 }] }); setNewPackaging({ name: "", price: "0" }); }}>Legg til</button></div></Section></section>;
 }
 
 function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void }) {
@@ -1649,6 +1710,7 @@ function GlobalStyles() {
     .list { display: block; width: 100%; text-align: left; border: 1px solid #e2e8f0; background: white; border-radius: 12px; padding: 12px; margin: 8px 0; cursor: pointer; }
     .active-list { background: #0f172a; color: white; }
     .metric-row { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin: 12px 0; }
+    .metric-row.three-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); }
     .metric { background: #f1f5f9; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
     .metric.dark { background: #0f172a; color: white; }
     .metric.good { background: #dcfce7; }
@@ -1684,6 +1746,12 @@ function GlobalStyles() {
     .search-result { width: 100%; border: 0; background: white; padding: 10px 12px; text-align: left; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
     .search-result:hover { background: #f8fafc; }
     .search-result small { color: #64748b; }
+    .inventory-chart { display: grid; gap: 14px; }
+    .inventory-month { border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; background: white; }
+    .bar-bg { height: 14px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin: 10px 0; }
+    .bar-fill { height: 100%; background: #0f172a; border-radius: 999px; }
+    .inventory-breakdown { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 14px; margin-top: 10px; }
+    .breakdown-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #f1f5f9; padding: 4px 0; font-size: 13px; }
     @media (max-width: 900px) { .grid.two, .form-grid, .form-grid.three, .form-grid.four, .form-grid.five, .metric-row, .small-grid { grid-template-columns: 1fr; } }
   `}</style>;
 }
