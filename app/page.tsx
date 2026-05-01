@@ -498,10 +498,10 @@ export default function Page() {
             src="/logo.png"
             alt="Brødrene Berbusmel"
             style={{
-              height: 70,
+              height: 140,
               width: "auto",
               objectFit: "contain",
-              marginBottom: 12,
+              marginBottom: 20,
             }}
           />
 
