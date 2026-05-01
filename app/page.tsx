@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 
@@ -303,14 +304,33 @@ export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [data, setData] = useState<AppData>(initialData);
+  const router = useRouter();
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  useEffect(() => {
+  async function checkAuth() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    setCheckingAuth(false);
+  }
+
+  checkAuth();
+}, [router]);
 
  useEffect(() => {
   async function loadData() {
-    const { data: row, error } = await supabase
-      .from("app_data")
-      .select("data")
-      .eq("id", "main")
-      .single();
+   const { data: row, error } = await supabase
+  .from("app_data")
+  .select("data")
+  .eq("id", "main")
+  .maybeSingle();
 
     if (row?.data) {
       setData(migrateData(row.data));
@@ -342,10 +362,14 @@ export default function Page() {
   function updateData(partial: Partial<AppData>) { setData((prev) => ({ ...prev, ...partial })); }
 
   async function saveToSupabase(data: any) {
+    console.log("LAGRER NÅ", data);
   const { error } = await supabase
     .from("app_data")
-    .update({ data })
-    .eq("id", "main");
+    .upsert({
+      id: "main",
+      data,
+      updated_at: new Date().toISOString(),
+    });
 
   if (error) {
     console.error("Supabase error:", error);
@@ -456,7 +480,9 @@ export default function Page() {
     if (margin >= 1) return 0;
     return Math.ceil((costExVat / (1 - margin)) * (1 + data.settings.foodVat / 100));
   }
-
+  if (checkingAuth) {
+  return <div>Laster...</div>;
+  }
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
   return (
