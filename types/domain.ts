@@ -1,5 +1,18 @@
 export type Unit = "kg" | "liter" | "stk" | "g" | "ml" | "porsjoner" | string;
 
+export type Nutrition = {
+  kcal: number;
+  kj: number;
+  fat: number;
+  saturatedFat: number;
+  fiber: number;
+  carbs: number;
+  sugars: number;
+  addedSugar: number;
+  protein: number;
+  salt: number;
+};
+
 export type Material = {
   id: string;
   name: string;
