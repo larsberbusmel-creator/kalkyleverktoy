@@ -5,10 +5,10 @@ export type Material = {
   name: string;
   category?: string;
   unit: Unit;
-  packageSize?: number;
-  packagePrice?: number;
-  pricePerUnit?: number;
-  unitPrice?: number;
+ packageSize: number;
+packagePrice: number;
+pricePerUnit: number;
+unitPrice: number;
   retailPrice?: number;
   isForResale?: boolean;
   allergens?: string[];
