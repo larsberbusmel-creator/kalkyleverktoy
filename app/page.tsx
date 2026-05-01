@@ -12,6 +12,7 @@ type Material = {
   id: string;
   name: string;
   category: string;
+  supplier?: string;
   unit: Unit;
   packageSize: number;
   packagePrice: number;
