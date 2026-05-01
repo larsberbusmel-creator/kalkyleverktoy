@@ -486,27 +486,69 @@ export default function Page() {
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
-      <div style={{ maxWidth: 1250, margin: "0 auto" }}>
-        <header className="card">
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+   <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
+  <div style={{ maxWidth: 1250, margin: "0 auto" }}>
+
+    <header className="card">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+
+        {/* VENSTRE SIDE */}
+        <div>
           <img
-  src="/logo.png"
-  alt="Brødrene Berbusmel"
-  style={{
-    height: 70,
-    width: "auto",
-    objectFit: "contain",
-    marginBottom: 12,
-  }}
-/>
+            src="/logo.png"
+            alt="Brødrene Berbusmel"
+            style={{
+              height: 70,
+              width: "auto",
+              objectFit: "contain",
+              marginBottom: 12,
+            }}
+          />
+
           <h1>Kalkyleverktøy</h1>
           <p>Råvarer, grunnoppskrifter, produkter, ordre, produksjon, varetelling og lokaleleie.</p>
+
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-            <button className="btn active" onClick={exportData}>Eksporter database</button>
-            <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Importer database<input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => importData(e.target.files?.[0] || null)} /></label>
+            <button className="btn active" onClick={exportData}>
+              Eksporter database
+            </button>
+
+            <label
+  className="btn"
+  style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}
+>
+  Importer database
+  <input
+    type="file"
+    accept="application/json"
+    style={{ display: "none" }}
+    onChange={(e) => importData(e.target.files?.[0] || null)}
+  />
+</label>
           </div>
-        </header>
+        </div>
+
+        {/* HØYRE SIDE (LOGOUT) */}
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            window.location.href = "/login";
+          }}
+          style={{
+            background: "#dc2626",
+            color: "white",
+            border: "none",
+            borderRadius: 10,
+            padding: "10px 16px",
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Logg ut
+        </button>
+
+      </div>
+    </header>
 
         <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "18px 0" }}>
           {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
