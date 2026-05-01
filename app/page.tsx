@@ -441,23 +441,34 @@ export default function Page() {
     <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
       <div style={{ maxWidth: 1250, margin: "0 auto" }}>
         <header className="card">
-          <img
-            src="/logo.png"
-            alt="Logo"
-            style={{
-              height: 140,
-              width: "auto",
-              objectFit: "contain",
-              marginBottom: 16,
-            }}
-          />
-          <h1>Kalkyleverktøy</h1>
-          <p>Råvarer, grunnoppskrifter, produkter, ordre, produksjon, varetelling og lokaleleie.</p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-            <button className="btn active" onClick={exportData}>Eksporter database</button>
-            <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}>Importer database<input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => importData(e.target.files?.[0] || null)} /></label>
-          </div>
-        </header>
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    
+    {/* VENSTRE */}
+    <div>
+      <img
+        src="/logo.png"
+        alt="Logo"
+        style={{
+          height: 140,
+          width: "auto",
+          objectFit: "contain",
+        }}
+      />
+    </div>
+
+    {/* HØYRE */}
+   <button
+  className="btn logout"
+  onClick={async () => {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }}
+>
+  Logg ut
+</button>
+
+  </div>
+</header>
 
         <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "18px 0" }}>
           {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
@@ -637,7 +648,15 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
 <table><thead><tr><th>Råvare</th><th>Leverandør</th><th>Kategori</th><th>Pakning</th><th>Pris/enhet</th><th>Utsalgspris</th><th>Margin</th><th>Allergener</th><th></th></tr></thead><tbody>{visibleMaterials.map((m) => {
   const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
   const deliMargin = m.category === "Deli" ? marginPercentFrom(retailExVat, m.pricePerUnit) : 0;
-  return <tr key={m.id}><td><b>{m.name}</b>{m.isForResale && <><br /><small style={{ color: "#64748b" }}>Videresalg</small></>}</td><td>{m.supplier || "-"}</td><td>{m.category}</td><td>{m.packageSize} {m.unit}</td><td>{currency(m.pricePerUnit)}</td><td>{m.category === "Deli" ? currency(m.retailPrice || 0) : "-"}</td><td>{m.category === "Deli" ? `${num(deliMargin, 1)} %` : "-"}</td><td>{m.allergens.join(", ")}</td><td><button onClick={() => edit(m)}>Rediger</button><button style={{ marginLeft: 8 }} onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td></tr>;
+  return <tr key={m.id}><td><b>{m.name}</b>{m.isForResale && <><br /><small style={{ color: "#64748b" }}>Videresalg</small></>}</td><td>{m.supplier || "-"}</td><td>{m.category}</td><td>{m.packageSize} {m.unit}</td><td>{currency(m.pricePerUnit)}</td><td>{m.category === "Deli" ? currency(m.retailPrice || 0) : "-"}</td><td>{m.category === "Deli" ? `${num(deliMargin, 1)} %` : "-"}</td><td>{m.allergens.join(", ")}</td><td><button
+  className="btn"
+  onClick={() => {
+    edit(m);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }}
+>
+  Rediger
+</button><button style={{ marginLeft: 8 }} className="btn danger" onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td></tr>;
 })}</tbody></table><div className="pager"><button className="btn" disabled={materialPage <= 1} onClick={() => setMaterialPage(materialPage - 1)}>Forrige</button><span>Side {materialPage} av {totalPages}</span><button className="btn" disabled={materialPage >= totalPages} onClick={() => setMaterialPage(materialPage + 1)}>Neste</button></div></section>;
 }
 
@@ -1706,7 +1725,32 @@ function GlobalStyles() {
     .small-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 8px; }
     .between { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
     input, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 10px; padding: 9px 10px; background: white; }
-    .btn { border: 1px solid #cbd5e1; background: white; border-radius: 12px; padding: 9px 12px; font-weight: 700; cursor: pointer; margin-right: 6px; margin-bottom: 6px; }
+    .btn {
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid #cbd5f5;
+  background: white;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+  .btn:hover {
+  background: #f1f5f9;
+}
+  .btn.danger {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+  .btn.logout {
+  background: #fecaca;   /* lys rød */
+  color: #0f172a;        /* sort tekst */
+  border: 1px solid #fca5a5;
+}
+
+.btn.logout:hover {
+  background: #fca5a5;
+}
     .btn.active { background: #0f172a; color: white; border-color: #0f172a; }
     .list { display: block; width: 100%; text-align: left; border: 1px solid #e2e8f0; background: white; border-radius: 12px; padding: 12px; margin: 8px 0; cursor: pointer; }
     .active-list { background: #0f172a; color: white; }
