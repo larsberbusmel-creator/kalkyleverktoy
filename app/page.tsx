@@ -1,9 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-
 
 type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings";
 type Unit = "kg" | "liter" | "stk";
@@ -304,79 +301,18 @@ export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [data, setData] = useState<AppData>(initialData);
-  const router = useRouter();
-  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-  async function checkAuth() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      router.push("/login");
-      return;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try { setData(migrateData(JSON.parse(saved))); } catch { setData(initialData); }
     }
-
-    setCheckingAuth(false);
-  }
-
-  checkAuth();
-}, [router]);
-
- useEffect(() => {
-  async function loadData() {
-   const { data: row, error } = await supabase
-  .from("app_data")
-  .select("data")
-  .eq("id", "main")
-  .maybeSingle();
-
-    if (row?.data) {
-      setData(migrateData(row.data));
-    } else {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try {
-          setData(migrateData(JSON.parse(saved)));
-        } catch {
-          setData(initialData);
-        }
-      }
-    }
-
     setIsLoaded(true);
-  }
+  }, []);
 
-  loadData();
-}, []);
-  useEffect(() => {
-  if (!isLoaded) return;
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-
-  saveToSupabase(data);
-
-}, [data, isLoaded]);
+  useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
 
   function updateData(partial: Partial<AppData>) { setData((prev) => ({ ...prev, ...partial })); }
-
-  async function saveToSupabase(data: any) {
-    console.log("LAGRER NÅ", data);
-  const { error } = await supabase
-    .from("app_data")
-    .upsert({
-      id: "main",
-      data,
-      updated_at: new Date().toISOString(),
-    });
-
-  if (error) {
-    console.error("Supabase error:", error);
-  } else {
-    console.log("Lagret til Supabase");
-  }
-}
 
   function exportData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
@@ -480,75 +416,69 @@ export default function Page() {
     if (margin >= 1) return 0;
     return Math.ceil((costExVat / (1 - margin)) * (1 + data.settings.foodVat / 100));
   }
-  if (checkingAuth) {
-  return <div>Laster...</div>;
-  }
+
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
   return (
-   <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
-  <div style={{ maxWidth: 1250, margin: "0 auto" }}>
+    <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
+      <div style={{ maxWidth: 1250, margin: "0 auto" }}>
+       <header className="card">
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
 
-    <header className="card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+    {/* VENSTRE SIDE */}
+    <div>
+      <img
+        src="/logo.png"
+        alt="Brødrene Berbusmel"
+        style={{
+          height: 140,
+          width: "auto",
+          objectFit: "contain",
+          marginBottom: 20,
+        }}
+      />
 
-        {/* VENSTRE SIDE */}
-        <div>
-          <img
-            src="/logo.png"
-            alt="Brødrene Berbusmel"
-            style={{
-              height: 140,
-              width: "auto",
-              objectFit: "contain",
-              marginBottom: 20,
-            }}
-          />
+      <h1>Kalkyleverktøy</h1>
+      <p>Råvarer, grunnoppskrifter, produkter, ordre, produksjon, varetelling og lokaleleie.</p>
 
-          <h1>Kalkyleverktøy</h1>
-          <p>Råvarer, grunnoppskrifter, produkter, ordre, produksjon, varetelling og lokaleleie.</p>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-            <button className="btn active" onClick={exportData}>
-              Eksporter database
-            </button>
-
-            <label
-  className="btn"
-  style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}
->
-  Importer database
-  <input
-    type="file"
-    accept="application/json"
-    style={{ display: "none" }}
-    onChange={(e) => importData(e.target.files?.[0] || null)}
-  />
-</label>
-          </div>
-        </div>
-
-        {/* HØYRE SIDE (LOGOUT) */}
-        <button
-          onClick={async () => {
-            await supabase.auth.signOut();
-            window.location.href = "/login";
-          }}
-          style={{
-            background: "#dc2626",
-            color: "white",
-            border: "none",
-            borderRadius: 10,
-            padding: "10px 16px",
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
-        >
-          Logg ut
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <button className="btn active" onClick={exportData}>
+          Eksporter database
         </button>
 
+        <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}>
+          Importer database
+          <input
+            type="file"
+            accept="application/json"
+            style={{ display: "none" }}
+            onChange={(e) => importData(e.target.files?.[0] || null)}
+          />
+        </label>
       </div>
-    </header>
+    </div>
+
+    {/* HØYRE SIDE */}
+    <button
+      onClick={async () => {
+        await supabase.auth.signOut();
+        window.location.href = "/login";
+      }}
+      style={{
+        background: "#dc2626",
+        color: "white",
+        border: "none",
+        borderRadius: 10,
+        padding: "10px 16px",
+        fontWeight: 700,
+        cursor: "pointer",
+      }}
+    >
+      Logg ut
+    </button>
+
+  </div>
+</header>
 
         <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "18px 0" }}>
           {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
@@ -614,7 +544,30 @@ function DashboardTab({ data, productCost, setTab }: { data: AppData; productCos
 }
 
 function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
-  const blank = { id: "", name: "", category: data.materialCategories[0] || "Mat", unit: "kg" as Unit, packageSize: "1", packagePrice: "0", retailPrice: "", deliMargin: "50", allergens: "", kcal: "0", protein: "0", carbs: "0", fat: "0", kj: "0", saturatedFat: "0", fiber: "0", sugars: "0", addedSugar: "0", salt: "0", isWholegrain: false };
+  const blank = {
+    id: "",
+    name: "",
+    supplier: "",
+    category: data.materialCategories[0] || "Mat",
+    unit: "kg" as Unit,
+    packageSize: "1",
+    packagePrice: "0",
+    retailPrice: "",
+    deliMargin: "50",
+    allergens: "",
+    kcal: "0",
+    protein: "0",
+    carbs: "0",
+    fat: "0",
+    kj: "0",
+    saturatedFat: "0",
+    fiber: "0",
+    sugars: "0",
+    addedSugar: "0",
+    salt: "0",
+    isWholegrain: false,
+  };
+
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -624,15 +577,46 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
   const pageSize = 50;
 
   const filtered = data.materials
-    .filter((m) => `${m.name} ${m.category}`.toLowerCase().includes(search.toLowerCase()))
+    .filter((m) => `${m.name} ${m.category} ${m.supplier || ""}`.toLowerCase().includes(search.toLowerCase()))
     .filter((m) => categoryFilter === "Alle" || m.category === categoryFilter)
     .sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "no-NO"));
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleMaterials = filtered.slice((materialPage - 1) * pageSize, materialPage * pageSize);
 
-  function reset() { setForm(blank); setEditingId(null); }
-  function edit(m: Material) { setForm({ ...blank, id: m.id, name: m.name, category: m.category, unit: m.unit, packageSize: String(m.packageSize), packagePrice: String(m.packagePrice), retailPrice: String(m.retailPrice || ""), allergens: (m.allergens || []).join(", "), kcal: String(m.kcal || 0), protein: String(m.protein || 0), carbs: String(m.carbs || 0), fat: String(m.fat || 0), kj: String(m.kj || 0), saturatedFat: String(m.saturatedFat || 0), fiber: String(m.fiber || 0), sugars: String(m.sugars || 0), addedSugar: String(m.addedSugar || 0), salt: String(m.salt || 0), isWholegrain: !!m.isWholegrain }); setEditingId(m.id); setShowForm(true); }
+  function reset() {
+    setForm(blank);
+    setEditingId(null);
+  }
+
+  function edit(m: Material) {
+    setForm({
+      ...blank,
+      id: m.id,
+      name: m.name,
+      supplier: m.supplier || "",
+      category: m.category,
+      unit: m.unit,
+      packageSize: String(m.packageSize),
+      packagePrice: String(m.packagePrice),
+      retailPrice: String(m.retailPrice || ""),
+      allergens: (m.allergens || []).join(", "),
+      kcal: String(m.kcal || 0),
+      protein: String(m.protein || 0),
+      carbs: String(m.carbs || 0),
+      fat: String(m.fat || 0),
+      kj: String(m.kj || 0),
+      saturatedFat: String(m.saturatedFat || 0),
+      fiber: String(m.fiber || 0),
+      sugars: String(m.sugars || 0),
+      addedSugar: String(m.addedSugar || 0),
+      salt: String(m.salt || 0),
+      isWholegrain: !!m.isWholegrain,
+    });
+    setEditingId(m.id);
+    setShowForm(true);
+  }
+
   function save() {
     if (!form.name.trim()) return;
     const id = editingId || `${idFromName(form.name)}-${Date.now()}`;
@@ -640,12 +624,14 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
       ...makeMaterial(id, form.name, form.category, form.unit, Number(form.packageSize) || 1, Number(form.packagePrice) || 0, form.allergens.split(",").map(normalizeAllergen).filter(Boolean), Number(form.kcal) || 0, Number(form.protein) || 0, Number(form.carbs) || 0, Number(form.fat) || 0, Number(form.kj) || 0, Number(form.saturatedFat) || 0, Number(form.fiber) || 0, Number(form.sugars) || 0, Number(form.addedSugar) || 0, Number(form.salt) || 0, form.isWholegrain),
       retailPrice: Number(form.retailPrice) || undefined,
       isForResale: form.category === "Deli",
+      supplier: form.supplier || "",
     };
     updateData({ materials: editingId ? data.materials.map((x) => x.id === editingId ? m : x) : [m, ...data.materials] });
-    reset(); setShowForm(false);
+    reset();
+    setShowForm(false);
   }
 
-  return <section className="card"><div className="between"><h2>Råvarer</h2><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>{showForm && <div className="soft-box"><div className="form-grid"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select><select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select><label>Pakningsstørrelse<input type="number" value={form.packageSize} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label><label>Pakningspris eks. mva<input type="number" value={form.packagePrice} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label><Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} /></div>
+  return <section className="card"><div className="between"><h2>Råvarer</h2><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>{showForm && <div className="soft-box"><div className="form-grid"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /><label>Leverandør<input value={form.supplier || ""} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select><select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select><label>Pakningsstørrelse<input type="number" value={form.packageSize} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label><label>Pakningspris eks. mva<input type="number" value={form.packagePrice} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label><Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} /></div>
 
 {form.category === "Deli" && (() => {
   const costExVat = (Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1);
@@ -655,59 +641,128 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
   const retailExVat = exVatFromIncVat(retailIncVat, data.settings.foodVat);
   const finalMargin = marginPercentFrom(retailExVat, costExVat);
   const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
+  return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="50" value={form.deliMargin} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label><Metric label="Anbefalt utsalgspris inkl. mva" value={currency(suggestedIncVat)} dark /><label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label><button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button></div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label="Valgt pris eks. mva" value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
+})()}<h3>Allergier</h3><div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div><h3>Næring per 100g/ml</h3><div className="form-grid five">{[["kj", "kJ"], ["kcal", "Kcal"], ["fat", "Fett"], ["saturatedFat", "Mettet fett"], ["protein", "Protein"], ["carbs", "Karbo"], ["sugars", "Sukkerarter"], ["addedSugar", "Tilsatt sukker"], ["fiber", "Kostfiber"], ["salt", "Salt"]].map(([k, label]) => <label key={k}>{label}<input type="number" value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>)}</div><label className="check"><input type="checkbox" checked={form.isWholegrain} onChange={(e) => setForm({ ...form, isWholegrain: e.target.checked })} /> Fullkorn/grov råvare</label><button className="btn active" onClick={save}>Lagre</button><button className="btn" onClick={() => { reset(); setShowForm(false); }}>Avbryt</button></div>}<input value={search} onChange={(e) => { setSearch(e.target.value); setMaterialPage(1); }} placeholder="Søk råvare / leverandør" />
 
-  return (
-    <div className="soft-box" style={{ gridColumn: "1 / -1" }}>
-      <h3>Deli / videresalg</h3>
-      <div className="form-grid four">
-        <label>Ønsket fortjeneste %<input type="number" min="50" value={form.deliMargin} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label>
-        <Metric label="Anbefalt utsalgspris inkl. mva" value={currency(suggestedIncVat)} dark />
-        <label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label>
-        <button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button>
-      </div>
-      <div className="metric-row">
-        <Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} />
-        <Metric label="Valgt pris eks. mva" value={currency(retailExVat)} />
-        <Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} />
-        <Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} />
-      </div>
-    </div>
-  );
-})()}<h3>Allergier</h3><div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div><h3>Næring per 100g/ml</h3><div className="form-grid five">{[["kj", "kJ"], ["kcal", "Kcal"], ["fat", "Fett"], ["saturatedFat", "Mettet fett"], ["protein", "Protein"], ["carbs", "Karbo"], ["sugars", "Sukkerarter"], ["addedSugar", "Tilsatt sukker"], ["fiber", "Kostfiber"], ["salt", "Salt"]].map(([k, label]) => <label key={k}>{label}<input type="number" value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>)}</div><label className="check"><input type="checkbox" checked={form.isWholegrain} onChange={(e) => setForm({ ...form, isWholegrain: e.target.checked })} /> Fullkorn/grov råvare</label><button className="btn active" onClick={save}>Lagre</button><button className="btn" onClick={() => { reset(); setShowForm(false); }}>Avbryt</button></div>}<input value={search} onChange={(e) => { setSearch(e.target.value); setMaterialPage(1); }} placeholder="Søk råvare" />
-
-<div className="chips">
-  {["Alle", ...data.materialCategories].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => (
-    <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setMaterialPage(1); }}>{cat}</button>
-  ))}
-</div>
+<div className="chips">{["Alle", ...data.materialCategories].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setMaterialPage(1); }}>{cat}</button>)}</div>
 
 <p style={{ color: "#64748b" }}>Viser {visibleMaterials.length} av {filtered.length} råvarer. Side {materialPage} av {totalPages}.</p>
 
-<table><thead><tr><th>Råvare</th><th>Kategori</th><th>Pakning</th><th>Pris/enhet</th><th>Utsalgspris</th><th>Margin</th><th>Allergener</th><th></th></tr></thead><tbody>{visibleMaterials.map((m) => {
+<table><thead><tr><th>Råvare</th><th>Leverandør</th><th>Kategori</th><th>Pakning</th><th>Pris/enhet</th><th>Utsalgspris</th><th>Margin</th><th>Allergener</th><th></th></tr></thead><tbody>{visibleMaterials.map((m) => {
   const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
   const deliMargin = m.category === "Deli" ? marginPercentFrom(retailExVat, m.pricePerUnit) : 0;
-  return <tr key={m.id}><td><b>{m.name}</b>{m.isForResale && <><br /><small style={{ color: "#64748b" }}>Videresalg</small></>}</td><td>{m.category}</td><td>{m.packageSize} {m.unit}</td><td>{currency(m.pricePerUnit)}</td><td>{m.category === "Deli" ? currency(m.retailPrice || 0) : "-"}</td><td>{m.category === "Deli" ? `${num(deliMargin, 1)} %` : "-"}</td><td>{m.allergens.join(", ")}</td><td><button onClick={() => edit(m)}>Rediger</button><button style={{ marginLeft: 8 }} onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td></tr>;
+  return <tr key={m.id}><td><b>{m.name}</b>{m.isForResale && <><br /><small style={{ color: "#64748b" }}>Videresalg</small></>}</td><td>{m.supplier || "-"}</td><td>{m.category}</td><td>{m.packageSize} {m.unit}</td><td>{currency(m.pricePerUnit)}</td><td>{m.category === "Deli" ? currency(m.retailPrice || 0) : "-"}</td><td>{m.category === "Deli" ? `${num(deliMargin, 1)} %` : "-"}</td><td>{m.allergens.join(", ")}</td><td><button onClick={() => edit(m)}>Rediger</button><button style={{ marginLeft: 8 }} onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td></tr>;
 })}</tbody></table><div className="pager"><button className="btn" disabled={materialPage <= 1} onClick={() => setMaterialPage(materialPage - 1)}>Forrige</button><span>Side {materialPage} av {totalPages}</span><button className="btn" disabled={materialPage >= totalPages} onClick={() => setMaterialPage(materialPage + 1)}>Neste</button></div></section>;
 }
 
 function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[] }) {
   const [selectedId, setSelectedId] = useState(data.recipes[0]?.id || "");
+  const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftLines, setDraftLines] = useState<RecipeLine[]>([]);
   const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0" });
-  const selected = data.recipes.find((r) => r.id === selectedId);
+  const [lineSearch, setLineSearch] = useState("");
+  const [recipeSearch, setRecipeSearch] = useState("");
 
-  function saveRecipe() {
-    if (!form.name.trim()) return;
-    const recipe: Recipe = { id: editingId || `${idFromName(form.name)}-${Date.now()}`, productNumber: form.productNumber, name: form.name, category: form.category, yieldAmount: Number(form.yieldAmount) || 1, yieldUnit: form.yieldUnit, lines: editingId ? data.recipes.find((r) => r.id === editingId)?.lines || [] : [] };
-    updateData({ recipes: editingId ? data.recipes.map((r) => r.id === editingId ? recipe : r) : [recipe, ...data.recipes] });
-    setSelectedId(recipe.id); setEditingId(null); setForm({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" });
+  const selected = data.recipes.find((r) => r.id === selectedId);
+  const activeRecipe: Recipe | undefined = mode === "view" ? selected : {
+    id: selected?.id || "draft",
+    productNumber: form.productNumber,
+    name: form.name || "Ny grunnoppskrift",
+    category: form.category,
+    yieldAmount: Number(form.yieldAmount) || 1,
+    yieldUnit: form.yieldUnit,
+    lines: draftLines,
+  };
+
+  const filteredRecipes = data.recipes
+    .filter((r) => `${r.productNumber} ${r.name} ${r.category}`.toLowerCase().includes(recipeSearch.toLowerCase()))
+    .sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "no-NO"));
+
+  function startNewRecipe() {
+    setMode("new");
+    setForm({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" });
+    setDraftLines([]);
+    setLine({ itemType: "material", itemId: "", amount: "0" });
+    setLineSearch("");
   }
 
-  function editRecipe(r: Recipe) { setEditingId(r.id); setForm({ productNumber: r.productNumber, name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit }); setSelectedId(r.id); }
-  function addLine() { if (!selected || !line.itemId) return; if (line.itemType === "recipe" && line.itemId === selected.id) return alert("En grunnoppskrift kan ikke inneholde seg selv."); updateData({ recipes: data.recipes.map((r) => r.id === selected.id ? { ...r, lines: [...r.lines, { itemType: line.itemType, itemId: line.itemId, amount: Number(line.amount) || 0 }] } : r) }); setLine({ itemType: "material", itemId: "", amount: "0" }); }
+  function editRecipe(r: Recipe) {
+    setSelectedId(r.id);
+    setMode("edit");
+    setForm({ productNumber: r.productNumber || "", name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit });
+    setDraftLines(r.lines.map((l) => ({ ...l })));
+    setLine({ itemType: "material", itemId: "", amount: "0" });
+    setLineSearch("");
+  }
 
-  return <section className="grid two"><div className="card"><h2>{editingId ? "Rediger grunnoppskrift" : "Ny grunnoppskrift"}</h2><div className="form-grid"><input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /><input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Kategori" /><label>Gir<input type="number" value={form.yieldAmount} onChange={(e) => setForm({ ...form, yieldAmount: e.target.value })} /></label><select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></div><button className="btn active" onClick={saveRecipe}>Lagre</button>{editingId && <button className="btn" onClick={() => setEditingId(null)}>Avbryt</button>}<h3>Liste</h3>{data.recipes.map((r) => <div key={r.id} className={selectedId === r.id ? "list active-list" : "list"}><button className="plain" onClick={() => setSelectedId(r.id)}><b>{r.name}</b><br /><small>{r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small></button><button className="link" onClick={() => editRecipe(r)}>Rediger</button><button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button></div>)}</div><div className="card">{!selected ? <p>Velg en grunnoppskrift.</p> : <><h2>{selected.name}</h2><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(selected))} dark /><Metric label={`Kost per ${selected.yieldUnit}`} value={currency(recipeUnitCost(selected))} /><Metric label="Yield" value={`${num(selected.yieldAmount)} ${selected.yieldUnit}`} /><Metric label="Allergener" value={recipeAllergens(selected).join(", ") || "Ingen"} /></div><h3>Legg til linje</h3><div className="form-grid three"><select value={line.itemType} onChange={(e) => setLine({ ...line, itemType: e.target.value as any, itemId: "" })}><option value="material">Råvare</option><option value="recipe">Annen grunnoppskrift</option></select><select value={line.itemId} onChange={(e) => setLine({ ...line, itemId: e.target.value })}><option value="">Velg</option>{line.itemType === "material" ? data.materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>) : data.recipes.filter((r) => r.id !== selected.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select><input type="number" value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" /><button className="btn" onClick={addLine}>Legg til</button></div><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th><th></th></tr></thead><tbody>{selected.lines.map((l, i) => { const m = l.itemType === "material" ? data.materials.find((x) => x.id === l.itemId) : undefined; const r = l.itemType === "recipe" ? data.recipes.find((x) => x.id === l.itemId) : undefined; const cost = l.itemType === "material" ? l.amount * (m?.pricePerUnit || 0) : l.amount * (r ? recipeUnitCost(r) : 0); return <tr key={i}><td>{l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>{m?.name || r?.name}</td><td>{num(l.amount)}</td><td>{currency(cost)}</td><td><button className="link danger" onClick={() => updateData({ recipes: data.recipes.map((x) => x.id === selected.id ? { ...x, lines: x.lines.filter((_, ix) => ix !== i) } : x) })}>Slett</button></td></tr>; })}</tbody></table></>}</div></section>;
+  function cancelEdit() {
+    setMode("view");
+    setDraftLines([]);
+    setLineSearch("");
+  }
+
+  function saveRecipe() {
+    if (!form.name.trim()) return alert("Legg inn navn på grunnoppskrift.");
+    const recipe: Recipe = {
+      id: mode === "edit" && selected ? selected.id : `${idFromName(form.name)}-${Date.now()}`,
+      productNumber: form.productNumber,
+      name: form.name.trim(),
+      category: form.category || "Grunnoppskrift",
+      yieldAmount: Number(form.yieldAmount) || 1,
+      yieldUnit: form.yieldUnit,
+      lines: draftLines,
+    };
+    updateData({ recipes: mode === "edit" ? data.recipes.map((r) => r.id === recipe.id ? recipe : r) : [recipe, ...data.recipes] });
+    setSelectedId(recipe.id);
+    setMode("view");
+    setDraftLines([]);
+  }
+
+  function lineItemName(itemType: RecipeLine["itemType"], itemId: string) {
+    if (itemType === "material") return data.materials.find((x) => x.id === itemId)?.name || "";
+    return data.recipes.find((x) => x.id === itemId)?.name || "";
+  }
+
+  function lineOptions(itemType: RecipeLine["itemType"], query: string) {
+    const q = query.toLowerCase();
+    const source = itemType === "material"
+      ? data.materials.map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${x.supplier || "Uten leverandør"} · ${currency(x.pricePerUnit)}/${x.unit}` }))
+      : data.recipes.filter((x) => x.id !== selected?.id).map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${num(x.yieldAmount)} ${x.yieldUnit}` }));
+    return source.filter((x) => !q || `${x.name} ${x.subtitle}`.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name, "no-NO")).slice(0, 12);
+  }
+
+  function lineCost(l: RecipeLine) {
+    if (l.itemType === "material") {
+      const m = data.materials.find((x) => x.id === l.itemId);
+      return l.amount * (m?.pricePerUnit || 0);
+    }
+    const r = data.recipes.find((x) => x.id === l.itemId);
+    return l.amount * (r ? recipeUnitCost(r) : 0);
+  }
+
+  function addLine() {
+    if (!line.itemId) return;
+    if (line.itemType === "recipe" && line.itemId === selected?.id) return alert("En grunnoppskrift kan ikke inneholde seg selv.");
+    setDraftLines((prev) => [...prev, { itemType: line.itemType, itemId: line.itemId, amount: Number(line.amount) || 0 }]);
+    setLine({ itemType: "material", itemId: "", amount: "0" });
+    setLineSearch("");
+  }
+
+  function updateDraftLine(index: number, partial: Partial<RecipeLine>) {
+    setDraftLines((prev) => prev.map((l, i) => i === index ? { ...l, ...partial } : l));
+  }
+
+  if (mode !== "view") {
+    return <section className="card product-editor-page"><div className="between"><h1>{mode === "edit" ? "Rediger grunnoppskrift" : "Ny grunnoppskrift"}</h1><div><button className="btn active" onClick={saveRecipe}>{mode === "edit" ? "Lagre endringer" : "Lagre grunnoppskrift"}</button><button className="btn" onClick={cancelEdit}>Avbryt</button></div></div>
+      <div className="form-grid four"><label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label><label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /></label><label>Kategori<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Kategori" /></label><label>Gir<input type="number" value={form.yieldAmount} onChange={(e) => setForm({ ...form, yieldAmount: e.target.value })} /></label><label>Enhet<select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></label></div>
+      {activeRecipe && <div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(activeRecipe))} dark /><Metric label={`Kost per ${form.yieldUnit}`} value={currency(recipeUnitCost(activeRecipe))} /><Metric label="Yield" value={`${num(Number(form.yieldAmount) || 1)} ${form.yieldUnit}`} /><Metric label="Allergener" value={recipeAllergens(activeRecipe).join(", ") || "Ingen"} /></div>}
+      <div className="soft-box"><h2>Ingredienser</h2><div className="form-grid four"><select value={line.itemType} onChange={(e) => { setLine({ ...line, itemType: e.target.value as RecipeLine["itemType"], itemId: "" }); setLineSearch(""); }}><option value="material">Råvare</option><option value="recipe">Annen grunnoppskrift</option></select><div className="search-picker"><input value={lineSearch || lineItemName(line.itemType, line.itemId)} onChange={(e) => { setLineSearch(e.target.value); setLine({ ...line, itemId: "" }); }} placeholder="Søk og velg" />{lineSearch && <div className="search-dropdown inline">{lineOptions(line.itemType, lineSearch).map((item) => <button key={item.id} type="button" className="search-result" onClick={() => { setLine({ ...line, itemId: item.id }); setLineSearch(item.name); }}><b>{item.name}</b><small>{item.subtitle}</small></button>)}</div>}</div><input type="number" value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" /><button className="btn" onClick={addLine}>Legg til</button></div>
+      <table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th><th></th></tr></thead><tbody>{draftLines.map((l, i) => <tr key={i}><td><select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as RecipeLine["itemType"], itemId: "" })}><option value="material">Råvare</option><option value="recipe">Grunnoppskrift</option></select></td><td><select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}><option value="">Velg</option>{l.itemType === "material" ? data.materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>) : data.recipes.filter((r) => r.id !== selected?.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></td><td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td><td>{currency(lineCost(l))}</td><td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td></tr>)}</tbody></table></div>
+    </section>;
+  }
+
+  return <section className="grid two"><div className="card"><div className="between"><h2>Grunnoppskrifter</h2><button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button></div><input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />{filteredRecipes.map((r) => <div key={r.id} className={selectedId === r.id ? "list active-list" : "list"}><button className="plain" onClick={() => setSelectedId(r.id)}><b>{r.name}</b><br /><small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small></button><button className="link" onClick={() => editRecipe(r)}>Rediger</button><button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button></div>)}</div><div className="card">{!selected ? <p>Velg eller opprett en grunnoppskrift.</p> : <><div className="between"><div><h2>{selected.name}</h2><p>{selected.category} · gir {num(selected.yieldAmount)} {selected.yieldUnit}</p></div><button className="btn" onClick={() => editRecipe(selected)}>Rediger</button></div><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(selected))} dark /><Metric label={`Kost per ${selected.yieldUnit}`} value={currency(recipeUnitCost(selected))} /><Metric label="Yield" value={`${num(selected.yieldAmount)} ${selected.yieldUnit}`} /><Metric label="Allergener" value={recipeAllergens(selected).join(", ") || "Ingen"} /></div><h3>Ingredienser</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>{selected.lines.map((l, i) => <tr key={i}><td>{l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>{lineItemName(l.itemType, l.itemId)}</td><td>{num(l.amount)}</td><td>{currency(lineCost(l))}</td></tr>)}</tbody></table></>}</div></section>;
 }
 
 function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
@@ -1246,19 +1301,21 @@ function ProductionTab({ data }: { data: AppData }) {
     .filter((o) => o.date >= dateFrom && o.date <= dateTo)
     .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 
-  function addAmount(map: Record<string, { name: string; category: string; amount: number; unit: string }>, key: string, name: string, category: string, amount: number, unit: string) {
+  type MaterialOrderRow = { name: string; category: string; supplier: string; amount: number; unit: string };
+
+  function addAmount(map: Record<string, MaterialOrderRow>, key: string, name: string, category: string, supplier: string, amount: number, unit: string) {
     const mapKey = `${key}-${unit}`;
-    if (!map[mapKey]) map[mapKey] = { name, category, amount: 0, unit };
+    if (!map[mapKey]) map[mapKey] = { name, category, supplier, amount: 0, unit };
     map[mapKey].amount += amount;
   }
 
-  function expandProductToMaterials(product: Product, multiplier: number, map: Record<string, { name: string; category: string; amount: number; unit: string }>, path: string[] = []) {
+  function expandProductToMaterials(product: Product, multiplier: number, map: Record<string, MaterialOrderRow>, path: string[] = []) {
     if (path.includes(product.id)) return;
     product.lines.forEach((line) => {
       const amount = line.amount * multiplier;
       if (line.itemType === "material") {
         const material = data.materials.find((m) => m.id === line.itemId);
-        if (material) addAmount(map, material.id, material.name, material.category, amount, line.unit);
+        if (material) addAmount(map, material.id, material.name, material.category, material.supplier || "Uten leverandør", amount, line.unit);
         return;
       }
       if (line.itemType === "recipe") {
@@ -1267,7 +1324,7 @@ function ProductionTab({ data }: { data: AppData }) {
         recipe.lines.forEach((rl) => {
           if (rl.itemType === "material") {
             const material = data.materials.find((m) => m.id === rl.itemId);
-            if (material) addAmount(map, material.id, material.name, material.category, rl.amount * amount, material.unit);
+            if (material) addAmount(map, material.id, material.name, material.category, material.supplier || "Uten leverandør", rl.amount * amount, material.unit);
           }
         });
         return;
@@ -1277,7 +1334,7 @@ function ProductionTab({ data }: { data: AppData }) {
     });
   }
 
-  const materialMap: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
+  const materialMap: Record<string, MaterialOrderRow> = {};
   ordersInPeriod.forEach((order) => {
     order.orderLines.forEach((line) => {
       const product = data.products.find((p) => p.id === line.productId);
@@ -1285,7 +1342,7 @@ function ProductionTab({ data }: { data: AppData }) {
     });
   });
 
-  const materialRows = Object.values(materialMap).sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "no-NO"));
+  const materialRows = Object.values(materialMap).sort((a, b) => `${a.supplier} ${a.category} ${a.name}`.localeCompare(`${b.supplier} ${b.category} ${b.name}`, "no-NO"));
 
   function printProductionSummary() {
     const orderRows = ordersInPeriod.flatMap((o) => o.orderLines.map((l) => {
@@ -1294,16 +1351,16 @@ function ProductionTab({ data }: { data: AppData }) {
     })).join("");
 
     const grouped = materialRows.reduce((acc, row) => {
-      if (!acc[row.category]) acc[row.category] = [];
-      acc[row.category].push(row);
+      if (!acc[row.supplier]) acc[row.supplier] = [];
+      acc[row.supplier].push(row);
       return acc;
     }, {} as Record<string, typeof materialRows>);
 
-    const materialHtml = Object.entries(grouped).map(([category, rows]) => `<tr><td colspan="3" style="background:#111827;color:white;font-weight:800;">${category}</td></tr>${rows.map((r) => `<tr><td>${r.name}</td><td>${num(r.amount)}</td><td>${r.unit}</td></tr>`).join("")}`).join("");
+    const materialHtml = Object.entries(grouped).map(([supplier, rows]) => `<tr><td colspan="4" style="background:#111827;color:white;font-weight:800;">${supplier}</td></tr>${rows.map((r) => `<tr><td>${r.category}</td><td>${r.name}</td><td>${num(r.amount)}</td><td>${r.unit}</td></tr>`).join("")}`).join("");
 
     const w = window.open("", "_blank");
     if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Produksjon ${dateFrom} - ${dateTo}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.muted{color:#64748b}table{width:100%;border-collapse:collapse;margin-top:8px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">PRODUKSJONSSAMMENDRAG</div><div class="muted">${formatDateNo(dateFrom)} til ${formatDateNo(dateTo)}</div></div><h2>Ordre</h2><table><thead><tr><th>Dato/tid</th><th>Kunde</th><th>Produkt</th><th>Antall</th></tr></thead><tbody>${orderRows}</tbody></table><h2>Varebestillingsliste</h2><table><thead><tr><th>Råvare</th><th>Mengde</th><th>Enhet</th></tr></thead><tbody>${materialHtml}</tbody></table></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Produksjon ${dateFrom} - ${dateTo}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.muted{color:#64748b}table{width:100%;border-collapse:collapse;margin-top:8px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">PRODUKSJONSSAMMENDRAG</div><div class="muted">${formatDateNo(dateFrom)} til ${formatDateNo(dateTo)}</div></div><h2>Ordre</h2><table><thead><tr><th>Dato/tid</th><th>Kunde</th><th>Produkt</th><th>Antall</th></tr></thead><tbody>${orderRows}</tbody></table><h2>Varebestillingsliste per leverandør</h2><table><thead><tr><th>Kategori</th><th>Råvare</th><th>Mengde</th><th>Enhet</th></tr></thead><tbody>${materialHtml}</tbody></table></body></html>`);
     w.document.close();
     w.focus();
   }
@@ -1321,7 +1378,7 @@ function ProductionTab({ data }: { data: AppData }) {
       <h3>Ordre i perioden</h3>
       <table><thead><tr><th>Dato</th><th>Kunde</th><th>Produkt/meny</th><th>Antall</th></tr></thead><tbody>{ordersInPeriod.flatMap((o) => o.orderLines.map((l, i) => <tr key={`${o.id}-${i}`}><td>{formatDateNo(o.date)} {o.time}</td><td>{o.customerType === "bedrift" ? o.companyName : o.customer}</td><td>{data.products.find((p) => p.id === l.productId)?.name}</td><td>{l.quantity}</td></tr>))}</tbody></table>
 
-      {showMaterials && <><h3>Varebestillingsliste</h3><table><thead><tr><th>Kategori</th><th>Råvare</th><th>Mengde</th><th>Enhet</th></tr></thead><tbody>{materialRows.map((r, i) => <tr key={i}><td>{r.category}</td><td>{r.name}</td><td>{num(r.amount)}</td><td>{r.unit}</td></tr>)}</tbody></table></>}
+      {showMaterials && <><h3>Varebestillingsliste</h3><table><thead><tr><th>Leverandør</th><th>Kategori</th><th>Råvare</th><th>Mengde</th><th>Enhet</th></tr></thead><tbody>{materialRows.map((r, i) => <tr key={i}><td>{r.supplier || "Uten leverandør"}</td><td>{r.category}</td><td>{r.name}</td><td>{num(r.amount)}</td><td>{r.unit}</td></tr>)}</tbody></table></>}
     </section>
   );
 }
