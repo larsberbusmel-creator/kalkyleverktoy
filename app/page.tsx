@@ -489,7 +489,17 @@ export default function Page() {
     <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
       <div style={{ maxWidth: 1250, margin: "0 auto" }}>
         <header className="card">
-          <p style={{ textTransform: "uppercase", letterSpacing: 1, color: "#64748b", fontWeight: 700 }}>Prototype v4</p>
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <img
+  src="/logo.png"
+  alt="Brødrene Berbusmel"
+  style={{
+    height: 70,
+    width: "auto",
+    objectFit: "contain",
+    marginBottom: 12,
+  }}
+/>
           <h1>Kalkyleverktøy</h1>
           <p>Råvarer, grunnoppskrifter, produkter, ordre, produksjon, varetelling og lokaleleie.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
