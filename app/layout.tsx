@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "BB Kalkuleringsverktøy",
   description: "Kalkulering",
+    icons: {
+    icon: "/logo.png",
+  },
 };
 
 export default function RootLayout({
@@ -31,10 +34,3 @@ export default function RootLayout({
     </html>
   );
 }
-export const metadata = {
-  title: "Kalkyleverktøy",
-  description: "Berbusmel kalkyleverktøy",
-  icons: {
-    icon: "/logo.png",
-  },
-};
