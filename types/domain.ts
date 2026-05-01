@@ -77,7 +77,7 @@ export type MenuLine = {
   itemType?: "material" | "recipe" | "product" | string;
   amount?: number;
   quantity?: number;
-  quantityPerPerson?: number;
+  quantityPerPerson: number;
   inputUnit?: string;
   materialUnit?: string;
   material?: Material;
