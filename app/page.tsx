@@ -1387,7 +1387,6 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
           <span>Side {productPage} av {totalProductPages}</span>
           <button className="btn" disabled={productPage >= totalProductPages} onClick={() => setProductPage(productPage + 1)}>Neste</button>
         </div>
-      </div>
 
       {wideProduct && (
         <div className="card wide-product-view">
