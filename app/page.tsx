@@ -15,6 +15,7 @@ type Material = {
   name: string;
   category: string;
   supplier?: string;
+  ingredients?: string[];
   unit: Unit;
   packageSize: number;
   packagePrice: number;
@@ -264,6 +265,7 @@ function makeMaterial(id: string, name: string, category: string, unit: Unit, pa
   packagePrice,
   pricePerUnit: packageSize ? packagePrice / packageSize : 0,
   allergens,
+  ingredients: [],
   kcal,
   protein,
   carbs,
@@ -654,6 +656,7 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
     retailPrice: "",
     deliMargin: "50",
     allergens: "",
+    ingredients: "",
     kcal: "0",
     protein: "0",
     carbs: "0",
@@ -700,6 +703,7 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
       packagePrice: String(m.packagePrice),
       retailPrice: String(m.retailPrice || ""),
       allergens: (m.allergens || []).join(", "),
+      ingredients: (m.ingredients || []).join(", "),
       kcal: String(m.kcal || 0),
       protein: String(m.protein || 0),
       carbs: String(m.carbs || 0),
@@ -731,6 +735,10 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
       retailPrice: Number(form.retailPrice) || undefined,
       isForResale: form.category === "Deli",
       supplier: form.supplier || "",
+      ingredients: form.ingredients
+  .split(",")
+  .map((x) => x.trim())
+  .filter(Boolean),
       updatedAt: new Date().toISOString(),
       priceUpdatedAt: priceChanged ? new Date().toISOString() : oldMaterial?.priceUpdatedAt,
     };
@@ -778,6 +786,15 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
         const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
         return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="50" value={form.deliMargin} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label><Metric label="Anbefalt utsalgspris inkl. mva" value={currency(suggestedIncVat)} dark /><label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label><button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button></div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label="Valgt pris eks. mva" value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
       })()}
+
+      <label>
+  Ingredienser i råvaren
+  <input
+    value={form.ingredients}
+    onChange={(e) => setForm({ ...form, ingredients: e.target.value })}
+    placeholder="F.eks. fløte, salt / vann, soyabønner, sukker"
+  />
+</label>
 
       <h3>Allergier</h3>
       <div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div>
@@ -1111,6 +1128,191 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
     return data.products.find((x) => x.id === itemId)?.name || "";
   }
 
+  type NutritionTotals = {
+  kcal: number;
+  kj: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  saturatedFat: number;
+  fiber: number;
+  sugars: number;
+  addedSugar: number;
+  salt: number;
+  totalAmount: number;
+};
+
+function emptyNutrition(): NutritionTotals {
+  return {
+    kcal: 0,
+    kj: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    saturatedFat: 0,
+    fiber: 0,
+    sugars: 0,
+    addedSugar: 0,
+    salt: 0,
+    totalAmount: 0,
+  };
+}
+
+function addMaterialNutrition(total: NutritionTotals, material: Material, amount: number, unit?: ProductLine["unit"] | YieldUnit) {
+  const amountInGramsOrMl = unit === "stk" || unit === "porsjoner" ? amount : amount * 1000;
+  const factor = amountInGramsOrMl / 100;
+
+  total.kcal += (material.kcal || 0) * factor;
+  total.kj += (material.kj || 0) * factor;
+  total.protein += (material.protein || 0) * factor;
+  total.carbs += (material.carbs || 0) * factor;
+  total.fat += (material.fat || 0) * factor;
+  total.saturatedFat += (material.saturatedFat || 0) * factor;
+  total.fiber += (material.fiber || 0) * factor;
+  total.sugars += (material.sugars || 0) * factor;
+  total.addedSugar += (material.addedSugar || 0) * factor;
+  total.salt += (material.salt || 0) * factor;
+  total.totalAmount += amountInGramsOrMl;
+}
+
+function mergeNutrition(target: NutritionTotals, source: NutritionTotals) {
+  Object.keys(target).forEach((key) => {
+    target[key as keyof NutritionTotals] += source[key as keyof NutritionTotals];
+  });
+}
+
+function recipeNutrition(recipe: Recipe, multiplier = 1, visited: string[] = []) {
+  const total = emptyNutrition();
+  if (visited.includes(recipe.id)) return total;
+
+  recipe.lines.forEach((line) => {
+    const amount = line.amount * multiplier;
+
+    if (line.itemType === "material") {
+      const material = data.materials.find((m) => m.id === line.itemId);
+      if (material) addMaterialNutrition(total, material, amount);
+    }
+
+    if (line.itemType === "recipe") {
+      const subRecipe = data.recipes.find((r) => r.id === line.itemId);
+      if (subRecipe) mergeNutrition(total, recipeNutrition(subRecipe, amount, [...visited, recipe.id]));
+    }
+  });
+
+  return total;
+}
+
+function productNutrition(product: Product, multiplier = 1, visited: string[] = []) {
+  const total = emptyNutrition();
+  if (visited.includes(product.id)) return total;
+
+  product.lines.forEach((line) => {
+    const amount = line.amount * multiplier;
+
+    if (line.itemType === "material") {
+      const material = data.materials.find((m) => m.id === line.itemId);
+      if (material) addMaterialNutrition(total, material, amount, line.unit);
+    }
+
+    if (line.itemType === "recipe") {
+      const recipe = data.recipes.find((r) => r.id === line.itemId);
+      if (recipe) mergeNutrition(total, recipeNutrition(recipe, amount));
+    }
+
+    if (line.itemType === "product") {
+      const subProduct = data.products.find((p) => p.id === line.itemId);
+      if (subProduct) mergeNutrition(total, productNutrition(subProduct, amount, [...visited, product.id]));
+    }
+  });
+
+  return total;
+}
+
+function nutritionPer100(product: Product) {
+  const total = productNutrition(product);
+  const divisor = total.totalAmount > 0 ? total.totalAmount / 100 : 1;
+
+  return {
+    kcal: total.kcal / divisor,
+    kj: total.kj / divisor,
+    protein: total.protein / divisor,
+    carbs: total.carbs / divisor,
+    fat: total.fat / divisor,
+    saturatedFat: total.saturatedFat / divisor,
+    fiber: total.fiber / divisor,
+    sugars: total.sugars / divisor,
+    addedSugar: total.addedSugar / divisor,
+    salt: total.salt / divisor,
+  };
+}
+
+function materialIngredientName(material: Material) {
+  return material.ingredients?.length
+    ? `${material.name} (${material.ingredients.join(", ")})`
+    : material.name;
+}
+
+function recipeIngredients(recipe: Recipe, visited: string[] = []): string[] {
+  if (visited.includes(recipe.id)) return [];
+
+  return recipe.lines.flatMap((line) => {
+    if (line.itemType === "material") {
+      const material = data.materials.find((m) => m.id === line.itemId);
+      return material ? [materialIngredientName(material)] : [];
+    }
+
+    const subRecipe = data.recipes.find((r) => r.id === line.itemId);
+    return subRecipe ? recipeIngredients(subRecipe, [...visited, recipe.id]) : [];
+  });
+}
+
+function productIngredients(product: Product, visited: string[] = []): string[] {
+  if (visited.includes(product.id)) return [];
+
+  return Array.from(new Set(product.lines.flatMap((line) => {
+    if (line.itemType === "material") {
+      const material = data.materials.find((m) => m.id === line.itemId);
+      return material ? [materialIngredientName(material)] : [];
+    }
+
+    if (line.itemType === "recipe") {
+      const recipe = data.recipes.find((r) => r.id === line.itemId);
+      return recipe ? recipeIngredients(recipe) : [];
+    }
+
+    const subProduct = data.products.find((p) => p.id === line.itemId);
+    return subProduct ? productIngredients(subProduct, [...visited, product.id]) : [];
+  })));
+}
+
+function printNutritionLabel(product: Product) {
+  const n = nutritionPer100(product);
+  const ingredients = productIngredients(product).join(", ") || "-";
+  const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+
+  const w = window.open("", "_blank");
+  if (!w) return;
+
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Næring ${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.label{max-width:520px;border:2px solid #111827;padding:18px}h1{font-size:24px;margin:0 0 10px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}.small{font-size:12px;color:#4b5563;margin-top:12px}@media print{button{display:none}body{padding:0}}</style></head><body><button onclick="window.print()">Print</button><div class="label"><h1>${escapeHtml(product.name)}</h1><p><b>Ingredienser:</b> ${escapeHtml(ingredients)}</p><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><p><b>Næringsinnhold per 100 g/ml</b></p><table><tbody><tr><td>Energi</td><td>${num(n.kj, 0)} kJ / ${num(n.kcal, 0)} kcal</td></tr><tr><td>Fett</td><td>${num(n.fat, 1)} g</td></tr><tr><td>– hvorav mettet fett</td><td>${num(n.saturatedFat, 1)} g</td></tr><tr><td>Karbohydrater</td><td>${num(n.carbs, 1)} g</td></tr><tr><td>– hvorav sukkerarter</td><td>${num(n.sugars, 1)} g</td></tr><tr><td>Kostfiber</td><td>${num(n.fiber, 1)} g</td></tr><tr><td>Protein</td><td>${num(n.protein, 1)} g</td></tr><tr><td>Salt</td><td>${num(n.salt, 2)} g</td></tr></tbody></table><p class="small">Beregnet fra registrerte råvarer.</p></div></body></html>`);
+
+  w.document.close();
+  w.focus();
+}
+
+function printProductLabel(product: Product) {
+  const n = nutritionPer100(product);
+  const ingredients = productIngredients(product).join(", ") || "-";
+  const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+
+  const w = window.open("", "_blank");
+  if (!w) return;
+
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Label ${escapeHtml(product.name)}</title><style>@page{size:90mm 60mm;margin:5mm}body{font-family:Arial,sans-serif;color:#111827;font-size:10px}h1{font-size:16px;margin:0 0 4px}table{width:100%;border-collapse:collapse;margin-top:6px}td{border-bottom:1px solid #ddd;padding:2px}.muted{color:#4b5563}.bold{font-weight:800}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print label</button><h1>${escapeHtml(product.name)}</h1><p><span class="bold">Ingredienser:</span> ${escapeHtml(ingredients)}</p><p><span class="bold">Allergener:</span> ${escapeHtml(allergens)}</p><table><tbody><tr><td>Energi</td><td>${num(n.kj, 0)} kJ / ${num(n.kcal, 0)} kcal</td></tr><tr><td>Fett</td><td>${num(n.fat, 1)} g</td></tr><tr><td>Mettet fett</td><td>${num(n.saturatedFat, 1)} g</td></tr><tr><td>Karbohydrater</td><td>${num(n.carbs, 1)} g</td></tr><tr><td>Sukkerarter</td><td>${num(n.sugars, 1)} g</td></tr><tr><td>Protein</td><td>${num(n.protein, 1)} g</td></tr><tr><td>Salt</td><td>${num(n.salt, 2)} g</td></tr></tbody></table><p class="muted">Brødrene Berbusmel</p></body></html>`);
+
+  w.document.close();
+  w.focus();
+}
+
   function lineOptions(itemType: ProductLine["itemType"], query: string) {
     const q = query.toLowerCase();
 
@@ -1398,9 +1600,21 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
               <td>{currency(p.customerPrice)}</td>
               <td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td>
               <td>
-                <button className="btn" onClick={() => { setSelectedId(p.id); setWideProductId(p.id); }}>Se oppskrift</button>
-                <button className="btn" onClick={() => editProduct(p)}>Rediger</button>
-                <button className="btn" onClick={() => printProduct(p)}>Print</button>
+                <button className="btn" onClick={() => { setSelectedId(p.id); setWideProductId(p.id); }}>
+  Se oppskrift
+</button>
+<button className="btn" onClick={() => printNutritionLabel(p)}>
+  Næring
+</button>
+<button className="btn" onClick={() => printProductLabel(p)}>
+  Print label
+</button>
+<button className="btn" onClick={() => editProduct(p)}>
+  Rediger
+</button>
+<button className="btn" onClick={() => printProduct(p)}>
+  Print
+</button>
               </td>
             </tr>
           ))}
