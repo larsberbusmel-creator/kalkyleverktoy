@@ -804,7 +804,7 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
           <td><input className="inline-cell-input" type="number" value={m.pricePerUnit} onChange={(e) => { const pricePerUnit = Number(e.target.value) || 0; updateMaterialInline(m.id, { pricePerUnit, packagePrice: pricePerUnit * (m.packageSize || 1) }, true); }} /></td>
           <td><input className="inline-cell-input" type="number" value={m.retailPrice || ""} onChange={(e) => updateMaterialInline(m.id, { retailPrice: Number(e.target.value) || undefined })} placeholder="-" /></td>
           <td>{m.category === "Deli" ? `${num(deliMargin, 1)} %` : "-"}</td>
-          <td><input className="inline-cell-input" value={(m.allergens || []).join(", ")} onChange={(e) => updateMaterialInline(m.id, { allergens: e.target.value.split(",").map(normalizeAllergen).filter(Boolean) })} placeholder="Allergener" /></td>
+          <td>{(m.allergens || []).join(", ") || "-"}</td>
           <td><button className="btn" onClick={() => { edit(m); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Rediger</button><button style={{ marginLeft: 8 }} className="btn danger" onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td>
           <td>{m.priceUpdatedAt ? formatDateNo(m.priceUpdatedAt.slice(0, 10)) : "-"}</td>
         </tr>;
@@ -1326,7 +1326,7 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
         <input value={search} onChange={(e) => { setSearch(e.target.value); setProductPage(1); }} placeholder="Søk produkt" />
 
         <div className="chips">
-          {["Alle", ...data.productCategories, "grunnoppskrift", "bakst", "cateringmeny", "pasmuurt", "egenprodusert"].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => (
+          {["Alle", ...data.productCategories]
             <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setProductPage(1); }}>{cat}</button>
           ))}
         </div>
@@ -1401,11 +1401,35 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
       <div className="card product-list-card">
         <h2>Produktlister / prislister</h2>
 
-        <div className="chips">
-          <button className="btn active" onClick={() => { setListMode("bakst"); setListName("Produktliste bakst"); setShowProductListEditor(true); }}>Lag produktliste: Bakst</button>
-          <button className="btn active" onClick={() => { setListMode("catering"); setListName("Produktliste catering"); setShowProductListEditor(true); }}>Lag produktliste: Catering</button>
-          <button className="btn active" onClick={() => { setListMode("storkjokken"); setListName("Produktliste storkjøkken"); setShowProductListEditor(true); }}>Lag produktliste: Storkjøkken</button>
-        </div>
+        <div className="form-grid three">
+  <button className="btn active" onClick={() => setShowProductListEditor(true)}>
+    Lag produktliste
+  </button>
+
+  {showProductListEditor && (
+    <label>
+      Type liste
+      <select
+        value={listMode}
+        onChange={(e) => {
+          const kind = e.target.value as ProductListKind;
+          setListMode(kind);
+          setListName(
+            kind === "bakst"
+              ? "Produktliste bakst"
+              : kind === "catering"
+                ? "Produktliste catering"
+                : "Produktliste storkjøkken"
+          );
+        }}
+      >
+        <option value="bakst">Bakst</option>
+        <option value="catering">Catering</option>
+        <option value="storkjokken">Storkjøkken</option>
+      </select>
+    </label>
+  )}
+</div>
 
         {showProductListEditor && (
           <div className="soft-box">
