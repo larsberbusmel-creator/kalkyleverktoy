@@ -1227,7 +1227,25 @@ function productNutrition(product: Product, multiplier = 1, visited: string[] = 
 
   return total;
 }
+function calculateWholegrainPercent(product: Product) {
+  const total = productNutrition(product).totalAmount;
+  if (!total) return 0;
 
+  const wholegrainAmount = product.lines.reduce((sum, line) => {
+    if (line.itemType !== "material") return sum;
+
+    const material = data.materials.find((m) => m.id === line.itemId);
+    if (!material?.isWholegrain) return sum;
+
+    const amount = line.unit === "stk" || line.unit === "porsjoner"
+      ? line.amount
+      : line.amount * 1000;
+
+    return sum + amount;
+  }, 0);
+
+  return (wholegrainAmount / total) * 100;
+}
 function nutritionPer100(product: Product) {
   const total = productNutrition(product);
   const divisor = total.totalAmount > 0 ? total.totalAmount / 100 : 1;
@@ -1348,11 +1366,13 @@ function printNutritionLabel(product: Product) {
   const n = nutritionPer100(product);
   const ingredients = productIngredients(product).join(", ") || "-";
   const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+  const wholegrainPercent = calculateWholegrainPercent(product);
+const showWholegrain = product.category === "Brød" || product.subType === "brød";
 
   const w = window.open("", "_blank");
   if (!w) return;
 
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Næring ${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.label{max-width:520px;border:2px solid #111827;padding:18px}h1{font-size:24px;margin:0 0 10px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}.small{font-size:12px;color:#4b5563;margin-top:12px}@media print{button{display:none}body{padding:0}}</style></head><body><button onclick="window.print()">Print</button><div class="label"><h1>${escapeHtml(product.name)}</h1><p><b>Ingredienser:</b> ${escapeHtml(ingredients)}</p><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><p><b>Næringsinnhold per 100 g/ml</b></p><table><tbody><tr><td>Energi</td><td>${num(n.kj, 0)} kJ / ${num(n.kcal, 0)} kcal</td></tr><tr><td>Fett</td><td>${num(n.fat, 1)} g</td></tr><tr><td>– hvorav mettet fett</td><td>${num(n.saturatedFat, 1)} g</td></tr><tr><td>Karbohydrater</td><td>${num(n.carbs, 1)} g</td></tr><tr><td>– hvorav sukkerarter</td><td>${num(n.sugars, 1)} g</td></tr><tr><td>Kostfiber</td><td>${num(n.fiber, 1)} g</td></tr><tr><td>Protein</td><td>${num(n.protein, 1)} g</td></tr><tr><td>Salt</td><td>${num(n.salt, 2)} g</td></tr></tbody></table><p class="small">Beregnet fra registrerte råvarer.</p></div></body></html>`);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Næring ${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.label{max-width:520px;border:2px solid #111827;padding:18px}h1{font-size:24px;margin:0 0 10px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}.small{font-size:12px;color:#4b5563;margin-top:12px}@media print{button{display:none}body{padding:0}}</style></head><body><button onclick="window.print()">Print</button><div class="label"><h1>${escapeHtml(product.name)}</h1><p><b>Ingredienser:</b> ${escapeHtml(ingredients)}</p><p><b>Allergener:</b> ${escapeHtml(allergens)}</p>${showWholegrain ? `<p><b>Grovhet:</b> ${num(wholegrainPercent, 0)} %</p>` : ""}<p><b>Næringsinnhold per 100 g/ml</b></p><table><tbody><tr><td>Energi</td><td>${num(n.kj, 0)} kJ / ${num(n.kcal, 0)} kcal</td></tr><tr><td>Fett</td><td>${num(n.fat, 1)} g</td></tr><tr><td>– hvorav mettet fett</td><td>${num(n.saturatedFat, 1)} g</td></tr><tr><td>Karbohydrater</td><td>${num(n.carbs, 1)} g</td></tr><tr><td>– hvorav sukkerarter</td><td>${num(n.sugars, 1)} g</td></tr><tr><td>Kostfiber</td><td>${num(n.fiber, 1)} g</td></tr><tr><td>Protein</td><td>${num(n.protein, 1)} g</td></tr><tr><td>Salt</td><td>${num(n.salt, 2)} g</td></tr></tbody></table><p class="small">Laget med kjærlighet og håndtverk</p></div></body></html>`);
 
   w.document.close();
   w.focus();
@@ -1663,7 +1683,7 @@ function printProductLabel(product: Product) {
   Se oppskrift
 </button>
 <button className="btn" onClick={() => printNutritionLabel(p)}>
-  Næring
+  Deklarasjon
 </button>
 <button className="btn" onClick={() => printProductLabel(p)}>
   Print label
