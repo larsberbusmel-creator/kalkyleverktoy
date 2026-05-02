@@ -1246,43 +1246,102 @@ function nutritionPer100(product: Product) {
   };
 }
 
+type IngredientRow = {
+  name: string;
+  amount: number;
+};
+
 function materialIngredientName(material: Material) {
-  return material.ingredients?.length
-    ? `${material.name} (${material.ingredients.join(", ")})`
-    : material.name;
+  if (material.ingredients && material.ingredients.length) {
+    return material.ingredients.join(", ");
+  }
+
+  return material.name;
 }
 
-function recipeIngredients(recipe: Recipe, visited: string[] = []): string[] {
-  if (visited.includes(recipe.id)) return [];
+function addIngredient(
+  map: Record<string, IngredientRow>,
+  name: string,
+  amount: number
+) {
+  if (!name.trim()) return;
 
-  return recipe.lines.flatMap((line) => {
+  if (!map[name]) {
+    map[name] = { name, amount: 0 };
+  }
+
+  map[name].amount += amount;
+}
+
+function recipeIngredientMap(
+  recipe: Recipe,
+  multiplier = 1,
+  map: Record<string, IngredientRow> = {},
+  visited: string[] = []
+) {
+  if (visited.includes(recipe.id)) return map;
+
+  recipe.lines.forEach((line) => {
+    const amount = Number(line.amount || 0) * multiplier;
+
     if (line.itemType === "material") {
       const material = data.materials.find((m) => m.id === line.itemId);
-      return material ? [materialIngredientName(material)] : [];
+      if (material) {
+        addIngredient(map, materialIngredientName(material), amount);
+      }
     }
 
-    const subRecipe = data.recipes.find((r) => r.id === line.itemId);
-    return subRecipe ? recipeIngredients(subRecipe, [...visited, recipe.id]) : [];
+    if (line.itemType === "recipe") {
+      const subRecipe = data.recipes.find((r) => r.id === line.itemId);
+      if (subRecipe) {
+        recipeIngredientMap(subRecipe, amount, map, [...visited, recipe.id]);
+      }
+    }
   });
+
+  return map;
 }
 
-function productIngredients(product: Product, visited: string[] = []): string[] {
-  if (visited.includes(product.id)) return [];
+function productIngredientMap(
+  product: Product,
+  multiplier = 1,
+  map: Record<string, IngredientRow> = {},
+  visited: string[] = []
+) {
+  if (visited.includes(product.id)) return map;
 
-  return Array.from(new Set(product.lines.flatMap((line) => {
+  product.lines.forEach((line) => {
+    const amount = Number(line.amount || 0) * multiplier;
+
     if (line.itemType === "material") {
       const material = data.materials.find((m) => m.id === line.itemId);
-      return material ? [materialIngredientName(material)] : [];
+      if (material) {
+        addIngredient(map, materialIngredientName(material), amount);
+      }
     }
 
     if (line.itemType === "recipe") {
       const recipe = data.recipes.find((r) => r.id === line.itemId);
-      return recipe ? recipeIngredients(recipe) : [];
+      if (recipe) {
+        recipeIngredientMap(recipe, amount, map);
+      }
     }
 
-    const subProduct = data.products.find((p) => p.id === line.itemId);
-    return subProduct ? productIngredients(subProduct, [...visited, product.id]) : [];
-  })));
+    if (line.itemType === "product") {
+      const subProduct = data.products.find((p) => p.id === line.itemId);
+      if (subProduct) {
+        productIngredientMap(subProduct, amount, map, [...visited, product.id]);
+      }
+    }
+  });
+
+  return map;
+}
+
+function productIngredients(product: Product): string[] {
+  return Object.values(productIngredientMap(product))
+    .sort((a, b) => b.amount - a.amount)
+    .map((x) => x.name);
 }
 
 function printNutritionLabel(product: Product) {
