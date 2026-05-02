@@ -34,7 +34,9 @@ type Material = {
   salt: number;
   isWholegrain?: boolean;
   updatedAt?: string;
+  priceUpdatedAt?: string;
 };
+
 
 type RecipeLine = {
   itemType: "material" | "recipe";
@@ -81,10 +83,12 @@ type Product = {
   yieldUnit: YieldUnit;
   portionsPerWhole?: number;
   customerPrice: number;
+  storkjokkenPriceExVat?: number;
   targetMargin: number;
   lines: ProductLine[];
   packaging: ProductPackagingLine[];
 };
+
 
 type OrderLine = { productId: string; quantity: number };
 
@@ -149,6 +153,17 @@ type InventoryMonthData = {
 
 type RentalAddon = { id: string; name: string; price: number };
 
+type ProductListKind = "bakst" | "catering" | "storkjokken";
+
+type ProductList = {
+  id: string;
+  name: string;
+  kind: ProductListKind;
+  introText: string;
+  productIds: string[];
+  createdAt: string;
+};
+
 type AppData = {
   materials: Material[];
   recipes: Recipe[];
@@ -159,6 +174,7 @@ type AppData = {
   venues: Venue[];
   packaging: Packaging[];
   rentalAddons: RentalAddon[];
+  productLists: ProductList[];
   menuCategories: string[];
   productCategories: string[];
   materialCategories: string[];
@@ -201,6 +217,15 @@ function num(value: number, digits = 2) {
   return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: digits }).format(Number(value) || 0);
 }
 
+function escapeHtml(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function normalizeAllergen(value: string) {
   const s = value.trim();
   return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "";
@@ -230,7 +255,30 @@ function marginTone(margin: number) {
 }
 
 function makeMaterial(id: string, name: string, category: string, unit: Unit, packageSize: number, packagePrice: number, allergens: string[], kcal: number, protein: number, carbs: number, fat: number, kj: number, saturatedFat: number, fiber: number, sugars: number, addedSugar: number, salt: number, isWholegrain = false): Material {
-  return { id, name, category, unit, packageSize, packagePrice, pricePerUnit: packageSize ? packagePrice / packageSize : 0, allergens, kcal, protein, carbs, fat, kj, saturatedFat, fiber, sugars, addedSugar, salt, isWholegrain, updatedAt: new Date().toISOString() };
+  return {
+  id,
+  name,
+  category,
+  unit,
+  packageSize,
+  packagePrice,
+  pricePerUnit: packageSize ? packagePrice / packageSize : 0,
+  allergens,
+  kcal,
+  protein,
+  carbs,
+  fat,
+  kj,
+  saturatedFat,
+  fiber,
+  sugars,
+  addedSugar,
+  salt,
+  isWholegrain,
+  updatedAt: new Date().toISOString(),
+  priceUpdatedAt: new Date().toISOString(),
+};
+
 }
 
 const initialData: AppData = {
@@ -262,6 +310,7 @@ const initialData: AppData = {
   venues: [{ id: "kafeen", name: "Kaféen", price: 11000 }, { id: "oscarshall", name: "Oscarshall", price: 18000 }, { id: "gammelfloya", name: "Gammelfløya", price: 18000 }, { id: "bodogaard", name: "Bodøgaard hel helg", price: 24000 }],
   packaging: [{ id: "glass", name: "Glass", price: 8 }, { id: "brodpose", name: "Brødpose", price: 2.5 }, { id: "aluminiumsbakke", name: "Aluminiumsbakke", price: 12 }],
   rentalAddons: defaultRentalAddons,
+  productLists: [],
   menuCategories: defaultMenuCategories,
   productCategories: defaultProductCategories,
   materialCategories: defaultMaterialCategories,
@@ -305,6 +354,7 @@ function migrateData(raw: Partial<AppData>): AppData {
     venues: raw.venues || initialData.venues,
     packaging: raw.packaging || initialData.packaging,
     rentalAddons: (raw as any).rentalAddons || defaultRentalAddons,
+    productLists: (raw as any).productLists || [],
     menuCategories: raw.menuCategories || defaultMenuCategories,
     productCategories: raw.productCategories || defaultProductCategories,
     materialCategories: raw.materialCategories || defaultMaterialCategories,
@@ -626,47 +676,99 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
   function save() {
     if (!form.name.trim()) return;
     const id = editingId || `${idFromName(form.name)}-${Date.now()}`;
+    const oldMaterial = editingId ? data.materials.find((x) => x.id === editingId) : undefined;
+    const packageSize = Number(form.packageSize) || 1;
+    const packagePrice = Number(form.packagePrice) || 0;
+    const oldPrice = oldMaterial?.pricePerUnit || 0;
+    const newPrice = packageSize ? packagePrice / packageSize : 0;
+    const priceChanged = !oldMaterial || Math.abs(oldPrice - newPrice) > 0.0001;
+
     const m = {
-      ...makeMaterial(id, form.name, form.category, form.unit, Number(form.packageSize) || 1, Number(form.packagePrice) || 0, form.allergens.split(",").map(normalizeAllergen).filter(Boolean), Number(form.kcal) || 0, Number(form.protein) || 0, Number(form.carbs) || 0, Number(form.fat) || 0, Number(form.kj) || 0, Number(form.saturatedFat) || 0, Number(form.fiber) || 0, Number(form.sugars) || 0, Number(form.addedSugar) || 0, Number(form.salt) || 0, form.isWholegrain),
+      ...makeMaterial(id, form.name, form.category, form.unit, packageSize, packagePrice, form.allergens.split(",").map(normalizeAllergen).filter(Boolean), Number(form.kcal) || 0, Number(form.protein) || 0, Number(form.carbs) || 0, Number(form.fat) || 0, Number(form.kj) || 0, Number(form.saturatedFat) || 0, Number(form.fiber) || 0, Number(form.sugars) || 0, Number(form.addedSugar) || 0, Number(form.salt) || 0, form.isWholegrain),
       retailPrice: Number(form.retailPrice) || undefined,
       isForResale: form.category === "Deli",
       supplier: form.supplier || "",
+      updatedAt: new Date().toISOString(),
+      priceUpdatedAt: priceChanged ? new Date().toISOString() : oldMaterial?.priceUpdatedAt,
     };
+
     updateData({ materials: editingId ? data.materials.map((x) => x.id === editingId ? m : x) : [m, ...data.materials] });
     reset();
     setShowForm(false);
   }
 
-  return <section className="card"><div className="between"><h2>Råvarer</h2><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>{showForm && <div className="soft-box"><div className="form-grid"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /><label>Leverandør<input value={form.supplier || ""} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select><select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select><label>Pakningsstørrelse<input type="number" value={form.packageSize} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label><label>Pakningspris eks. mva<input type="number" value={form.packagePrice} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label><Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} /></div>
+  function updateMaterialInline(materialId: string, patch: Partial<Material>, priceChanged = false) {
+    updateData({
+      materials: data.materials.map((m) => {
+        if (m.id !== materialId) return m;
+        return {
+          ...m,
+          ...patch,
+          updatedAt: new Date().toISOString(),
+          priceUpdatedAt: priceChanged ? new Date().toISOString() : m.priceUpdatedAt,
+        };
+      }),
+    });
+  }
 
-{form.category === "Deli" && (() => {
-  const costExVat = (Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1);
-  const selectedMargin = Math.max(Number(form.deliMargin) || 50, 0);
-  const suggestedIncVat = selectedMargin >= 100 ? 0 : Math.ceil((costExVat / (1 - selectedMargin / 100)) * (1 + data.settings.foodVat / 100));
-  const retailIncVat = Number(form.retailPrice) || 0;
-  const retailExVat = exVatFromIncVat(retailIncVat, data.settings.foodVat);
-  const finalMargin = marginPercentFrom(retailExVat, costExVat);
-  const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
-  return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="50" value={form.deliMargin} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label><Metric label="Anbefalt utsalgspris inkl. mva" value={currency(suggestedIncVat)} dark /><label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label><button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button></div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label="Valgt pris eks. mva" value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
-})()}<h3>Allergier</h3><div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div><h3>Næring per 100g/ml</h3><div className="form-grid five">{[["kj", "kJ"], ["kcal", "Kcal"], ["fat", "Fett"], ["saturatedFat", "Mettet fett"], ["protein", "Protein"], ["carbs", "Karbo"], ["sugars", "Sukkerarter"], ["addedSugar", "Tilsatt sukker"], ["fiber", "Kostfiber"], ["salt", "Salt"]].map(([k, label]) => <label key={k}>{label}<input type="number" value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>)}</div><label className="check"><input type="checkbox" checked={form.isWholegrain} onChange={(e) => setForm({ ...form, isWholegrain: e.target.checked })} /> Fullkorn/grov råvare</label><button className="btn active" onClick={save}>Lagre</button><button className="btn" onClick={() => { reset(); setShowForm(false); }}>Avbryt</button></div>}<input value={search} onChange={(e) => { setSearch(e.target.value); setMaterialPage(1); }} placeholder="Søk råvare / leverandør" />
+  return <section className="card">
+    <div className="between"><h2>Råvarer</h2><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>
 
-<div className="chips">{["Alle", ...data.materialCategories].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setMaterialPage(1); }}>{cat}</button>)}</div>
+    {showForm && <div className="soft-box">
+      <div className="form-grid">
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" />
+        <label>Leverandør<input value={form.supplier || ""} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label>
+        <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select>
+        <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select>
+        <label>Pakningsstørrelse<input type="number" value={form.packageSize} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label>
+        <label>Pakningspris eks. mva<input type="number" value={form.packagePrice} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label>
+        <Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} />
+      </div>
 
-<p style={{ color: "#64748b" }}>Viser {visibleMaterials.length} av {filtered.length} råvarer. Side {materialPage} av {totalPages}.</p>
+      {form.category === "Deli" && (() => {
+        const costExVat = (Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1);
+        const selectedMargin = Math.max(Number(form.deliMargin) || 50, 0);
+        const suggestedIncVat = selectedMargin >= 100 ? 0 : Math.ceil((costExVat / (1 - selectedMargin / 100)) * (1 + data.settings.foodVat / 100));
+        const retailIncVat = Number(form.retailPrice) || 0;
+        const retailExVat = exVatFromIncVat(retailIncVat, data.settings.foodVat);
+        const finalMargin = marginPercentFrom(retailExVat, costExVat);
+        const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
+        return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="50" value={form.deliMargin} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label><Metric label="Anbefalt utsalgspris inkl. mva" value={currency(suggestedIncVat)} dark /><label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label><button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button></div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label="Valgt pris eks. mva" value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
+      })()}
 
-<table><thead><tr><th>Råvare</th><th>Leverandør</th><th>Kategori</th><th>Pakning</th><th>Pris/enhet</th><th>Utsalgspris</th><th>Margin</th><th>Allergener</th><th></th></tr></thead><tbody>{visibleMaterials.map((m) => {
-  const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
-  const deliMargin = m.category === "Deli" ? marginPercentFrom(retailExVat, m.pricePerUnit) : 0;
-  return <tr key={m.id}><td><b>{m.name}</b>{m.isForResale && <><br /><small style={{ color: "#64748b" }}>Videresalg</small></>}</td><td>{m.supplier || "-"}</td><td>{m.category}</td><td>{m.packageSize} {m.unit}</td><td>{currency(m.pricePerUnit)}</td><td>{m.category === "Deli" ? currency(m.retailPrice || 0) : "-"}</td><td>{m.category === "Deli" ? `${num(deliMargin, 1)} %` : "-"}</td><td>{m.allergens.join(", ")}</td><td><button
-  className="btn"
-  onClick={() => {
-    edit(m);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }}
->
-  Rediger
-</button><button style={{ marginLeft: 8 }} className="btn danger" onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td></tr>;
-})}</tbody></table><div className="pager"><button className="btn" disabled={materialPage <= 1} onClick={() => setMaterialPage(materialPage - 1)}>Forrige</button><span>Side {materialPage} av {totalPages}</span><button className="btn" disabled={materialPage >= totalPages} onClick={() => setMaterialPage(materialPage + 1)}>Neste</button></div></section>;
+      <h3>Allergier</h3>
+      <div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div>
+      <h3>Næring per 100g/ml</h3>
+      <div className="form-grid five">{[["kj", "kJ"], ["kcal", "Kcal"], ["fat", "Fett"], ["saturatedFat", "Mettet fett"], ["protein", "Protein"], ["carbs", "Karbo"], ["sugars", "Sukkerarter"], ["addedSugar", "Tilsatt sukker"], ["fiber", "Kostfiber"], ["salt", "Salt"]].map(([k, label]) => <label key={k}>{label}<input type="number" value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>)}</div>
+      <label className="check"><input type="checkbox" checked={form.isWholegrain} onChange={(e) => setForm({ ...form, isWholegrain: e.target.checked })} /> Fullkorn/grov råvare</label>
+      <button className="btn active" onClick={save}>Lagre</button><button className="btn" onClick={() => { reset(); setShowForm(false); }}>Avbryt</button>
+    </div>}
+
+    <input value={search} onChange={(e) => { setSearch(e.target.value); setMaterialPage(1); }} placeholder="Søk råvare / leverandør" />
+    <div className="chips">{["Alle", ...data.materialCategories].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setMaterialPage(1); }}>{cat}</button>)}</div>
+    <p style={{ color: "#64748b" }}>Viser {visibleMaterials.length} av {filtered.length} råvarer. Side {materialPage} av {totalPages}.</p>
+
+    <table>
+      <thead><tr><th>Råvare</th><th>Leverandør</th><th>Kategori</th><th>Pakning</th><th>Pris/enhet</th><th>Utsalgspris</th><th>Margin</th><th>Allergener</th><th></th><th>Sist prisendret</th></tr></thead>
+      <tbody>{visibleMaterials.map((m) => {
+        const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
+        const deliMargin = m.category === "Deli" ? marginPercentFrom(retailExVat, m.pricePerUnit) : 0;
+        return <tr key={m.id}>
+          <td><input className="inline-cell-input" value={m.name} onChange={(e) => updateMaterialInline(m.id, { name: e.target.value })} />{m.isForResale && <small style={{ color: "#64748b" }}>Videresalg</small>}</td>
+          <td><input className="inline-cell-input" value={m.supplier || ""} onChange={(e) => updateMaterialInline(m.id, { supplier: e.target.value })} placeholder="Leverandør" /></td>
+          <td><select className="inline-cell-input" value={m.category} onChange={(e) => updateMaterialInline(m.id, { category: e.target.value, isForResale: e.target.value === "Deli" })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select></td>
+          <td><div className="inline-packaging-grid"><input className="inline-cell-input" type="number" value={m.packageSize} onChange={(e) => { const packageSize = Number(e.target.value) || 1; updateMaterialInline(m.id, { packageSize, packagePrice: m.pricePerUnit * packageSize }, true); }} /><select className="inline-cell-input" value={m.unit} onChange={(e) => updateMaterialInline(m.id, { unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select></div></td>
+          <td><input className="inline-cell-input" type="number" value={m.pricePerUnit} onChange={(e) => { const pricePerUnit = Number(e.target.value) || 0; updateMaterialInline(m.id, { pricePerUnit, packagePrice: pricePerUnit * (m.packageSize || 1) }, true); }} /></td>
+          <td><input className="inline-cell-input" type="number" value={m.retailPrice || ""} onChange={(e) => updateMaterialInline(m.id, { retailPrice: Number(e.target.value) || undefined })} placeholder="-" /></td>
+          <td>{m.category === "Deli" ? `${num(deliMargin, 1)} %` : "-"}</td>
+          <td><input className="inline-cell-input" value={(m.allergens || []).join(", ")} onChange={(e) => updateMaterialInline(m.id, { allergens: e.target.value.split(",").map(normalizeAllergen).filter(Boolean) })} placeholder="Allergener" /></td>
+          <td><button className="btn" onClick={() => { edit(m); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Rediger</button><button style={{ marginLeft: 8 }} className="btn danger" onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td>
+          <td>{m.priceUpdatedAt ? formatDateNo(m.priceUpdatedAt.slice(0, 10)) : "-"}</td>
+        </tr>;
+      })}</tbody>
+    </table>
+    <div className="pager"><button className="btn" disabled={materialPage <= 1} onClick={() => setMaterialPage(materialPage - 1)}>Forrige</button><span>Side {materialPage} av {totalPages}</span><button className="btn" disabled={materialPage >= totalPages} onClick={() => setMaterialPage(materialPage + 1)}>Neste</button></div>
+  </section>;
 }
 
 function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[] }) {
@@ -796,7 +898,7 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
   const [selectedId, setSelectedId] = useState(data.products[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [testMargin, setTestMargin] = useState("70");
-  const [form, setForm] = useState({ productNumber: "", name: "", type: "bakst" as ProductType, subType: "" as ProductSubType, category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk" as YieldUnit, portionsPerWhole: "", customerPrice: "0", targetMargin: "70" });
+  const [form, setForm] = useState({ productNumber: "", name: "", type: "bakst" as ProductType, subType: "" as ProductSubType, category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk" as YieldUnit, portionsPerWhole: "", customerPrice: "0", storkjokkenPriceExVat: "", targetMargin: "70" });
   const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
   const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
   const [line, setLine] = useState({ itemType: "material" as "material" | "recipe" | "product", itemId: "", amount: "0", unit: "kg" as ProductLine["unit"] });
@@ -804,13 +906,26 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
   const [packLine, setPackLine] = useState({ packagingId: "", quantity: "1" });
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Alle");
+  const [productPage, setProductPage] = useState(1);
+  const [wideProductId, setWideProductId] = useState<string | null>(null);
+  const [listMode, setListMode] = useState<ProductListKind>("bakst");
+  const [showProductListEditor, setShowProductListEditor] = useState(false);
+  const [listName, setListName] = useState("Ny produktliste");
+  const [listIntroText, setListIntroText] = useState("");
+  const [listSelectedIds, setListSelectedIds] = useState<string[]>([]);
+  const pageSize = 20;
 
   const selected = data.products.find((p) => p.id === selectedId);
+  const wideProduct = data.products.find((p) => p.id === wideProductId);
+
   const filtered = data.products.filter((p) => {
-    const matchesSearch = `${p.name} ${p.type} ${p.category}`.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = `${p.productNumber} ${p.name} ${p.type} ${p.category}`.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = categoryFilter === "Alle" || p.category === categoryFilter || p.type === categoryFilter;
     return matchesSearch && matchesCategory;
-  });
+  }).sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "no-NO"));
+
+  const totalProductPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pagedProducts = filtered.slice((productPage - 1) * pageSize, productPage * pageSize);
 
   const draftProduct: Product = {
     id: selected?.id || "draft",
@@ -823,6 +938,7 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
     yieldUnit: form.yieldUnit,
     portionsPerWhole: form.portionsPerWhole ? Number(form.portionsPerWhole) : undefined,
     customerPrice: Number(form.customerPrice) || 0,
+    storkjokkenPriceExVat: form.storkjokkenPriceExVat ? Number(form.storkjokkenPriceExVat) : undefined,
     targetMargin: Number(form.targetMargin) || 70,
     lines: draftLines,
     packaging: draftPackaging,
@@ -830,13 +946,18 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
 
   const activeProduct = mode === "view" ? selected : draftProduct;
 
+  function priceIncVatFromCost(costExVat: number, marginPercent: number, vatRate: number) {
+    const margin = Number(marginPercent || 0) / 100;
+    if (margin >= 1) return 0;
+    return Math.ceil((costExVat / (1 - margin)) * (1 + vatRate / 100));
+  }
+
   function startNewProduct() {
     setMode("new");
-    setForm({ productNumber: "", name: "", type: "bakst", subType: "", category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk", portionsPerWhole: "", customerPrice: "0", targetMargin: "70" });
+    setForm({ productNumber: "", name: "", type: "bakst", subType: "", category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk", portionsPerWhole: "", customerPrice: "0", storkjokkenPriceExVat: "", targetMargin: "70" });
     setDraftLines([]);
     setDraftPackaging([]);
     setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg" });
-    setLineSearch("");
     setLineSearch("");
   }
 
@@ -853,18 +974,14 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
 
   function saveProduct() {
     if (!form.name.trim()) return alert("Legg inn produktnavn.");
-    const product: Product = {
-      ...draftProduct,
-      id: mode === "edit" && selected ? selected.id : `${idFromName(form.name)}-${Date.now()}`,
-      name: form.name.trim(),
-    };
+    const product: Product = { ...draftProduct, id: mode === "edit" && selected ? selected.id : `${idFromName(form.name)}-${Date.now()}`, name: form.name.trim() };
     updateData({ products: mode === "edit" ? data.products.map((x) => x.id === product.id ? product : x) : [product, ...data.products] });
     setSelectedId(product.id);
     setMode("view");
   }
 
   function editProduct(p: Product) {
-    setForm({ productNumber: p.productNumber || "", name: p.name, type: p.type, subType: "", category: p.category, yieldAmount: String(p.yieldAmount), yieldUnit: p.yieldUnit, portionsPerWhole: String(p.portionsPerWhole || ""), customerPrice: String(p.customerPrice || 0), targetMargin: String(p.targetMargin || 70) });
+    setForm({ productNumber: p.productNumber || "", name: p.name, type: p.type, subType: "", category: p.category, yieldAmount: String(p.yieldAmount), yieldUnit: p.yieldUnit, portionsPerWhole: String(p.portionsPerWhole || ""), customerPrice: String(p.customerPrice || 0), storkjokkenPriceExVat: String(p.storkjokkenPriceExVat || ""), targetMargin: String(p.targetMargin || 70) });
     setDraftLines(p.lines.map((l) => ({ ...l })));
     setDraftPackaging(p.packaging.map((x) => ({ ...x })));
     setSelectedId(p.id);
@@ -880,30 +997,13 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
     if (line.itemType === "product" && line.itemId === selected?.id) return alert("Et produkt kan ikke inneholde seg selv.");
     setDraftLines((prev) => [...prev, { itemType: line.itemType, itemId: line.itemId, amount: Number(line.amount) || 0, unit: line.unit }]);
     setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg" });
+    setLineSearch("");
   }
 
   function addPackaging() {
     if (!packLine.packagingId) return;
     setDraftPackaging((prev) => [...prev, { packagingId: packLine.packagingId, quantity: Number(packLine.quantity) || 0 }]);
     setPackLine({ packagingId: "", quantity: "1" });
-  }
-
-  function printProduct(product: Product) {
-    const rows = product.lines.map((l) => {
-      const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
-      return `<tr><td>${l.itemType}</td><td>${name}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`;
-    }).join("");
-    const packagingRows = product.packaging.map((p) => {
-      const pack = data.packaging.find((x) => x.id === p.packagingId);
-      return `<tr><td>${pack?.name || "Ukjent"}</td><td>${p.quantity}</td><td>${currency((pack?.price || 0) * p.quantity)}</td></tr>`;
-    }).join("");
-    const allergens = productAllergens(product).join(", ") || "Ingen registrert";
-    const priceExVat = exVatFromIncVat(product.customerPrice, data.settings.foodVat);
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${product.name}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">PRODUKTKALKYLE</div><h1>${product.name}</h1><p>${product.type} · ${product.category}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(productCost(product))}</b></div><div class="metric">Kost per ${product.yieldUnit}<b>${currency(productUnitCost(product))}</b></div><div class="metric">Kundepris inkl. mva<b>${currency(product.customerPrice)}</b></div><div class="metric">Varekost / margin<b>${num(foodCostPercentFrom(priceExVat, productUnitCost(product)), 1)}% / ${num(marginPercentFrom(priceExVat, productUnitCost(product)), 1)}%</b></div></div><p><b>Allergener:</b> ${allergens}</p><h2>Innhold</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table>${packagingRows ? `<h2>Emballasje</h2><table><thead><tr><th>Navn</th><th>Antall</th><th>Kost</th></tr></thead><tbody>${packagingRows}</tbody></table>` : ""}</body></html>`);
-    w.document.close();
-    w.focus();
   }
 
   function lineCost(l: ProductLine) {
@@ -923,17 +1023,59 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
 
   function lineOptions(itemType: ProductLine["itemType"], query: string) {
     const q = query.toLowerCase();
-    const source =
-      itemType === "material"
-        ? data.materials.map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${currency(x.pricePerUnit)}/${x.unit}` }))
-        : itemType === "recipe"
-          ? data.recipes.map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${num(x.yieldAmount)} ${x.yieldUnit}` }))
-          : data.products.filter((x) => x.id !== selected?.id).map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${currency(productUnitCost(x))}/${x.yieldUnit}` }));
+    const source = itemType === "material"
+      ? data.materials.map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${currency(x.pricePerUnit)}/${x.unit}` }))
+      : itemType === "recipe"
+        ? data.recipes.map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${num(x.yieldAmount)} ${x.yieldUnit}` }))
+        : data.products.filter((x) => x.id !== selected?.id).map((x) => ({ id: x.id, name: x.name, subtitle: `${x.category} · ${currency(productUnitCost(x))}/${x.yieldUnit}` }));
+    return source.filter((x) => !q || `${x.name} ${x.subtitle}`.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name, "no-NO")).slice(0, 12);
+  }
 
-    return source
-      .filter((x) => !q || `${x.name} ${x.subtitle}`.toLowerCase().includes(q))
-      .sort((a, b) => a.name.localeCompare(b.name, "no-NO"))
-      .slice(0, 12);
+  function printProduct(product: Product) {
+    const rows = product.lines.map((l) => `<tr><td>${l.itemType}</td><td>${escapeHtml(lineItemName(l.itemType, l.itemId) || "Ukjent")}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`).join("");
+    const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+    const priceExVat = exVatFromIncVat(product.customerPrice, data.settings.foodVat);
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo-img{height:120px;width:auto;object-fit:contain}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><img src="/logo.png" class="logo-img" /><h1>${escapeHtml(product.name)}</h1><p>${escapeHtml(product.type)} · ${escapeHtml(product.category)}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(productCost(product))}</b></div><div class="metric">Kost per ${product.yieldUnit}<b>${currency(productUnitCost(product))}</b></div><div class="metric">Kundepris inkl. mva<b>${currency(product.customerPrice)}</b></div><div class="metric">Varekost / margin<b>${num(foodCostPercentFrom(priceExVat, productUnitCost(product)), 1)}% / ${num(marginPercentFrom(priceExVat, productUnitCost(product)), 1)}%</b></div></div><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><h2>Innhold</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
+  function toggleListProduct(productId: string) {
+    setListSelectedIds((prev) => prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]);
+  }
+
+  function createProductList() {
+    if (!listSelectedIds.length) return alert("Velg minst ett produkt til listen.");
+    const next: ProductList = { id: `product-list-${Date.now()}`, name: listName.trim() || "Produktliste", kind: listMode, introText: listIntroText, productIds: listSelectedIds, createdAt: new Date().toISOString() };
+    updateData({ productLists: [next, ...(data.productLists || [])] });
+  }
+
+  function printProductList(list: ProductList) {
+    const products = list.productIds.map((id) => data.products.find((p) => p.id === id)).filter(Boolean) as Product[];
+    const logo = `<img src="/logo.png" style="height:120px;width:auto;object-fit:contain;margin-bottom:10px;" />`;
+    const title = escapeHtml(list.name);
+    const intro = list.introText ? `<p class="intro">${escapeHtml(list.introText).replace(/\n/g, "<br>")}</p>` : "";
+
+    let content = "";
+    if (list.kind === "catering") {
+      content = products.map((p) => {
+        const elements = p.lines.map((line) => lineItemName(line.itemType, line.itemId)).filter(Boolean);
+        const allergens = productAllergens(p).join(", ") || "-";
+        return `<section class="catering-menu"><h2>${escapeHtml(p.name)}</h2>${elements.map((element) => `<p class="menu-line">${escapeHtml(element)}</p>`).join("")}<p class="allergens">A: ${escapeHtml(allergens)}</p><p class="price">Kr ${num(p.customerPrice, 0)},- pr pers</p></section>`;
+      }).join("");
+    } else if (list.kind === "storkjokken") {
+      content = `<table><thead><tr><th>Produkt</th><th>Vekt/str</th><th>Pris eks. mva</th><th>Pris inkl. 15%</th><th>Pris inkl. 25%</th></tr></thead><tbody>${products.map((p) => { const exVat = p.storkjokkenPriceExVat || exVatFromIncVat(p.customerPrice, 15); return `<tr><td><b>${escapeHtml(p.name)}</b><br><small>A: ${escapeHtml(productAllergens(p).join(", ") || "-")}</small></td><td>${escapeHtml(`${p.yieldAmount} ${p.yieldUnit}`)}</td><td>${currency(exVat)}</td><td>${currency(exVat * 1.15)}</td><td>${currency(exVat * 1.25)}</td></tr>`; }).join("")}</tbody></table>`;
+    } else {
+      content = `<table><thead><tr><th>Produkt</th><th>Kategori</th><th>Vekt/str</th><th>Pris</th></tr></thead><tbody>${products.map((p) => `<tr><td><b>${escapeHtml(p.name)}</b><br><small>A: ${escapeHtml(productAllergens(p).join(", ") || "-")}</small></td><td>${escapeHtml(p.category)}</td><td>${escapeHtml(`${p.yieldAmount} ${p.yieldUnit}`)}</td><td>${currency(p.customerPrice)}</td></tr>`).join("")}</tbody></table>`;
+    }
+
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${title}</title><style>@page{size:A4;margin:14mm}body{font-family:Arial,sans-serif;color:#111827;line-height:1.35}.top{text-align:center;border-bottom:2px solid #111827;padding-bottom:12px;margin-bottom:16px}h1{font-size:25px;margin:4px 0 6px}.intro{font-size:13px;color:#334155;margin:8px auto 0;max-width:680px}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#111827;color:white;text-align:left;padding:7px}td{border-bottom:1px solid #e5e7eb;padding:7px;vertical-align:top}small,.allergens{color:#64748b}.catering-menu{max-width:560px;margin:0 auto 18px;break-inside:avoid}.catering-menu h2{text-align:center;font-size:26px;margin:16px 0 12px}.menu-line{font-size:15px;margin:0 0 8px;text-align:left}.allergens{font-size:13px;margin:3px 0 12px}.price{text-align:center;font-size:18px;font-weight:900;margin-top:16px}.footer{position:fixed;bottom:0;left:0;right:0;text-align:center;font-size:10px;color:#64748b}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print</button><div class="top">${logo}<h1>${title}</h1>${intro}</div>${content}<div class="footer">Brødrene Berbusmel | tlf 413 73 000 | brodrene@berbusmel.no</div></body></html>`);
+    w.document.close();
+    w.focus();
   }
 
   const activeCost = activeProduct ? productCost(activeProduct) : 0;
@@ -943,72 +1085,166 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
   const finalMargin = activeProduct ? marginPercentFrom(priceExVat, activeUnitCost) : 0;
 
   if (mode !== "view") {
-    return (
-      <section className="card product-editor-page">
-        <div className="between">
-          <h1>{mode === "edit" ? "Rediger produkt" : "Nytt produkt"}</h1>
-          <div>
-            <button className="btn active" onClick={saveProduct}>{mode === "edit" ? "Lagre endringer" : "Lagre produkt"}</button>
-            <button className="btn" onClick={() => setMode("view")}>Avbryt</button>
-          </div>
-        </div>
-
-        <div className="form-grid four">
-          <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
-          <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Produktnavn" /></label>
-          <label>Type<select value={form.type} onChange={(e) => blankFor(e.target.value as ProductType)}><option value="grunnoppskrift">Grunnoppskrift</option><option value="bakst">Bakst</option><option value="cateringmeny">Cateringmeny</option><option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option></select></label>
-          <label>Kategori<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.productCategories.map((c) => <option key={c}>{c}</option>)}</select></label>
-          <label>Gir<input type="number" value={form.yieldAmount} onChange={(e) => setForm({ ...form, yieldAmount: e.target.value })} /></label>
-          <label>Enhet<select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="stk">stk</option><option value="porsjoner">porsjoner</option><option value="kg">kg</option><option value="liter">liter</option></select></label>
-          {form.type === "pasmuurt" && <label>Deles på antall porsjoner<input type="number" value={form.portionsPerWhole} onChange={(e) => setForm({ ...form, portionsPerWhole: e.target.value })} placeholder="f.eks. 12" /></label>}
-          <label>Valgt kundepris inkl. mva<input type="number" value={form.customerPrice} onChange={(e) => setForm({ ...form, customerPrice: e.target.value })} /></label>
-          <label>Målmargin %<input type="number" value={form.targetMargin} onChange={(e) => setForm({ ...form, targetMargin: e.target.value })} /></label>
-        </div>
-
-        <div className="metric-row">
-          <Metric label="Total kost eks. mva" value={currency(activeCost)} />
-          <Metric label={`Kost per ${form.yieldUnit}`} value={currency(activeUnitCost)} dark />
-          <Metric label="Anbefalt pris 70% inkl. mva" value={currency(recommendedPriceIncVat(activeUnitCost, 70))} />
-          <Metric label="Endelig margin" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} />
-        </div>
-
-        <div className="soft-box">
-          <h2>Ingredienser / innhold</h2>
-          <div className="form-grid five">
-            <select value={line.itemType} onChange={(e) => { setLine({ ...line, itemType: e.target.value as any, itemId: "" }); setLineSearch(""); }}><option value="material">Råvare</option><option value="recipe">Grunnoppskrift</option><option value="product">Produkt</option></select>
-            <div className="search-picker">
-              <input value={lineSearch || lineItemName(line.itemType, line.itemId)} onChange={(e) => { setLineSearch(e.target.value); setLine({ ...line, itemId: "" }); }} placeholder="Søk og velg" />
-              {(lineSearch && lineSearch.length > 0) && (
-                <div className="search-dropdown inline">
-                  {lineOptions(line.itemType, lineSearch).map((item) => (
-                    <button key={item.id} type="button" className="search-result" onClick={() => { setLine({ ...line, itemId: item.id }); setLineSearch(item.name); }}>
-                      <b>{item.name}</b>
-                      <small>{item.subtitle}</small>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <input type="number" value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" />
-            <select value={line.unit} onChange={(e) => setLine({ ...line, unit: e.target.value as any })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select>
-            <button className="btn" onClick={addLine}>Legg til</button>
-          </div>
-
-          <table>
-            <thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th><th></th></tr></thead>
-            <tbody>{draftLines.map((l, i) => {
-              return <tr key={i}><td><select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}><option value="material">Råvare</option><option value="recipe">Grunnoppskrift</option><option value="product">Produkt</option></select></td><td><input value={lineItemName(l.itemType, l.itemId)} readOnly /><small style={{ color: "#64748b" }}>Endre ved å slette/legge inn ny linje</small></td><td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td><td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td><td>{currency(lineCost(l))}</td><td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td></tr>;
-            })}</tbody>
-          </table>
-        </div>
-
-        {form.type === "egenprodusert" && <div className="soft-box"><h2>Emballasje</h2><div className="form-grid three"><select value={packLine.packagingId} onChange={(e) => setPackLine({ ...packLine, packagingId: e.target.value })}><option value="">Velg emballasje</option>{data.packaging.map((p) => <option key={p.id} value={p.id}>{p.name} · {currency(p.price)}</option>)}</select><input type="number" value={packLine.quantity} onChange={(e) => setPackLine({ ...packLine, quantity: e.target.value })} placeholder="Antall" /><button className="btn" onClick={addPackaging}>Legg til</button></div><table><tbody>{draftPackaging.map((p, i) => { const pack = data.packaging.find((x) => x.id === p.packagingId); return <tr key={i}><td><select value={p.packagingId} onChange={(e) => updateDraftPackaging(i, { packagingId: e.target.value })}>{data.packaging.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td><td><input type="number" value={p.quantity} onChange={(e) => updateDraftPackaging(i, { quantity: Number(e.target.value) || 0 })} /></td><td>{currency((pack?.price || 0) * p.quantity)}</td><td><button className="link danger" onClick={() => setDraftPackaging((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td></tr>; })}</tbody></table></div>}
-      </section>
-    );
+    return <section className="card product-editor-page">
+      <div className="between"><h1>{mode === "edit" ? "Rediger produkt" : "Nytt produkt"}</h1><div><button className="btn active" onClick={saveProduct}>{mode === "edit" ? "Lagre endringer" : "Lagre produkt"}</button><button className="btn" onClick={() => setMode("view")}>Avbryt</button></div></div>
+      <div className="form-grid four">
+        <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
+        <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Produktnavn" /></label>
+        <label>Type<select value={form.type} onChange={(e) => blankFor(e.target.value as ProductType)}><option value="grunnoppskrift">Grunnoppskrift</option><option value="bakst">Bakst</option><option value="cateringmeny">Cateringmeny</option><option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option></select></label>
+        <label>Kategori<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.productCategories.map((c) => <option key={c}>{c}</option>)}</select></label>
+        <label>Gir<input type="number" value={form.yieldAmount} onChange={(e) => setForm({ ...form, yieldAmount: e.target.value })} /></label>
+        <label>Enhet<select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="stk">stk</option><option value="porsjoner">porsjoner</option><option value="kg">kg</option><option value="liter">liter</option></select></label>
+        {form.type === "pasmuurt" && <label>Deles på antall porsjoner<input type="number" value={form.portionsPerWhole} onChange={(e) => setForm({ ...form, portionsPerWhole: e.target.value })} placeholder="f.eks. 12" /></label>}
+        <label>Valgt kundepris inkl. mva<input type="number" value={form.customerPrice} onChange={(e) => setForm({ ...form, customerPrice: e.target.value })} /></label>
+        <label>Storkjøkkenpris eks. mva<input type="number" value={form.storkjokkenPriceExVat} onChange={(e) => setForm({ ...form, storkjokkenPriceExVat: e.target.value })} placeholder="Valgfritt" /></label>
+        <label>Målmargin %<input type="number" value={form.targetMargin} onChange={(e) => setForm({ ...form, targetMargin: e.target.value })} /></label>
+      </div>
+      <div className="metric-row"><Metric label="Total kost eks. mva" value={currency(activeCost)} /><Metric label={`Kost per ${form.yieldUnit}`} value={currency(activeUnitCost)} dark /><Metric label="Anbefalt 70% inkl. 15% mva" value={currency(priceIncVatFromCost(activeUnitCost, 70, 15))} /><Metric label="Anbefalt 70% inkl. 25% mva" value={currency(priceIncVatFromCost(activeUnitCost, 70, 25))} /></div>
+      <div className="metric-row"><Metric label="Endelig margin" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /><Metric label="Endelig varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Storkjøkkenpris eks. mva" value={form.storkjokkenPriceExVat ? currency(Number(form.storkjokkenPriceExVat)) : "Ikke satt"} /><Metric label="Storkjøkken inkl. 15%" value={form.storkjokkenPriceExVat ? currency(Number(form.storkjokkenPriceExVat) * 1.15) : "-"} /></div>
+      <div className="soft-box"><h2>Ingredienser / innhold</h2><div className="form-grid five"><select value={line.itemType} onChange={(e) => { setLine({ ...line, itemType: e.target.value as any, itemId: "" }); setLineSearch(""); }}><option value="material">Råvare</option><option value="recipe">Grunnoppskrift</option><option value="product">Produkt</option></select><div className="search-picker"><input value={lineSearch || lineItemName(line.itemType, line.itemId)} onChange={(e) => { setLineSearch(e.target.value); setLine({ ...line, itemId: "" }); }} placeholder="Søk og velg" />{lineSearch && <div className="search-dropdown inline">{lineOptions(line.itemType, lineSearch).map((item) => <button key={item.id} type="button" className="search-result" onClick={() => { setLine({ ...line, itemId: item.id }); setLineSearch(item.name); }}><b>{item.name}</b><small>{item.subtitle}</small></button>)}</div>}</div><input type="number" value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" /><select value={line.unit} onChange={(e) => setLine({ ...line, unit: e.target.value as any })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select><button className="btn" onClick={addLine}>Legg til</button></div><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th><th></th></tr></thead><tbody>{draftLines.map((l, i) => <tr key={i}><td><select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}><option value="material">Råvare</option><option value="recipe">Grunnoppskrift</option><option value="product">Produkt</option></select></td><td><input value={lineItemName(l.itemType, l.itemId)} readOnly /><small style={{ color: "#64748b" }}>Endre ved å slette/legge inn ny linje</small></td><td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td><td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td><td>{currency(lineCost(l))}</td><td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td></tr>)}</tbody></table></div>
+      {form.type === "egenprodusert" && <div className="soft-box"><h2>Emballasje</h2><div className="form-grid three"><select value={packLine.packagingId} onChange={(e) => setPackLine({ ...packLine, packagingId: e.target.value })}><option value="">Velg emballasje</option>{data.packaging.map((p) => <option key={p.id} value={p.id}>{p.name} · {currency(p.price)}</option>)}</select><input type="number" value={packLine.quantity} onChange={(e) => setPackLine({ ...packLine, quantity: e.target.value })} placeholder="Antall" /><button className="btn" onClick={addPackaging}>Legg til</button></div><table><tbody>{draftPackaging.map((p, i) => { const pack = data.packaging.find((x) => x.id === p.packagingId); return <tr key={i}><td><select value={p.packagingId} onChange={(e) => updateDraftPackaging(i, { packagingId: e.target.value })}>{data.packaging.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td><td><input type="number" value={p.quantity} onChange={(e) => updateDraftPackaging(i, { quantity: Number(e.target.value) || 0 })} /></td><td>{currency((pack?.price || 0) * p.quantity)}</td><td><button className="link danger" onClick={() => setDraftPackaging((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td></tr>; })}</tbody></table></div>}
+    </section>;
   }
 
-  return <section className="grid two"><div className="card"><div className="between"><h2>Produkter</h2><button className="btn active" onClick={startNewProduct}>Nytt produkt</button></div><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Søk produkt" /><div className="chips">{["Alle", ...data.productCategories, "grunnoppskrift", "bakst", "cateringmeny", "pasmuurt", "egenprodusert"].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat)}>{cat}</button>)}</div>{filtered.map((p) => <button key={p.id} className={selectedId === p.id ? "list active-list" : "list"} onClick={() => { setSelectedId(p.id); setMode("view"); }}><b>{p.name}</b><br /><small>{p.type} · {p.category} · {currency(productUnitCost(p))}/{p.yieldUnit}</small></button>)}</div><div className="card">{!selected ? <p>Velg eller opprett et produkt.</p> : <><div className="between"><div><h2>{selected.name}</h2><p>{selected.type} · {selected.category} · gir {num(selected.yieldAmount)} {selected.yieldUnit}{selected.portionsPerWhole ? ` · deles på ${selected.portionsPerWhole}` : ""}</p></div><div><button className="btn" onClick={() => editProduct(selected)}>Rediger</button><button className="btn" onClick={() => printProduct(selected)}>Print</button><button className="btn" onClick={() => { const copy = { ...selected, id: `${selected.id}-copy-${Date.now()}`, name: `${selected.name} - kopi` }; updateData({ products: [copy, ...data.products] }); setSelectedId(copy.id); }}>Kopier</button></div></div><h3>Kalkyle eks. mva</h3><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(productCost(selected))} /><Metric label={`Kost per ${selected.yieldUnit}`} value={currency(productUnitCost(selected))} dark /><Metric label="Anbefalt pris 70% inkl. mva" value={currency(recommendedPriceIncVat(productUnitCost(selected), 70))} dark /><Metric label="Allergener" value={productAllergens(selected).join(", ") || "Ingen"} /></div><div className="metric-row"><Metric label="Valgt pris inkl. mva" value={currency(selected.customerPrice)} dark /><Metric label="Valgt pris eks. mva" value={currency(exVatFromIncVat(selected.customerPrice, data.settings.foodVat))} /><Metric label="Endelig varekost" value={`${num(foodCostPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)), 1)} %`} /><Metric label="Endelig margin" value={`${num(marginPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)), 1)} %`} tone={marginTone(marginPercentFrom(exVatFromIncVat(selected.customerPrice, data.settings.foodVat), productUnitCost(selected)))} /></div><div className="soft-box"><h3>Test annen margin</h3><div className="form-grid three"><label>Margin %<input type="number" value={testMargin} onChange={(e) => setTestMargin(e.target.value)} /></label><Metric label="Testpris inkl. mva" value={currency(recommendedPriceIncVat(productUnitCost(selected), Number(testMargin) || 0))} /><button className="btn active" onClick={() => updateSelected({ customerPrice: recommendedPriceIncVat(productUnitCost(selected), Number(testMargin) || 0), targetMargin: Number(testMargin) || selected.targetMargin })}>Bruk testpris</button></div></div><h3>Produktinnhold</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th></tr></thead><tbody>{selected.lines.map((l, i) => { const m = l.itemType === "material" ? data.materials.find((x) => x.id === l.itemId) : undefined; const r = l.itemType === "recipe" ? data.recipes.find((x) => x.id === l.itemId) : undefined; const p = l.itemType === "product" ? data.products.find((x) => x.id === l.itemId) : undefined; return <tr key={i}><td>{l.itemType}</td><td>{m?.name || r?.name || p?.name}</td><td>{num(l.amount)}</td><td>{l.unit}</td><td>{currency(lineCost(l))}</td></tr>; })}</tbody></table></>}</div></section>;
+  return <section>
+    <div className="card"><div className="between"><h2>Produkter</h2><button className="btn active" onClick={startNewProduct}>Nytt produkt</button></div><input value={search} onChange={(e) => { setSearch(e.target.value); setProductPage(1); }} placeholder="Søk produkt" /><div className="chips">{["Alle", ...data.productCategories, "grunnoppskrift", "bakst", "cateringmeny", "pasmuurt", "egenprodusert"].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setProductPage(1); }}>{cat}</button>)}</div><p style={{ color: "#64748b" }}>Viser {pagedProducts.length} av {filtered.length} produkter. Side {productPage} av {totalProductPages}.</p><table><thead><tr><th>Produktnr</th><th>Produkt</th><th>Type</th><th>Kategori</th><th>Kost/enhet</th><th>Kundepris</th><th>Storkjøkken eks. mva</th><th></th></tr></thead><tbody>{pagedProducts.map((p) => <tr key={p.id}><td>{p.productNumber || "-"}</td><td><b>{p.name}</b><br /><small>{p.yieldAmount} {p.yieldUnit}</small></td><td>{p.type}</td><td>{p.category}</td><td>{currency(productUnitCost(p))}</td><td>{currency(p.customerPrice)}</td><td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td><td><button className="btn" onClick={() => { setSelectedId(p.id); setWideProductId(p.id); }}>Se oppskrift</button><button className="btn" onClick={() => editProduct(p)}>Rediger</button><button className="btn" onClick={() => printProduct(p)}>Print</button></td></tr>)}</tbody></table><div className="pager"><button className="btn" disabled={productPage <= 1} onClick={() => setProductPage(productPage - 1)}>Forrige</button><span>Side {productPage} av {totalProductPages}</span><button className="btn" disabled={productPage >= totalProductPages} onClick={() => setProductPage(productPage + 1)}>Neste</button></div></div>
+
+    {wideProduct && <div className="card wide-product-view"><div className="between"><div><h2>{wideProduct.name}</h2><p>{wideProduct.type} · {wideProduct.category} · gir {num(wideProduct.yieldAmount)} {wideProduct.yieldUnit}</p></div><div><button className="btn" onClick={() => editProduct(wideProduct)}>Rediger</button><button className="btn" onClick={() => printProduct(wideProduct)}>Print</button><button className="btn" onClick={() => setWideProductId(null)}>Lukk</button></div></div><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(productCost(wideProduct))} /><Metric label={`Kost per ${wideProduct.yieldUnit}`} value={currency(productUnitCost(wideProduct))} dark /><Metric label="Anbefalt 70% inkl. 15%" value={currency(priceIncVatFromCost(productUnitCost(wideProduct), 70, 15))} /><Metric label="Anbefalt 70% inkl. 25%" value={currency(priceIncVatFromCost(productUnitCost(wideProduct), 70, 25))} /></div><div className="metric-row"><Metric label="Valgt pris inkl. mva" value={currency(wideProduct.customerPrice)} dark /><Metric label="Storkjøkken eks. mva" value={wideProduct.storkjokkenPriceExVat ? currency(wideProduct.storkjokkenPriceExVat) : "Ikke satt"} /><Metric label="Storkjøkken inkl. 15%" value={wideProduct.storkjokkenPriceExVat ? currency(wideProduct.storkjokkenPriceExVat * 1.15) : "-"} /><Metric label="Allergener" value={productAllergens(wideProduct).join(", ") || "Ingen"} /></div><h3>Produktinnhold</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th></tr></thead><tbody>{wideProduct.lines.map((l, i) => <tr key={i}><td>{l.itemType}</td><td>{lineItemName(l.itemType, l.itemId)}</td><td>{num(l.amount)}</td><td>{l.unit}</td><td>{currency(lineCost(l))}</td></tr>)}</tbody></table></div>}
+
+    <div className="card product-list-card">
+  <h2>Produktlister / prislister</h2>
+
+  <div className="chips">
+    <button
+      className="btn active"
+      onClick={() => {
+        setListMode("bakst");
+        setListName("Produktliste bakst");
+        setShowProductListEditor(true);
+      }}
+    >
+      Lag produktliste: Bakst
+    </button>
+
+    <button
+      className="btn active"
+      onClick={() => {
+        setListMode("catering");
+        setListName("Produktliste catering");
+        setShowProductListEditor(true);
+      }}
+    >
+      Lag produktliste: Catering
+    </button>
+
+    <button
+      className="btn active"
+      onClick={() => {
+        setListMode("storkjokken");
+        setListName("Produktliste storkjøkken");
+        setShowProductListEditor(true);
+      }}
+    >
+      Lag produktliste: Storkjøkken
+    </button>
+  </div>
+
+  {showProductListEditor && (
+    <div className="soft-box">
+      <div className="between">
+        <h3>
+          {listMode === "bakst" && "Produktliste: Bakst"}
+          {listMode === "catering" && "Produktliste: Catering"}
+          {listMode === "storkjokken" && "Produktliste: Storkjøkken"}
+        </h3>
+
+        <button className="btn" onClick={() => setShowProductListEditor(false)}>
+          Lukk
+        </button>
+      </div>
+
+      <div className="form-grid three">
+        <label>
+          Navn på liste
+          <input value={listName} onChange={(e) => setListName(e.target.value)} />
+        </label>
+
+        <button className="btn active" onClick={createProductList}>
+          Lagre liste
+        </button>
+
+        <button className="btn" onClick={() => setListSelectedIds(filtered.map((p) => p.id))}>
+          Velg alle filtrerte produkter
+        </button>
+      </div>
+
+      <label>
+        Fritekst under logo
+        <textarea
+          className="textarea"
+          value={listIntroText}
+          onChange={(e) => setListIntroText(e.target.value)}
+          placeholder="F.eks. gyldig fra dato, bestillingsinfo osv."
+        />
+      </label>
+
+      <div className="product-list-picker">
+        {filtered.map((p) => (
+          <label key={p.id} className="check product-list-check">
+            <input
+              type="checkbox"
+              checked={listSelectedIds.includes(p.id)}
+              onChange={() => toggleListProduct(p.id)}
+            />
+            <span>
+              <b>{p.name}</b>
+              <br />
+              <small>
+                {p.category} · kundepris {currency(p.customerPrice)} · storkjøkken{" "}
+                {p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "ikke satt"}
+              </small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </div>
+  )}
+
+  <h3>Lagrede produktlister</h3>
+
+  {(data.productLists || []).length ? (
+    (data.productLists || []).map((list) => (
+      <div key={list.id} className="editable-row">
+        <div>
+          <b>{list.name}</b>
+          <br />
+          <small>{list.kind} · {list.productIds.length} produkter</small>
+        </div>
+
+        <div>
+          <button className="btn" onClick={() => printProductList(list)}>
+            Print
+          </button>
+
+          <button
+            className="btn danger"
+            onClick={() =>
+              updateData({
+                productLists: (data.productLists || []).filter((x) => x.id !== list.id),
+              })
+            }
+          >
+            Slett
+          </button>
+        </div>
+      </div>
+    ))
+  ) : (
+    <p style={{ color: "#64748b" }}>Ingen produktlister laget ennå.</p>
+  )}
+</div>
 }
+
 
 function formatTimeInput(value: string) {
   const digits = value.replace(/[^0-9]/g, "");
@@ -1838,6 +2074,45 @@ function GlobalStyles() {
     .bar-fill { height: 100%; background: #0f172a; border-radius: 999px; }
     .inventory-breakdown { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 14px; margin-top: 10px; }
     .breakdown-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #f1f5f9; padding: 4px 0; font-size: 13px; }
+   .inline-cell-input {
+  min-width: 90px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.inline-packaging-grid {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: 6px;
+}
+.textarea {
+  width: 100%;
+  min-height: 90px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: white;
+  resize: vertical;
+}
+.product-list-card {
+  margin-top: 18px;
+}
+.product-list-picker {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+.product-list-check {
+  align-items: flex-start;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+  background: white;
+}
+.wide-product-view {
+  margin-top: 18px;
+}
     @media (max-width: 900px) { .grid.two, .form-grid, .form-grid.three, .form-grid.four, .form-grid.five, .metric-row, .small-grid { grid-template-columns: 1fr; } }
   `}</style>;
 }
