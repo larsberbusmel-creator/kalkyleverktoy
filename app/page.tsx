@@ -1326,10 +1326,21 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
         <input value={search} onChange={(e) => { setSearch(e.target.value); setProductPage(1); }} placeholder="Søk produkt" />
 
         <div className="chips">
-          {["Alle", ...data.productCategories]
-            <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setProductPage(1); }}>{cat}</button>
-          ))}
-        </div>
+  {["Alle", ...data.productCategories]
+    .filter((v, i, arr) => arr.indexOf(v) === i)
+    .map((cat) => (
+      <button
+        key={cat}
+        className={categoryFilter === cat ? "btn active" : "btn"}
+        onClick={() => {
+          setCategoryFilter(cat);
+          setProductPage(1);
+        }}
+      >
+        {cat}
+      </button>
+    ))}
+</div>
 
         <p style={{ color: "#64748b" }}>Viser {pagedProducts.length} av {filtered.length} produkter. Side {productPage} av {totalProductPages}.</p>
 
