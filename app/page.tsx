@@ -34,6 +34,8 @@ type Material = {
   addedSugar: number;
   salt: number;
   isWholegrain?: boolean;
+  breadScaleType?: "none" | "sifted" | "wholegrain" | "wholegrain_or_grain" | "wheat_bran" | "rye_bran" | "oat_bran";
+breadScaleFlourPercent?: number;
   updatedAt?: string;
   priceUpdatedAt?: string;
 };
@@ -668,6 +670,8 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
     addedSugar: "0",
     salt: "0",
     isWholegrain: false,
+    breadScaleType: "none" as Material["breadScaleType"],
+breadScaleFlourPercent: "0",
   };
 
   const [form, setForm] = useState(blank);
@@ -715,6 +719,8 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
       addedSugar: String(m.addedSugar || 0),
       salt: String(m.salt || 0),
       isWholegrain: !!m.isWholegrain,
+      breadScaleType: m.breadScaleType || "none",
+breadScaleFlourPercent: String(m.breadScaleFlourPercent || 0),
     });
     setEditingId(m.id);
     setShowForm(true);
@@ -735,6 +741,15 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
       retailPrice: Number(form.retailPrice) || undefined,
       isForResale: form.category === "Deli",
       supplier: form.supplier || "",
+      breadScaleType:
+  form.category === "Mel og frø"
+    ? (form.breadScaleType as Material["breadScaleType"])
+    : "none",
+
+breadScaleFlourPercent:
+  form.category === "Mel og frø"
+    ? Number(form.breadScaleFlourPercent) || 0
+    : 0,
       ingredients: form.ingredients
   .split(",")
   .map((x) => x.trim())
@@ -789,12 +804,42 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
       <label>
   Ingredienser i råvaren
+
   <input
     value={form.ingredients}
     onChange={(e) => setForm({ ...form, ingredients: e.target.value })}
     placeholder="F.eks. fløte, salt / vann, soyabønner, sukker"
   />
 </label>
+{form.category === "Mel og frø" && (
+  <div className="form-grid two">
+    <label>
+      Brødskala-type
+      <select
+        value={form.breadScaleType}
+        onChange={(e) => setForm({ ...form, breadScaleType: e.target.value as Material["breadScaleType"] })}
+      >
+        <option value="none">Ikke med i grovhet</option>
+        <option value="sifted">Siktet mel</option>
+        <option value="wholegrain">Sammalt/grovt mel</option>
+        <option value="wholegrain_or_grain">Hele korn / kornflak</option>
+        <option value="wheat_bran">Hvetekli</option>
+        <option value="rye_bran">Rugkli</option>
+        <option value="oat_bran">Havrekli</option>
+      </select>
+    </label>
+
+    <label>
+      Andel mel/korn/kli i råvaren %
+      <input
+        type="number"
+        value={form.breadScaleFlourPercent}
+        onChange={(e) => setForm({ ...form, breadScaleFlourPercent: e.target.value })}
+        placeholder="100 for mel, 50 for surdeig"
+      />
+    </label>
+  </div>
+)}
 
       <h3>Allergier</h3>
       <div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div>
@@ -1227,24 +1272,105 @@ function productNutrition(product: Product, multiplier = 1, visited: string[] = 
 
   return total;
 }
+type BreadScaleTotals = {
+  totalFlour: number;
+  wholegrainEquivalent: number;
+};
+
+function addBreadScaleMaterial(
+  totals: BreadScaleTotals,
+  material: Material,
+  amount: number,
+  unit?: ProductLine["unit"] | YieldUnit
+) {
+  const type = material.breadScaleType || "none";
+  if (type === "none") return;
+
+  const amountInGrams = unit === "stk" || unit === "porsjoner" ? amount : amount * 1000;
+  const flourPercent = Number(material.breadScaleFlourPercent ?? 100);
+  const flourAmount = amountInGrams * (flourPercent / 100);
+
+  if (flourAmount <= 0) return;
+
+  totals.totalFlour += flourAmount;
+
+  if (type === "wholegrain" || type === "wholegrain_or_grain") {
+    totals.wholegrainEquivalent += flourAmount;
+  }
+
+  if (type === "wheat_bran") {
+    totals.wholegrainEquivalent += flourAmount * 4.5;
+  }
+
+  if (type === "rye_bran") {
+    totals.wholegrainEquivalent += flourAmount * 4;
+  }
+
+  if (type === "oat_bran") {
+    totals.wholegrainEquivalent += flourAmount * 2;
+  }
+}
+
+function recipeBreadScaleTotals(
+  recipe: Recipe,
+  multiplier = 1,
+  totals: BreadScaleTotals = { totalFlour: 0, wholegrainEquivalent: 0 },
+  visited: string[] = []
+) {
+  if (visited.includes(recipe.id)) return totals;
+
+  recipe.lines.forEach((line) => {
+    const amount = Number(line.amount || 0) * multiplier;
+
+    if (line.itemType === "material") {
+      const material = data.materials.find((m) => m.id === line.itemId);
+      if (material) addBreadScaleMaterial(totals, material, amount);
+    }
+
+    if (line.itemType === "recipe") {
+      const subRecipe = data.recipes.find((r) => r.id === line.itemId);
+      if (subRecipe) recipeBreadScaleTotals(subRecipe, amount, totals, [...visited, recipe.id]);
+    }
+  });
+
+  return totals;
+}
+
+function productBreadScaleTotals(
+  product: Product,
+  multiplier = 1,
+  totals: BreadScaleTotals = { totalFlour: 0, wholegrainEquivalent: 0 },
+  visited: string[] = []
+) {
+  if (visited.includes(product.id)) return totals;
+
+  product.lines.forEach((line) => {
+    const amount = Number(line.amount || 0) * multiplier;
+
+    if (line.itemType === "material") {
+      const material = data.materials.find((m) => m.id === line.itemId);
+      if (material) addBreadScaleMaterial(totals, material, amount, line.unit);
+    }
+
+    if (line.itemType === "recipe") {
+      const recipe = data.recipes.find((r) => r.id === line.itemId);
+      if (recipe) recipeBreadScaleTotals(recipe, amount, totals);
+    }
+
+    if (line.itemType === "product") {
+      const subProduct = data.products.find((p) => p.id === line.itemId);
+      if (subProduct) productBreadScaleTotals(subProduct, amount, totals, [...visited, product.id]);
+    }
+  });
+
+  return totals;
+}
+
 function calculateWholegrainPercent(product: Product) {
-  const total = productNutrition(product).totalAmount;
-  if (!total) return 0;
+  const totals = productBreadScaleTotals(product);
+  if (!totals.totalFlour) return 0;
 
-  const wholegrainAmount = product.lines.reduce((sum, line) => {
-    if (line.itemType !== "material") return sum;
-
-    const material = data.materials.find((m) => m.id === line.itemId);
-    if (!material?.isWholegrain) return sum;
-
-    const amount = line.unit === "stk" || line.unit === "porsjoner"
-      ? line.amount
-      : line.amount * 1000;
-
-    return sum + amount;
-  }, 0);
-
-  return (wholegrainAmount / total) * 100;
+  return Math.min(100, (totals.wholegrainEquivalent / totals.totalFlour) * 100);
 }
 function nutritionPer100(product: Product) {
   const total = productNutrition(product);
@@ -1372,7 +1498,7 @@ const showWholegrain = product.category === "Brød" || product.subType === "brø
   const w = window.open("", "_blank");
   if (!w) return;
 
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Næring ${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.label{max-width:520px;border:2px solid #111827;padding:18px}h1{font-size:24px;margin:0 0 10px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}.small{font-size:12px;color:#4b5563;margin-top:12px}@media print{button{display:none}body{padding:0}}</style></head><body><button onclick="window.print()">Print</button><div class="label"><h1>${escapeHtml(product.name)}</h1><p><b>Ingredienser:</b> ${escapeHtml(ingredients)}</p><p><b>Allergener:</b> ${escapeHtml(allergens)}</p>${showWholegrain ? `<p><b>Grovhet:</b> ${num(wholegrainPercent, 0)} %</p>` : ""}<p><b>Næringsinnhold per 100 g/ml</b></p><table><tbody><tr><td>Energi</td><td>${num(n.kj, 0)} kJ / ${num(n.kcal, 0)} kcal</td></tr><tr><td>Fett</td><td>${num(n.fat, 1)} g</td></tr><tr><td>– hvorav mettet fett</td><td>${num(n.saturatedFat, 1)} g</td></tr><tr><td>Karbohydrater</td><td>${num(n.carbs, 1)} g</td></tr><tr><td>– hvorav sukkerarter</td><td>${num(n.sugars, 1)} g</td></tr><tr><td>Kostfiber</td><td>${num(n.fiber, 1)} g</td></tr><tr><td>Protein</td><td>${num(n.protein, 1)} g</td></tr><tr><td>Salt</td><td>${num(n.salt, 2)} g</td></tr></tbody></table><p class="small">Laget med kjærlighet og håndtverk</p></div></body></html>`);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Næring ${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.label{max-width:520px;border:2px solid #111827;padding:18px}h1{font-size:24px;margin:0 0 10px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}.small{font-size:12px;color:#4b5563;margin-top:12px}@media print{button{display:none}body{padding:0}}</style></head><body><button onclick="window.print()">Print</button><div class="label"><h1>${escapeHtml(product.name)}</h1><p><b>Ingredienser:</b> ${escapeHtml(ingredients)}</p><p><b>Allergener:</b> ${escapeHtml(allergens)}</p>${showWholegrain ? `<p><b>Grovhet:</b> ${num(wholegrainPercent, 0)} %</p>` : ""}${showWholegrain ? `<p><b>Grovhet:</b> ${num(wholegrainPercent, 0)} %</p>` : ""}<p><b>Næringsinnhold per 100 g/ml</b></p><table><tbody><tr><td>Energi</td><td>${num(n.kj, 0)} kJ / ${num(n.kcal, 0)} kcal</td></tr><tr><td>Fett</td><td>${num(n.fat, 1)} g</td></tr><tr><td>– hvorav mettet fett</td><td>${num(n.saturatedFat, 1)} g</td></tr><tr><td>Karbohydrater</td><td>${num(n.carbs, 1)} g</td></tr><tr><td>– hvorav sukkerarter</td><td>${num(n.sugars, 1)} g</td></tr><tr><td>Kostfiber</td><td>${num(n.fiber, 1)} g</td></tr><tr><td>Protein</td><td>${num(n.protein, 1)} g</td></tr><tr><td>Salt</td><td>${num(n.salt, 2)} g</td></tr></tbody></table><p class="small">Laget med kjærlighet og håndtverk</p></div></body></html>`);
 
   w.document.close();
   w.focus();
