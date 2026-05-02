@@ -1324,181 +1324,262 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
   }
 
   return (
-    <section>
+  <section>
+    <div className="card">
       <div className="between">
-  <h2>Produkter</h2>
+        <h2>Produkter</h2>
 
-  <div style={{ display: "flex", gap: 8 }}>
-    <button className="btn" onClick={() => setShowProductListEditor(true)}>
-      Lag produktliste
-    </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={() => setShowProductListEditor(true)}>
+            Lag produktliste
+          </button>
 
-    <button className="btn active" onClick={startNewProduct}>
-      Nytt produkt
-    </button>
-  </div>
-</div>
+          <button className="btn active" onClick={startNewProduct}>
+            Nytt produkt
+          </button>
+        </div>
+      </div>
 
-        <input value={search} onChange={(e) => { setSearch(e.target.value); setProductPage(1); }} placeholder="Søk produkt" />
-
-        <div className="chips">
-  {["Alle", ...data.productCategories]
-    .filter((v, i, arr) => arr.indexOf(v) === i)
-    .map((cat) => (
-      <button
-        key={cat}
-        className={categoryFilter === cat ? "btn active" : "btn"}
-        onClick={() => {
-          setCategoryFilter(cat);
+      <input
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value);
           setProductPage(1);
         }}
-      >
-        {cat}
-      </button>
-    ))}
-</div>
+        placeholder="Søk produkt"
+      />
 
-        <p style={{ color: "#64748b" }}>Viser {pagedProducts.length} av {filtered.length} produkter. Side {productPage} av {totalProductPages}.</p>
+      <div className="chips">
+        {["Alle", ...data.productCategories]
+          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .map((cat) => (
+            <button
+              key={cat}
+              className={categoryFilter === cat ? "btn active" : "btn"}
+              onClick={() => {
+                setCategoryFilter(cat);
+                setProductPage(1);
+              }}
+            >
+              {cat}
+            </button>
+          ))}
+      </div>
 
+      <p style={{ color: "#64748b" }}>
+        Viser {pagedProducts.length} av {filtered.length} produkter. Side {productPage} av {totalProductPages}.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Produktnr</th>
+            <th>Produkt</th>
+            <th>Type</th>
+            <th>Kategori</th>
+            <th>Kost/enhet</th>
+            <th>Kundepris</th>
+            <th>Storkjøkken eks. mva</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {pagedProducts.map((p) => (
+            <tr key={p.id}>
+              <td>{p.productNumber || "-"}</td>
+              <td>
+                <b>{p.name}</b>
+                <br />
+                <small>{p.yieldAmount} {p.yieldUnit}</small>
+              </td>
+              <td>{p.type}</td>
+              <td>{p.category}</td>
+              <td>{currency(productUnitCost(p))}</td>
+              <td>{currency(p.customerPrice)}</td>
+              <td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td>
+              <td>
+                <button className="btn" onClick={() => { setSelectedId(p.id); setWideProductId(p.id); }}>Se oppskrift</button>
+                <button className="btn" onClick={() => editProduct(p)}>Rediger</button>
+                <button className="btn" onClick={() => printProduct(p)}>Print</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="pager">
+        <button className="btn" disabled={productPage <= 1} onClick={() => setProductPage(productPage - 1)}>Forrige</button>
+        <span>Side {productPage} av {totalProductPages}</span>
+        <button className="btn" disabled={productPage >= totalProductPages} onClick={() => setProductPage(productPage + 1)}>Neste</button>
+      </div>
+    </div>
+
+    {wideProduct && (
+      <div className="card wide-product-view">
+        <div className="between">
+          <div>
+            <h2>{wideProduct.name}</h2>
+            <p>{wideProduct.type} · {wideProduct.category} · gir {num(wideProduct.yieldAmount)} {wideProduct.yieldUnit}</p>
+          </div>
+          <div>
+            <button className="btn" onClick={() => editProduct(wideProduct)}>Rediger</button>
+            <button className="btn" onClick={() => printProduct(wideProduct)}>Print</button>
+            <button className="btn" onClick={() => setWideProductId(null)}>Lukk</button>
+          </div>
+        </div>
+
+        <div className="metric-row">
+          <Metric label="Total kost eks. mva" value={currency(productCost(wideProduct))} />
+          <Metric label={`Kost per ${wideProduct.yieldUnit}`} value={currency(productUnitCost(wideProduct))} dark />
+          <Metric label="Anbefalt 70% inkl. 15%" value={currency(priceIncVatFromCost(productUnitCost(wideProduct), 70, 15))} />
+          <Metric label="Anbefalt 70% inkl. 25%" value={currency(priceIncVatFromCost(productUnitCost(wideProduct), 70, 25))} />
+        </div>
+
+        <div className="metric-row">
+          <Metric label="Valgt pris inkl. mva" value={currency(wideProduct.customerPrice)} dark />
+          <Metric label="Storkjøkken eks. mva" value={wideProduct.storkjokkenPriceExVat ? currency(wideProduct.storkjokkenPriceExVat) : "Ikke satt"} />
+          <Metric label="Storkjøkken inkl. 15%" value={wideProduct.storkjokkenPriceExVat ? currency(wideProduct.storkjokkenPriceExVat * 1.15) : "-"} />
+          <Metric label="Allergener" value={productAllergens(wideProduct).join(", ") || "Ingen"} />
+        </div>
+
+        <h3>Produktinnhold</h3>
         <table>
-          <thead><tr><th>Produktnr</th><th>Produkt</th><th>Type</th><th>Kategori</th><th>Kost/enhet</th><th>Kundepris</th><th>Storkjøkken eks. mva</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Navn</th>
+              <th>Mengde</th>
+              <th>Enhet</th>
+              <th>Kost</th>
+            </tr>
+          </thead>
           <tbody>
-            {pagedProducts.map((p) => (
-              <tr key={p.id}>
-                <td>{p.productNumber || "-"}</td>
-                <td><b>{p.name}</b><br /><small>{p.yieldAmount} {p.yieldUnit}</small></td>
-                <td>{p.type}</td>
-                <td>{p.category}</td>
-                <td>{currency(productUnitCost(p))}</td>
-                <td>{currency(p.customerPrice)}</td>
-                <td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td>
-                <td>
-                  <button className="btn" onClick={() => { setSelectedId(p.id); setWideProductId(p.id); }}>Se oppskrift</button>
-                  <button className="btn" onClick={() => editProduct(p)}>Rediger</button>
-                  <button className="btn" onClick={() => printProduct(p)}>Print</button>
-                </td>
+            {wideProduct.lines.map((l, i) => (
+              <tr key={i}>
+                <td>{l.itemType}</td>
+                <td>{lineItemName(l.itemType, l.itemId)}</td>
+                <td>{num(l.amount)}</td>
+                <td>{l.unit}</td>
+                <td>{currency(lineCost(l))}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    )}
 
-        <div className="pager">
-          <button className="btn" disabled={productPage <= 1} onClick={() => setProductPage(productPage - 1)}>Forrige</button>
-          <span>Side {productPage} av {totalProductPages}</span>
-          <button className="btn" disabled={productPage >= totalProductPages} onClick={() => setProductPage(productPage + 1)}>Neste</button>
-        </div>
+    <div className="card product-list-card">
+      <h2>Produktlister / prislister</h2>
 
-      {wideProduct && (
-        <div className="card wide-product-view">
+      {showProductListEditor && (
+        <div className="soft-box">
           <div className="between">
-            <div>
-              <h2>{wideProduct.name}</h2>
-              <p>{wideProduct.type} · {wideProduct.category} · gir {num(wideProduct.yieldAmount)} {wideProduct.yieldUnit}</p>
-            </div>
-            <div>
-              <button className="btn" onClick={() => editProduct(wideProduct)}>Rediger</button>
-              <button className="btn" onClick={() => printProduct(wideProduct)}>Print</button>
-              <button className="btn" onClick={() => setWideProductId(null)}>Lukk</button>
-            </div>
+            <h3>
+              {listMode === "bakst" && "Produktliste: Bakst"}
+              {listMode === "catering" && "Produktliste: Catering"}
+              {listMode === "storkjokken" && "Produktliste: Storkjøkken"}
+            </h3>
+            <button className="btn" onClick={() => setShowProductListEditor(false)}>Lukk</button>
           </div>
 
-          <div className="metric-row">
-            <Metric label="Total kost eks. mva" value={currency(productCost(wideProduct))} />
-            <Metric label={`Kost per ${wideProduct.yieldUnit}`} value={currency(productUnitCost(wideProduct))} dark />
-            <Metric label="Anbefalt 70% inkl. 15%" value={currency(priceIncVatFromCost(productUnitCost(wideProduct), 70, 15))} />
-            <Metric label="Anbefalt 70% inkl. 25%" value={currency(priceIncVatFromCost(productUnitCost(wideProduct), 70, 25))} />
+          <div className="form-grid three">
+            <label>
+              Type liste
+              <select
+                value={listMode}
+                onChange={(e) => {
+                  const kind = e.target.value as ProductListKind;
+                  setListMode(kind);
+                  setListName(
+                    kind === "bakst"
+                      ? "Produktliste bakst"
+                      : kind === "catering"
+                        ? "Produktliste catering"
+                        : "Produktliste storkjøkken"
+                  );
+                }}
+              >
+                <option value="bakst">Bakst</option>
+                <option value="catering">Catering</option>
+                <option value="storkjokken">Storkjøkken</option>
+              </select>
+            </label>
+
+            <label>
+              Navn på liste
+              <input value={listName} onChange={(e) => setListName(e.target.value)} />
+            </label>
+
+            <button className="btn active" onClick={createProductList}>Lagre liste</button>
           </div>
 
-          <div className="metric-row">
-            <Metric label="Valgt pris inkl. mva" value={currency(wideProduct.customerPrice)} dark />
-            <Metric label="Storkjøkken eks. mva" value={wideProduct.storkjokkenPriceExVat ? currency(wideProduct.storkjokkenPriceExVat) : "Ikke satt"} />
-            <Metric label="Storkjøkken inkl. 15%" value={wideProduct.storkjokkenPriceExVat ? currency(wideProduct.storkjokkenPriceExVat * 1.15) : "-"} />
-            <Metric label="Allergener" value={productAllergens(wideProduct).join(", ") || "Ingen"} />
-          </div>
+          <button className="btn" onClick={() => setListSelectedIds(filtered.map((p) => p.id))}>
+            Velg alle filtrerte produkter
+          </button>
 
-          <h3>Produktinnhold</h3>
-          <table>
-            <thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th></tr></thead>
-            <tbody>{wideProduct.lines.map((l, i) => <tr key={i}><td>{l.itemType}</td><td>{lineItemName(l.itemType, l.itemId)}</td><td>{num(l.amount)}</td><td>{l.unit}</td><td>{currency(lineCost(l))}</td></tr>)}</tbody>
-          </table>
+          <label>
+            Fritekst under logo
+            <textarea
+              className="textarea"
+              value={listIntroText}
+              onChange={(e) => setListIntroText(e.target.value)}
+              placeholder="F.eks. gyldig fra dato, bestillingsinfo osv."
+            />
+          </label>
+
+          <div className="product-list-picker">
+            {filtered.map((p) => (
+              <label key={p.id} className="check product-list-check">
+                <input
+                  type="checkbox"
+                  checked={listSelectedIds.includes(p.id)}
+                  onChange={() => toggleListProduct(p.id)}
+                />
+                <span>
+                  <b>{p.name}</b>
+                  <br />
+                  <small>
+                    {p.category} · kundepris {currency(p.customerPrice)} · storkjøkken{" "}
+                    {p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "ikke satt"}
+                  </small>
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
       )}
 
-      <div className="card product-list-card">
-        <h2>Produktlister / prislister</h2>
+      <h3>Lagrede produktlister</h3>
 
-  {showProductListEditor && (
-    <label>
-      Type liste
-      <select
-        value={listMode}
-        onChange={(e) => {
-          const kind = e.target.value as ProductListKind;
-          setListMode(kind);
-          setListName(
-            kind === "bakst"
-              ? "Produktliste bakst"
-              : kind === "catering"
-                ? "Produktliste catering"
-                : "Produktliste storkjøkken"
-          );
-        }}
-      >
-        <option value="bakst">Bakst</option>
-        <option value="catering">Catering</option>
-        <option value="storkjokken">Storkjøkken</option>
-      </select>
-    </label>
-  )}
-</div>
-
-        {showProductListEditor && (
-          <div className="soft-box">
-            <div className="between">
-              <h3>{listMode === "bakst" && "Produktliste: Bakst"}{listMode === "catering" && "Produktliste: Catering"}{listMode === "storkjokken" && "Produktliste: Storkjøkken"}</h3>
-              <button className="btn" onClick={() => setShowProductListEditor(false)}>Lukk</button>
+      {(data.productLists || []).length ? (
+        (data.productLists || []).map((list) => (
+          <div key={list.id} className="editable-row">
+            <div>
+              <b>{list.name}</b>
+              <br />
+              <small>{list.kind} · {list.productIds.length} produkter</small>
             </div>
-
-            <div className="form-grid three">
-              <label>Navn på liste<input value={listName} onChange={(e) => setListName(e.target.value)} /></label>
-              <button className="btn active" onClick={createProductList}>Lagre liste</button>
-              <button className="btn" onClick={() => setListSelectedIds(filtered.map((p) => p.id))}>Velg alle filtrerte produkter</button>
-            </div>
-
-            <label>
-              Fritekst under logo
-              <textarea className="textarea" value={listIntroText} onChange={(e) => setListIntroText(e.target.value)} placeholder="F.eks. gyldig fra dato, bestillingsinfo osv." />
-            </label>
-
-            <div className="product-list-picker">
-              {filtered.map((p) => (
-                <label key={p.id} className="check product-list-check">
-                  <input type="checkbox" checked={listSelectedIds.includes(p.id)} onChange={() => toggleListProduct(p.id)} />
-                  <span><b>{p.name}</b><br /><small>{p.category} · kundepris {currency(p.customerPrice)} · storkjøkken {p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "ikke satt"}</small></span>
-                </label>
-              ))}
+            <div>
+              <button className="btn" onClick={() => printProductList(list)}>Print</button>
+              <button
+                className="btn danger"
+                onClick={() =>
+                  updateData({
+                    productLists: (data.productLists || []).filter((x) => x.id !== list.id),
+                  })
+                }
+              >
+                Slett
+              </button>
             </div>
           </div>
-        )}
-
-        <h3>Lagrede produktlister</h3>
-
-        {(data.productLists || []).length ? (
-          (data.productLists || []).map((list) => (
-            <div key={list.id} className="editable-row">
-              <div><b>{list.name}</b><br /><small>{list.kind} · {list.productIds.length} produkter</small></div>
-              <div>
-                <button className="btn" onClick={() => printProductList(list)}>Print</button>
-                <button className="btn danger" onClick={() => updateData({ productLists: (data.productLists || []).filter((x) => x.id !== list.id) })}>Slett</button>
-              </div>
-            </div>
-          ))
-        ) : (
-          <p style={{ color: "#64748b" }}>Ingen produktlister laget ennå.</p>
-        )}
-      </div>
-    </section>
-  );
+        ))
+      ) : (
+        <p style={{ color: "#64748b" }}>Ingen produktlister laget ennå.</p>
+      )}
+    </div>
+  </section>
+);
 }
 
 function formatTimeInput(value: string) {
