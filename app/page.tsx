@@ -377,7 +377,24 @@ export default function Page() {
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
 
-  function updateData(partial: Partial<AppData>) { setData((prev) => ({ ...prev, ...partial })); }
+  function updateData(partial: Partial<AppData>) {
+  setData((prev) => {
+    const next = { ...prev, ...partial };
+
+    supabase
+      .from("app_data")
+      .upsert({
+        id: "main",
+        data: next,
+        updated_at: new Date().toISOString(),
+      })
+      .then(({ error }) => {
+        if (error) console.error("Supabase save error:", error);
+      });
+
+    return next;
+  });
+}
 
   function exportData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
