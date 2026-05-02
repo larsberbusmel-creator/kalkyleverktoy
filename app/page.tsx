@@ -1325,11 +1325,19 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
 
   return (
     <section>
-      <div className="card">
-        <div className="between">
-          <h2>Produkter</h2>
-          <button className="btn active" onClick={startNewProduct}>Nytt produkt</button>
-        </div>
+      <div className="between">
+  <h2>Produkter</h2>
+
+  <div style={{ display: "flex", gap: 8 }}>
+    <button className="btn" onClick={() => setShowProductListEditor(true)}>
+      Lag produktliste
+    </button>
+
+    <button className="btn active" onClick={startNewProduct}>
+      Nytt produkt
+    </button>
+  </div>
+</div>
 
         <input value={search} onChange={(e) => { setSearch(e.target.value); setProductPage(1); }} placeholder="Søk produkt" />
 
@@ -1419,11 +1427,6 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
 
       <div className="card product-list-card">
         <h2>Produktlister / prislister</h2>
-
-        <div className="form-grid three">
-  <button className="btn active" onClick={() => setShowProductListEditor(true)}>
-    Lag produktliste
-  </button>
 
   {showProductListEditor && (
     <label>
