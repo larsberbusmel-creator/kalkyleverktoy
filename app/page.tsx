@@ -797,7 +797,15 @@ function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Par
         const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
         const deliMargin = m.category === "Deli" ? marginPercentFrom(retailExVat, m.pricePerUnit) : 0;
         return <tr key={m.id}>
-          <td><input className="inline-cell-input" value={m.name} onChange={(e) => updateMaterialInline(m.id, { name: e.target.value })} />{m.isForResale && <small style={{ color: "#64748b" }}>Videresalg</small>}</td>
+          <td>
+  <b>{m.name}</b>
+  {m.isForResale && (
+    <>
+      <br />
+      <small style={{ color: "#64748b" }}>Videresalg</small>
+    </>
+  )}
+</td>
           <td><input className="inline-cell-input" value={m.supplier || ""} onChange={(e) => updateMaterialInline(m.id, { supplier: e.target.value })} placeholder="Leverandør" /></td>
           <td><select className="inline-cell-input" value={m.category} onChange={(e) => updateMaterialInline(m.id, { category: e.target.value, isForResale: e.target.value === "Deli" })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select></td>
           <td><div className="inline-packaging-grid"><input className="inline-cell-input" type="number" value={m.packageSize} onChange={(e) => { const packageSize = Number(e.target.value) || 1; updateMaterialInline(m.id, { packageSize, packagePrice: m.pricePerUnit * packageSize }, true); }} /><select className="inline-cell-input" value={m.unit} onChange={(e) => updateMaterialInline(m.id, { unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select></div></td>
