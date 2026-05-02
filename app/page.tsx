@@ -368,12 +368,38 @@ export default function Page() {
   const [data, setData] = useState<AppData>(initialData);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try { setData(migrateData(JSON.parse(saved))); } catch { setData(initialData); }
+  async function loadData() {
+    const { data: row, error } = await supabase
+      .from("app_data")
+      .select("data")
+      .eq("id", "main")
+      .single();
+
+    if (error) {
+      console.error("Supabase load error:", error);
+
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          setData(migrateData(JSON.parse(saved)));
+        } catch {
+          setData(initialData);
+        }
+      }
+
+      setIsLoaded(true);
+      return;
     }
+
+    if (row?.data) {
+      setData(migrateData(row.data));
+    }
+
     setIsLoaded(true);
-  }, []);
+  }
+
+  loadData();
+}, []);
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
 
