@@ -2563,20 +2563,32 @@ th{background:#f3f4f6}
 
           <h3>Produkter i ordre</h3>
           {form.orderLines.map((line, i) => {
-            const product = data.products.find((p) => p.id === line.productId);
-            return (
-              <div key={i} className="pill">
-                {line.quantity} × {product?.name}
-                <button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>✕</button>
-                <button
-  className="btn"
-  onClick={() => printProductPopup(product)}
->
-  Se oppskrift
-</button>
-              </div>
-            );
-          })}
+  const product = data.products.find((p) => p.id === line.productId);
+
+  return (
+    <div key={i} className="pill">
+      {line.quantity} × {product?.name}
+
+      <button
+        style={{ marginLeft: 8 }}
+        className="link danger"
+        onClick={() => removeOrderLine(i)}
+      >
+        ×
+      </button>
+
+      {product && (
+        <button
+          className="btn"
+          style={{ marginLeft: 8 }}
+          onClick={() => printProductPopup(product)}
+        >
+          Se oppskrift
+        </button>
+      )}
+    </div>
+  );
+})}
 
           <h3>Dietter / hensyn</h3>
           <div className="form-grid four">
