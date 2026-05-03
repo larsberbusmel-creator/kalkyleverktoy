@@ -1147,8 +1147,19 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
 function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
   const [selectedId, setSelectedId] = useState(data.products[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
-  const [form, setForm] = useState({ productNumber: getNextProductNumber(), name: "", type: "bakst" as ProductType, subType: "" as ProductSubType, category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk" as YieldUnit, portionsPerWhole: "", customerPrice: "0", storkjokkenPriceExVat: "", targetMargin: "70" });
-  const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
+const [form, setForm] = useState({
+  productNumber: getNextProductNumber("Søtbakst"),
+  name: "",
+  type: "bakst" as ProductType,
+  subType: "" as ProductSubType,
+  category: "Søtbakst",
+  yieldAmount: "1",
+  yieldUnit: "stk" as YieldUnit,
+  portionsPerWhole: "",
+  customerPrice: "0",
+  storkjokkenPriceExVat: "",
+  targetMargin: "70",
+});  const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
   const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
   const [line, setLine] = useState({ itemType: "material" as ProductLine["itemType"], itemId: "", amount: "0", unit: "kg" as ProductLine["unit"] });
   const [lineSearch, setLineSearch] = useState("");
@@ -1229,7 +1240,19 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
       ...draftProduct,
       id: mode === "edit" && selected ? selected.id : `${idFromName(form.name)}-${Date.now()}`,
       name: form.name.trim(),
+      
     };
+const exists =
+  product.productNumber?.trim() &&
+  data.products.some(
+    (x) =>
+      x.productNumber === product.productNumber &&
+      x.id !== product.id
+  );
+
+if (exists) {
+  return alert("Produktnummer finnes allerede!");
+}
 
     updateData({
       products: mode === "edit"
@@ -1243,8 +1266,7 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
 
   function editProduct(p: Product) {
     setForm({
-      productNumber: getNextProductNumber(),
-      name: p.name,
+productNumber: p.productNumber || "",      name: p.name,
       type: p.type,
       subType: p.subType || "",
       category: p.category,
@@ -1260,22 +1282,40 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
     setSelectedId(p.id);
     setMode("edit");
   }
-  function getNextProductNumber() {
+
+  function categoryPrefix(category: string) {
+  const map: Record<string, string> = {
+    "Brød": "BR",
+    "Søtbakst": "BA",
+    "Cateringmeny": "CA",
+    "Påsmurt": "PA",
+    "Egenprodusert": "EG",
+    "Grunnoppskrift": "GR",
+  };
+
+  return map[category] || "PR"; // fallback
+}
+
+  function getNextProductNumber(category: string) {
+  const prefix = categoryPrefix(category);
+
   const numbers = data.products
-    .map((p) => Number(p.productNumber))
+    .filter((p) => p.productNumber?.startsWith(prefix))
+    .map((p) => p.productNumber.replace(prefix, ""))
+    .map((n) => Number(n))
     .filter((n) => !isNaN(n));
 
   const next = numbers.length ? Math.max(...numbers) + 1 : 1;
 
   const LENGTH = 6;
 
-  return String(next).padStart(LENGTH, "0");
+  return prefix + String(next).padStart(LENGTH, "0");
 }
 function copyProduct(p: Product) {
   const copy: Product = {
     ...p,
     id: `${p.id}-copy-${Date.now()}`,
-    productNumber: "",
+    productNumber: getNextProductNumber(p.category),
     name: `${p.name} kopi`,
     lines: p.lines.map((l) => ({ ...l })),
     packaging: p.packaging.map((x) => ({ ...x })),
