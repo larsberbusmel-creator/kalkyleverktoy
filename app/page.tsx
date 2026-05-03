@@ -1147,7 +1147,7 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
 function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
   const [selectedId, setSelectedId] = useState(data.products[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
-  const [form, setForm] = useState({ productNumber: "", name: "", type: "bakst" as ProductType, subType: "" as ProductSubType, category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk" as YieldUnit, portionsPerWhole: "", customerPrice: "0", storkjokkenPriceExVat: "", targetMargin: "70" });
+  const [form, setForm] = useState({ productNumber: getNextProductNumber(), name: "", type: "bakst" as ProductType, subType: "" as ProductSubType, category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk" as YieldUnit, portionsPerWhole: "", customerPrice: "0", storkjokkenPriceExVat: "", targetMargin: "70" });
   const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
   const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
   const [line, setLine] = useState({ itemType: "material" as ProductLine["itemType"], itemId: "", amount: "0", unit: "kg" as ProductLine["unit"] });
@@ -1243,7 +1243,7 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
 
   function editProduct(p: Product) {
     setForm({
-      productNumber: p.productNumber || "",
+      productNumber: getNextProductNumber(),
       name: p.name,
       type: p.type,
       subType: p.subType || "",
@@ -1260,6 +1260,17 @@ function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUni
     setSelectedId(p.id);
     setMode("edit");
   }
+  function getNextProductNumber() {
+  const numbers = data.products
+    .map((p) => Number(p.productNumber))
+    .filter((n) => !isNaN(n));
+
+  const next = numbers.length ? Math.max(...numbers) + 1 : 1;
+
+  const LENGTH = 6;
+
+  return String(next).padStart(LENGTH, "0");
+}
 function copyProduct(p: Product) {
   const copy: Product = {
     ...p,
@@ -1803,6 +1814,46 @@ function printProductLabel(product: Product) {
     w.document.close();
     w.focus();
   }
+  function printProductPopup(product: Product) {
+  const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+  const ingredients = productIngredients(product).join(", ") || "-";
+
+  const rows = product.lines.map((line) => {
+    const name = lineItemName(line.itemType, line.itemId) || "Ukjent";
+    return `<tr><td>${escapeHtml(line.itemType)}</td><td>${escapeHtml(name)}</td><td>${num(line.amount, 3)} ${line.unit}</td><td>${currency(lineCost(line))}</td></tr>`;
+  }).join("");
+
+  const w = window.open("", "_blank");
+  if (!w) return;
+
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>
+body{font-family:Arial,sans-serif;color:#111827;padding:32px}
+.card{max-width:720px;border:2px solid #111827;padding:20px}
+.logo{height:70px;width:auto;object-fit:contain;margin-bottom:10px}
+h1{margin:0 0 10px;font-size:26px}
+table{width:100%;border-collapse:collapse;margin-top:14px}
+td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}
+th{background:#f3f4f6}
+@media print{button{display:none}body{padding:0}}
+</style></head><body>
+<button onclick="window.print()">Print</button>
+<div class="card">
+<img src="/logo.png" class="logo" />
+<h1>${escapeHtml(product.name)}</h1>
+<p><b>Kategori:</b> ${escapeHtml(product.category)}</p>
+<p><b>Ingredienser:</b> ${escapeHtml(ingredients)}</p>
+<p><b>Allergener:</b> ${escapeHtml(allergens)}</p>
+<h3>Oppskrift / innhold</h3>
+<table>
+<thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead>
+<tbody>${rows}</tbody>
+</table>
+</div>
+</body></html>`);
+
+  w.document.close();
+  w.focus();
+}
 
   const activeCost = activeProduct ? productCost(activeProduct) : 0;
   const activeUnitCost = activeProduct ? productUnitCost(activeProduct) : 0;
@@ -2020,7 +2071,7 @@ function printProductLabel(product: Product) {
               <td>{currency(p.customerPrice)}</td>
               <td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td>
               <td>
-                <button className="btn" onClick={() => { setSelectedId(p.id); setWideProductId(p.id); }}>
+                <button className="btn" onClick={() => printProductPopup(p)}>
   Se oppskrift
 </button>
 <button className="btn" onClick={() => printNutritionLabel(p)}>
@@ -2517,6 +2568,12 @@ th{background:#f3f4f6}
               <div key={i} className="pill">
                 {line.quantity} × {product?.name}
                 <button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>✕</button>
+                <button
+  className="btn"
+  onClick={() => printProductPopup(product)}
+>
+  Se oppskrift
+</button>
               </div>
             );
           })}
