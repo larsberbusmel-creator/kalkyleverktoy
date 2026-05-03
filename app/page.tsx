@@ -1916,8 +1916,26 @@ th{background:#f3f4f6}
           <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
           <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Produktnavn" /></label>
           <label>Type<select value={form.type} onChange={(e) => blankFor(e.target.value as ProductType)}><option value="grunnoppskrift">Grunnoppskrift</option><option value="bakst">Bakst</option><option value="cateringmeny">Cateringmeny</option><option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option></select></label>
-          <label>Kategori<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.productCategories.map((c) => <option key={c}>{c}</option>)}</select></label>
 <label>
+  Kategori
+  <select
+    value={form.category}
+    onChange={(e) => {
+      const category = e.target.value;
+      setForm({
+        ...form,
+        category,
+        productNumber: mode === "new"
+          ? getNextProductNumber(category)
+          : form.productNumber,
+      });
+    }}
+  >
+    {data.productCategories.map((c) => (
+      <option key={c}>{c}</option>
+    ))}
+  </select>
+</label><label>
   Produktstørrelse
   <input
     type="number"
