@@ -494,10 +494,14 @@ export default function Page() {
         return sum + amount * m.pricePerUnit;
       }
       if (line.itemType === "recipe") {
-        const r = data.recipes.find((x) => x.id === line.itemId);
-        if (!r) return sum;
-        return sum + recipeUnitCost(r) * line.amount;
-      }
+  const r = data.recipes.find((x) => x.id === line.itemId);
+  if (!r) return sum;
+
+  const productSize = Number(product.yieldAmount || 1);
+  const factor = Number(line.amount || 1);
+
+  return sum + recipeUnitCost(r) * productSize * factor;
+}
       const p = data.products.find((x) => x.id === line.itemId);
       if (!p) return sum;
       return sum + productUnitCost(p, [...visited, product.id]) * line.amount;
@@ -512,8 +516,8 @@ export default function Page() {
   }
 
   function productUnitCost(product: Product, visited: string[] = []) {
-    return productCost(product, visited) / Math.max(product.yieldAmount || 1, 1);
-  }
+  return productCost(product, visited);
+}
 
   function productAllergens(product: Product, visited: string[] = []): string[] {
     if (visited.includes(product.id)) return [];
@@ -1191,8 +1195,7 @@ const [form, setForm] = useState({
 
   const draftProduct: Product = {
     id: selected?.id || "draft",
-    productNumber: form.productNumber,
-    name: form.name || "Nytt produkt",
+productNumber: form.productNumber || getNextProductNumber(form.category),    name: form.name || "Nytt produkt",
     type: form.type,
     subType: form.subType,
     category: form.category,
@@ -1216,8 +1219,19 @@ const [form, setForm] = useState({
 
   function startNewProduct() {
     setMode("new");
-    setForm({ productNumber: "", name: "", type: "bakst", subType: "", category: "Søtbakst", yieldAmount: "1", yieldUnit: "stk", portionsPerWhole: "", customerPrice: "0", storkjokkenPriceExVat: "", targetMargin: "70" });
-    setDraftLines([]);
+setForm({
+  productNumber: getNextProductNumber("Søtbakst"),
+  name: "",
+  type: "bakst",
+  subType: "",
+  category: "Søtbakst",
+  yieldAmount: "1",
+  yieldUnit: "stk",
+  portionsPerWhole: "",
+  customerPrice: "0",
+  storkjokkenPriceExVat: "",
+  targetMargin: "70",
+});    setDraftLines([]);
     setDraftPackaging([]);
     setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg" });
     setLineSearch("");
@@ -1231,8 +1245,13 @@ const [form, setForm] = useState({
       pasmuurt: { category: "Påsmurt", yieldUnit: "stk" },
       egenprodusert: { category: "Egenprodusert", yieldUnit: "stk" },
     };
-    setForm((f) => ({ ...f, type, subType: "", ...(map[type] as any) }));
-  }
+setForm((f) => {
+  const next = { ...f, type, subType: "", ...(map[type] as any) };
+  return {
+    ...next,
+    productNumber: mode === "new" ? getNextProductNumber(next.category || f.category) : f.productNumber,
+  };
+});  }
 
   function saveProduct() {
     if (!form.name.trim()) return alert("Legg inn produktnavn.");
@@ -1325,8 +1344,7 @@ function copyProduct(p: Product) {
   updateData({ products: [copy, ...data.products] });
 
   setForm({
-    productNumber: "",
-    name: copy.name,
+productNumber: copy.productNumber,    name: copy.name,
     type: copy.type,
     subType: copy.subType || "",
     category: copy.category,
@@ -1931,7 +1949,7 @@ th{background:#f3f4f6}
       });
     }}
   >
-    
+
     {data.productCategories.map((c) => (
       <option key={c}>{c}</option>
     ))}
