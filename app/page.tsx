@@ -68,6 +68,7 @@ type ProductLine = {
   itemId: string;
   amount: number;
   unit: "kg" | "liter" | "stk" | "porsjoner";
+  wastePercent?: number;
 };
 
 type ProductPackagingLine = {
@@ -90,6 +91,8 @@ type Product = {
   targetMargin: number;
   lines: ProductLine[];
   packaging: ProductPackagingLine[];
+   recipeYieldAmount?: number;
+  unitWeightKg?: number;     
 };
 
 
@@ -484,39 +487,56 @@ export default function Page() {
     })));
   }
 
-  function productCost(product: Product, visited: string[] = []): number {
-    if (visited.includes(product.id)) return 0;
-    const lineCost = product.lines.reduce((sum, line) => {
-      if (line.itemType === "material") {
-        const m = data.materials.find((x) => x.id === line.itemId);
-        if (!m) return sum;
-        const amount = line.unit === "kg" || line.unit === "liter" || line.unit === "stk" ? line.amount : line.amount;
-        return sum + amount * m.pricePerUnit;
-      }
-      if (line.itemType === "recipe") {
-  const r = data.recipes.find((x) => x.id === line.itemId);
-  if (!r) return sum;
+  function productKgCost(product: Product, visited: string[] = []): number {
+  if (visited.includes(product.id)) return 0;
 
-  const productSize = Number(product.yieldAmount || 1);
-  const factor = Number(line.amount || 1);
+  const lineCost = product.lines.reduce((sum, line) => {
 
-  return sum + recipeUnitCost(r) * productSize * factor;
+       const amount = Number(line.amount || 0);
+const waste = Math.min(Number(line.wastePercent || 0), 95) / 100;
+const adjustedAmount = waste > 0 ? amount / (1 - waste) : amount;
+    
+if (line.itemType === "material") {
+      const m = data.materials.find((x) => x.id === line.itemId);
+      if (!m) return sum;
+
+      return sum + adjustedAmount * (m.pricePerUnit || 0);
+    }
+
+    if (line.itemType === "recipe") {
+      const r = data.recipes.find((x) => x.id === line.itemId);
+      if (!r) return sum;
+
+      return sum + recipeUnitCost(r) * adjustedAmount;
+    }
+
+    const p = data.products.find((x) => x.id === line.itemId);
+    if (!p) return sum;
+
+return sum + productKgCost(p, [...visited, product.id]) * adjustedAmount;
+  }, 0);
+
+  const packagingCost = product.packaging.reduce((sum, p) => {
+    const pack = data.packaging.find((x) => x.id === p.packagingId);
+    return sum + (pack?.price || 0) * Number(p.quantity || 0);
+  }, 0);
+
+  const totalCost = lineCost + packagingCost;
+
+  const totalWeight = Number(product.recipeYieldAmount || 1);
+
+  return totalWeight > 0 ? totalCost / totalWeight : totalCost;
 }
-      const p = data.products.find((x) => x.id === line.itemId);
-      if (!p) return sum;
-      return sum + productUnitCost(p, [...visited, product.id]) * line.amount;
-    }, 0);
 
-    const packagingCost = product.packaging.reduce((sum, p) => {
-      const pack = data.packaging.find((x) => x.id === p.packagingId);
-      return sum + (pack?.price || 0) * p.quantity;
-    }, 0);
+function productUnitCost(product: Product, visited: string[] = []) {
+  const kgPrice = productKgCost(product, visited);
+  const unitWeight = Number(product.unitWeightKg || 1);
 
-    return lineCost + packagingCost;
-  }
+  return kgPrice * unitWeight;
+}
 
-  function productUnitCost(product: Product, visited: string[] = []) {
-  return productCost(product, visited);
+function productCost(product: Product, visited: string[] = []) {
+  return productUnitCost(product, visited);
 }
 
   function productAllergens(product: Product, visited: string[] = []): string[] {
@@ -974,13 +994,24 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
     return l.amount * (r ? recipeUnitCost(r) : 0);
   }
 
-  function addLine() {
-    if (!line.itemId) return;
-    if (line.itemType === "recipe" && line.itemId === selected?.id) return alert("En grunnoppskrift kan ikke inneholde seg selv.");
-    setDraftLines((prev) => [...prev, { itemType: line.itemType, itemId: line.itemId, amount: Number(line.amount) || 0 }]);
-    setLine({ itemType: "material", itemId: "", amount: "0" });
-    setLineSearch("");
+function addLine() {
+  if (!line.itemId) return;
+  if (line.itemType === "recipe" && line.itemId === selected?.id) {
+    return alert("En grunnoppskrift kan ikke inneholde seg selv.");
   }
+
+  setDraftLines((prev) => [
+    ...prev,
+    {
+      itemType: line.itemType,
+      itemId: line.itemId,
+      amount: Number(line.amount) || 0,
+    },
+  ]);
+
+  setLine({ itemType: "material", itemId: "", amount: "0" });
+  setLineSearch("");
+}
 
   function updateDraftLine(index: number, partial: Partial<RecipeLine>) {
     setDraftLines((prev) => prev.map((l, i) => i === index ? { ...l, ...partial } : l));
@@ -1159,14 +1190,28 @@ const [form, setForm] = useState({
   category: "Søtbakst",
   yieldAmount: "1",
   yieldUnit: "stk" as YieldUnit,
+  recipeYieldAmount: "1",
+unitWeightKg: "1",
   portionsPerWhole: "",
   customerPrice: "0",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
 });  const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
   const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
-  const [line, setLine] = useState({ itemType: "material" as ProductLine["itemType"], itemId: "", amount: "0", unit: "kg" as ProductLine["unit"] });
-  const [lineSearch, setLineSearch] = useState("");
+const [line, setLine] = useState<{
+  itemType: ProductLine["itemType"];
+  itemId: string;
+  amount: string;
+  unit: ProductLine["unit"];
+  wastePercent: string;
+}>({
+  itemType: "material",
+  itemId: "",
+  amount: "0",
+  unit: "kg",
+  wastePercent: "",
+});
+const [lineSearch, setLineSearch] = useState("");
   const [packLine, setPackLine] = useState({ packagingId: "", quantity: "1" });
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Alle");
@@ -1207,6 +1252,8 @@ productNumber: form.productNumber || getNextProductNumber(form.category),    nam
     targetMargin: Number(form.targetMargin) || 70,
     lines: draftLines,
     packaging: draftPackaging,
+    recipeYieldAmount: Number(form.recipeYieldAmount) || 1,
+unitWeightKg: Number(form.unitWeightKg) || 0,
   };
 
   const activeProduct = mode === "view" ? selected : draftProduct;
@@ -1227,13 +1274,15 @@ setForm({
   category: "Søtbakst",
   yieldAmount: "1",
   yieldUnit: "stk",
+  recipeYieldAmount: "1",
+unitWeightKg: "1",
   portionsPerWhole: "",
   customerPrice: "0",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
 });    setDraftLines([]);
     setDraftPackaging([]);
-    setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg" });
+    setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg", wastePercent: "" });
     setLineSearch("");
   }
 
@@ -1291,6 +1340,8 @@ productNumber: p.productNumber || "",      name: p.name,
       category: p.category,
       yieldAmount: String(p.yieldAmount),
       yieldUnit: p.yieldUnit,
+      recipeYieldAmount: String(p.recipeYieldAmount || 1),
+unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
       portionsPerWhole: String(p.portionsPerWhole || ""),
       customerPrice: String(p.customerPrice || 0),
       storkjokkenPriceExVat: String(p.storkjokkenPriceExVat || ""),
@@ -1350,6 +1401,8 @@ productNumber: copy.productNumber,    name: copy.name,
     category: copy.category,
     yieldAmount: String(copy.yieldAmount),
     yieldUnit: copy.yieldUnit,
+    recipeYieldAmount: "1",
+unitWeightKg: "1",
     portionsPerWhole: String(copy.portionsPerWhole || ""),
     customerPrice: String(copy.customerPrice || 0),
     storkjokkenPriceExVat: String(copy.storkjokkenPriceExVat || ""),
@@ -1371,20 +1424,33 @@ productNumber: copy.productNumber,    name: copy.name,
     setDraftPackaging((prev) => prev.map((p, i) => i === index ? { ...p, ...partial } : p));
   }
 
-  function addLine() {
-    if (!line.itemId) return;
-    if (line.itemType === "product" && line.itemId === selected?.id) return alert("Et produkt kan ikke inneholde seg selv.");
+function addLine() {
+  if (!line.itemId) return;
+  if (line.itemType === "product" && line.itemId === selected?.id) {
+    return alert("Et produkt kan ikke inneholde seg selv.");
+  }
 
-    setDraftLines((prev) => [...prev, {
+  setDraftLines((prev) => [
+    ...prev,
+    {
       itemType: line.itemType,
       itemId: line.itemId,
       amount: Number(line.amount) || 0,
       unit: line.unit,
-    }]);
+      wastePercent: Number(line.wastePercent || 0),
+    },
+  ]);
 
-    setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg" });
-    setLineSearch("");
-  }
+  setLine({
+    itemType: "material",
+    itemId: "",
+    amount: "0",
+    unit: "kg",
+    wastePercent: "0",
+  });
+
+  setLineSearch("");
+}
 
   function addPackaging() {
     if (!packLine.packagingId) return;
@@ -1963,7 +2029,28 @@ th{background:#f3f4f6}
     onChange={(e) => setForm({ ...form, yieldAmount: e.target.value })}
     placeholder="F.eks. 0.08 for rundstykke / 0.6 for brød"
   />
-</label>          <label>Enhet<select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="stk">stk</option><option value="porsjoner">porsjoner</option><option value="kg">kg</option><option value="liter">liter</option></select></label>
+</label>  
+<label>
+  Total oppskriftsvekt (kg)
+  <input
+    type="number"
+    value={form.recipeYieldAmount}
+    onChange={(e) => setForm({ ...form, recipeYieldAmount: e.target.value })}
+    placeholder="F.eks. 12"
+  />
+</label>
+
+<label>
+  Vekt per stk (kg)
+  <input
+    type="number"
+    className="highlight-input"
+    value={form.unitWeightKg}
+    onChange={(e) => setForm({ ...form, unitWeightKg: e.target.value })}
+    placeholder="F.eks. 0.45"
+  />
+</label>
+        <label>Enhet<select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="stk">stk</option><option value="porsjoner">porsjoner</option><option value="kg">kg</option><option value="liter">liter</option></select></label>
           {form.type === "pasmuurt" && <label>Deles på antall porsjoner<input type="number" value={form.portionsPerWhole} onChange={(e) => setForm({ ...form, portionsPerWhole: e.target.value })} placeholder="f.eks. 12" /></label>}
           <label>Valgt kundepris inkl. mva<input type="number" value={form.customerPrice} onChange={(e) => setForm({ ...form, customerPrice: e.target.value })} /></label>
           <label>Storkjøkkenpris eks. mva<input type="number" value={form.storkjokkenPriceExVat} onChange={(e) => setForm({ ...form, storkjokkenPriceExVat: e.target.value })} placeholder="Valgfritt" /></label>
@@ -2008,6 +2095,12 @@ th{background:#f3f4f6}
             </div>
 
             <input type="number" value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" />
+            <input
+  type="number"
+  value={line.wastePercent}
+  onChange={(e) => setLine({ ...line, wastePercent: e.target.value })}
+  placeholder="Svinn %"
+/>
             <select value={line.unit} onChange={(e) => setLine({ ...line, unit: e.target.value as ProductLine["unit"] })}>
               <option value="kg">kg</option>
               <option value="liter">liter</option>
@@ -2031,6 +2124,16 @@ th{background:#f3f4f6}
                   </td>
                   <td><input value={lineItemName(l.itemType, l.itemId)} readOnly /><small style={{ color: "#64748b" }}>Endre ved å slette/legge inn ny linje</small></td>
                   <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
+                  <td>
+  <input
+    type="number"
+    value={(l as any).wastePercent || ""}
+    onChange={(e) =>
+      updateDraftLine(i, { wastePercent: Number(e.target.value) || 0 })
+    }
+    placeholder="%"
+  />
+</td>
                   <td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
                   <td>{currency(lineCost(l))}</td>
                   <td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td>
