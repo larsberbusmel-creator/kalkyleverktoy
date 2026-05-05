@@ -2111,7 +2111,17 @@ th{background:#f3f4f6}
           </div>
 
           <table>
-            <thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Enhet</th><th>Kost</th><th></th></tr></thead>
+            <thead>
+  <tr>
+    <th>Type</th>
+    <th>Navn</th>
+    <th>Mengde</th>
+    <th>Svinn %</th>
+    <th>Enhet</th>
+    <th>Kost</th>
+    <th></th>
+  </tr>
+</thead>
             <tbody>
               {draftLines.map((l, i) => (
                 <tr key={i}>
