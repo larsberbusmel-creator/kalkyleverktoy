@@ -3329,6 +3329,18 @@ function addDays(date: string, days: number) {
 <style>
 @page { size: A4; margin: 12mm; }
 body { font-family: Arial, sans-serif; color: #111827; padding: 24px; line-height: 1.35; }
+.print-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.print-logo {
+  max-width: 220px;
+  max-height: 90px;
+  object-fit: contain;
+}
 .logo { height: 90px; width: auto; object-fit: contain; margin-bottom: 8px; }
 .page { break-after: page; border: 2px solid #111827; border-radius: 14px; padding: 18px; margin-bottom: 18px; }
 .page:last-child { break-after: auto; }
@@ -3578,6 +3590,12 @@ const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
   }).join("");
 
   const body = `
+  
+const body = `
+<div class="print-header">
+  <img src="/logo.png" class="print-logo" />
+</div>
+
 <div class="page">
   <div class="top">
     <div>
