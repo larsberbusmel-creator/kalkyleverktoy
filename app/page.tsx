@@ -170,6 +170,46 @@ type ProductList = {
   createdAt: string;
 };
 
+type ProductionCategory = "smabakst" | "brod" | "spesialbrod" | "pasmuurt";
+
+type BakeryProductionTemplateLine = {
+  id: string;
+  category: ProductionCategory;
+  productId: string;
+  sortOrder: number;
+};
+
+type StorkjokkenCustomer = {
+  id: string;
+  name: string;
+  orgNumber?: string;
+  address?: string;
+  deliveryAddress?: string;
+  phone?: string;
+  active?: boolean;
+};
+
+type StorkjokkenSpecialPrice = {
+  customerId: string;
+  productId: string;
+  priceExVat: number;
+};
+
+type RecurringStorkjokkenOrder = {
+  id: string;
+  customerId: string;
+  weekdays: number[]; // 1=mandag, 2=tirsdag osv
+  lines: OrderLine[];
+  active: boolean;
+  note?: string;
+};
+
+type BakeryProductionDay = {
+  date: string;
+  approved?: boolean;
+  quantities: Record<string, Record<string, number>>;
+};
+
 type AppData = {
   materials: Material[];
   recipes: Recipe[];
@@ -185,6 +225,12 @@ type AppData = {
   productCategories: string[];
   materialCategories: string[];
   inventoryCounts?: Record<string, InventoryMonthData>;
+
+  bakeryProductionTemplateLines: BakeryProductionTemplateLine[];
+  storkjokkenCustomers: StorkjokkenCustomer[];
+  storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
+  recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
+  bakeryProductionDays: Record<string, BakeryProductionDay>;
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
@@ -322,6 +368,12 @@ const initialData: AppData = {
   productCategories: defaultProductCategories,
   materialCategories: defaultMaterialCategories,
   inventoryCounts: {},
+
+  bakeryProductionTemplateLines: [],
+  storkjokkenCustomers: [],
+  storkjokkenSpecialPrices: [],
+  recurringStorkjokkenOrders: [],
+  bakeryProductionDays: {},
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -366,6 +418,20 @@ function migrateData(raw: Partial<AppData>): AppData {
     productCategories: raw.productCategories || defaultProductCategories,
     materialCategories: raw.materialCategories || defaultMaterialCategories,
     inventoryCounts: raw.inventoryCounts || {},
+    bakeryProductionTemplateLines:
+  (raw as any).bakeryProductionTemplateLines || [],
+
+storkjokkenCustomers:
+  (raw as any).storkjokkenCustomers || [],
+
+storkjokkenSpecialPrices:
+  (raw as any).storkjokkenSpecialPrices || [],
+
+recurringStorkjokkenOrders:
+  (raw as any).recurringStorkjokkenOrders || [],
+
+bakeryProductionDays:
+  (raw as any).bakeryProductionDays || {},
   };
 }
 
@@ -602,7 +668,12 @@ function productCost(product: Product, visited: string[] = []) {
         {tab === "recipes" && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products" && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders" && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
-        {tab === "production" && <ProductionTab data={data} />}
+        {tab === "production" && (
+  <ProductionTab
+    data={data}
+    updateData={updateData}
+  />
+)}
         {tab === "inventory" && <InventoryTab data={data} updateData={updateData} />}
         {tab === "rental" && <RentalTab data={data} updateData={updateData} />}
         {tab === "settings" && (
@@ -823,6 +894,7 @@ breadScaleFlourPercent:
         const retailExVat = exVatFromIncVat(retailIncVat, data.settings.foodVat);
         const finalMargin = marginPercentFrom(retailExVat, costExVat);
         const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
+
         return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="50" value={form.deliMargin} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label><Metric label="Anbefalt utsalgspris inkl. mva" value={currency(suggestedIncVat)} dark /><label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label><button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button></div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label="Valgt pris eks. mva" value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
       })()}
 
@@ -1238,13 +1310,22 @@ const [lineSearch, setLineSearch] = useState("");
   const totalProductPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pagedProducts = filtered.slice((productPage - 1) * pageSize, productPage * pageSize);
 
+function calculatedRecipeYieldAmount(lines: ProductLine[]) {
+  return lines.reduce((sum, line) => {
+    if (line.unit === "kg" || line.unit === "liter") {
+      return sum + Number(line.amount || 0);
+    }
+
+    return sum;
+  }, 0);
+}
   const draftProduct: Product = {
     id: selected?.id || "draft",
 productNumber: form.productNumber || getNextProductNumber(form.category),    name: form.name || "Nytt produkt",
     type: form.type,
     subType: form.subType,
     category: form.category,
-    yieldAmount: Number(form.yieldAmount) || 1,
+    yieldAmount: Number(form.unitWeightKg) || 1,
     yieldUnit: form.yieldUnit,
     portionsPerWhole: form.portionsPerWhole ? Number(form.portionsPerWhole) : undefined,
     customerPrice: Number(form.customerPrice) || 0,
@@ -1252,7 +1333,7 @@ productNumber: form.productNumber || getNextProductNumber(form.category),    nam
     targetMargin: Number(form.targetMargin) || 70,
     lines: draftLines,
     packaging: draftPackaging,
-    recipeYieldAmount: Number(form.recipeYieldAmount) || 1,
+    recipeYieldAmount: calculatedRecipeYieldAmount(draftLines) || 1,
 unitWeightKg: Number(form.unitWeightKg) || 0,
   };
 
@@ -1997,65 +2078,95 @@ th{background:#f3f4f6}
         </div>
 
         <div className="form-grid four">
-          <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
-          <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Produktnavn" /></label>
-          <label>Type<select value={form.type} onChange={(e) => blankFor(e.target.value as ProductType)}><option value="grunnoppskrift">Grunnoppskrift</option><option value="bakst">Bakst</option><option value="cateringmeny">Cateringmeny</option><option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option></select></label>
-<label>
-  Kategori
-  <select
-    value={form.category}
-    onChange={(e) => {
-      const category = e.target.value;
-      setForm({
-        ...form,
-        category,
-        productNumber: mode === "new"
-          ? getNextProductNumber(category)
-          : form.productNumber,
-      });
-    }}
-  >
+  <label>Produktnr
+    <input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" />
+  </label>
 
-    {data.productCategories.map((c) => (
-      <option key={c}>{c}</option>
-    ))}
-  </select>
-</label><label>
-  Produktstørrelse
-  <input
-    type="number"
-    className="highlight-input"
-    value={form.yieldAmount}
-    onChange={(e) => setForm({ ...form, yieldAmount: e.target.value })}
-    placeholder="F.eks. 0.08 for rundstykke / 0.6 for brød"
-  />
-</label>  
-<label>
-  Total oppskriftsvekt (kg)
-  <input
-    type="number"
-    value={form.recipeYieldAmount}
-    onChange={(e) => setForm({ ...form, recipeYieldAmount: e.target.value })}
-    placeholder="F.eks. 12"
-  />
-</label>
+  <label>Navn
+    <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Produktnavn" />
+  </label>
 
-<label>
-  Vekt per stk (kg)
-  <input
-    type="number"
-    className="highlight-input"
-    value={form.unitWeightKg}
-    onChange={(e) => setForm({ ...form, unitWeightKg: e.target.value })}
-    placeholder="F.eks. 0.45"
-  />
-</label>
-        <label>Enhet<select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}><option value="stk">stk</option><option value="porsjoner">porsjoner</option><option value="kg">kg</option><option value="liter">liter</option></select></label>
-          {form.type === "pasmuurt" && <label>Deles på antall porsjoner<input type="number" value={form.portionsPerWhole} onChange={(e) => setForm({ ...form, portionsPerWhole: e.target.value })} placeholder="f.eks. 12" /></label>}
-          <label>Valgt kundepris inkl. mva<input type="number" value={form.customerPrice} onChange={(e) => setForm({ ...form, customerPrice: e.target.value })} /></label>
-          <label>Storkjøkkenpris eks. mva<input type="number" value={form.storkjokkenPriceExVat} onChange={(e) => setForm({ ...form, storkjokkenPriceExVat: e.target.value })} placeholder="Valgfritt" /></label>
-          <label>Målmargin %<input type="number" value={form.targetMargin} onChange={(e) => setForm({ ...form, targetMargin: e.target.value })} /></label>
-        </div>
+  <label>Type
+    <select value={form.type} onChange={(e) => blankFor(e.target.value as ProductType)}>
+      <option value="grunnoppskrift">Grunnoppskrift</option>
+      <option value="bakst">Bakst</option>
+      <option value="cateringmeny">Cateringmeny</option>
+      <option value="pasmuurt">Påsmurt</option>
+      <option value="egenprodusert">Egenprodusert</option>
+    </select>
+  </label>
+
+  <label>Kategori
+    <select
+      value={form.category}
+      onChange={(e) => {
+        const category = e.target.value;
+        setForm({
+          ...form,
+          category,
+          productNumber: mode === "new"
+            ? getNextProductNumber(category)
+            : form.productNumber,
+        });
+      }}
+    >
+      {data.productCategories.map((c) => (
+        <option key={c}>{c}</option>
+      ))}
+    </select>
+  </label>
+
+  <label>Total oppskriftsvekt (kg)
+    <input
+      type="number"
+      value={calculatedRecipeYieldAmount(draftLines)}
+      readOnly
+      placeholder="Beregnes automatisk"
+    />
+  </label>
+
+  <label>Vekt per stk (kg)
+    <input
+      type="number"
+      className="highlight-input"
+      value={form.unitWeightKg}
+      onChange={(e) => setForm({ ...form, unitWeightKg: e.target.value })}
+      placeholder="F.eks. 0.45"
+    />
+  </label>
+
+  <label>Enhet
+    <select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}>
+      <option value="stk">stk</option>
+      <option value="porsjoner">porsjoner</option>
+      <option value="kg">kg</option>
+      <option value="liter">liter</option>
+    </select>
+  </label>
+
+  {form.type === "pasmuurt" && (
+    <label>Deles på antall porsjoner
+      <input
+        type="number"
+        value={form.portionsPerWhole}
+        onChange={(e) => setForm({ ...form, portionsPerWhole: e.target.value })}
+        placeholder="f.eks. 12"
+      />
+    </label>
+  )}
+
+  <label>Valgt kundepris inkl. mva
+    <input type="number" value={form.customerPrice} onChange={(e) => setForm({ ...form, customerPrice: e.target.value })} />
+  </label>
+
+  <label>Storkjøkkenpris eks. mva
+    <input type="number" value={form.storkjokkenPriceExVat} onChange={(e) => setForm({ ...form, storkjokkenPriceExVat: e.target.value })} placeholder="Valgfritt" />
+  </label>
+
+  <label>Målmargin %
+    <input type="number" value={form.targetMargin} onChange={(e) => setForm({ ...form, targetMargin: e.target.value })} />
+  </label>
+</div>
 
         <div className="metric-row">
           <Metric label="Total kost eks. mva" value={currency(activeCost)} />
@@ -2708,6 +2819,7 @@ th{background:#f3f4f6}
       {showNewOrder && (
         <div className="soft-box full-width">
           <h3>{editingOrderId ? "Rediger ordre" : "Ny ordre"}</h3>
+
           <div className="form-grid four">
             <label>Ordretype<select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as Order["type"], customerType: e.target.value === "storkjokken" ? "storkjokken" : form.customerType })}><option value="catering">Catering</option><option value="bakeri">Bakeri</option><option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option><option value="storkjokken">Storkjøkken</option></select></label>
             <label>Kundetype<select value={form.customerType} onChange={(e) => setForm({ ...form, customerType: e.target.value as Order["customerType"] })}><option value="privat">Privat</option><option value="bedrift">Bedrift</option><option value="storkjokken">Storkjøkken</option></select></label>
@@ -2716,6 +2828,7 @@ th{background:#f3f4f6}
           </div>
 
           {form.customerType === "bedrift" || form.customerType === "storkjokken" ? (
+
             <div className="form-grid four">
               <label>Bedriftsnavn<input value={form.companyName || ""} onChange={(e) => setForm({ ...form, companyName: e.target.value })} placeholder="Bedrift" /></label>
               <label>Orgnr<input value={form.orgNumber || ""} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} placeholder="Org.nr" /></label>
@@ -2723,6 +2836,7 @@ th{background:#f3f4f6}
               <label>Kontaktperson<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kontaktperson" /></label>
             </div>
           ) : (
+
             <div className="form-grid four">
               <label>Kundenavn<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kunde" /></label>
             </div>
@@ -2781,6 +2895,7 @@ th{background:#f3f4f6}
 })}
 
           <h3>Dietter / hensyn</h3>
+
           <div className="form-grid four">
             <label>Vegetar<input type="number" value={form.dietVegetarian || "0"} onChange={(e) => setForm({ ...form, dietVegetarian: e.target.value })} /></label>
             <label>Vegan<input type="number" value={form.dietVegan || "0"} onChange={(e) => setForm({ ...form, dietVegan: e.target.value })} /></label>
@@ -2859,93 +2974,1174 @@ th{background:#f3f4f6}
   );
 }
 
-function ProductionTab({ data }: { data: AppData }) {
-  const [dateFrom, setDateFrom] = useState(today());
-  const [dateTo, setDateTo] = useState(today());
-  const [showMaterials, setShowMaterials] = useState(true);
+function ProductionTab({
+  data,
+  updateData,
+}: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+}) {
+  const productionCategories: { id: ProductionCategory; name: string }[] = [
+    { id: "smabakst", name: "Småbakst" },
+    { id: "brod", name: "Brød" },
+    { id: "spesialbrod", name: "Spesialbrød" },
+    { id: "pasmuurt", name: "Påsmurt" },
+  ];
 
-  const ordersInPeriod = data.orders
-    .filter((o) => o.date >= dateFrom && o.date <= dateTo)
-    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-
-  type MaterialOrderRow = { name: string; category: string; supplier: string; amount: number; unit: string };
-
-  function addAmount(map: Record<string, MaterialOrderRow>, key: string, name: string, category: string, supplier: string, amount: number, unit: string) {
-    const mapKey = `${key}-${unit}`;
-    if (!map[mapKey]) map[mapKey] = { name, category, supplier, amount: 0, unit };
-    map[mapKey].amount += amount;
-  }
-
-  function expandProductToMaterials(product: Product, multiplier: number, map: Record<string, MaterialOrderRow>, path: string[] = []) {
-    if (path.includes(product.id)) return;
-    product.lines.forEach((line) => {
-      const amount = line.amount * multiplier;
-      if (line.itemType === "material") {
-        const material = data.materials.find((m) => m.id === line.itemId);
-        if (material) addAmount(map, material.id, material.name, material.category, material.supplier || "Uten leverandør", amount, line.unit);
-        return;
-      }
-      if (line.itemType === "recipe") {
-        const recipe = data.recipes.find((r) => r.id === line.itemId);
-        if (!recipe) return;
-        recipe.lines.forEach((rl) => {
-          if (rl.itemType === "material") {
-            const material = data.materials.find((m) => m.id === rl.itemId);
-            if (material) addAmount(map, material.id, material.name, material.category, material.supplier || "Uten leverandør", rl.amount * amount, material.unit);
-          }
-        });
-        return;
-      }
-      const subProduct = data.products.find((p) => p.id === line.itemId);
-      if (subProduct) expandProductToMaterials(subProduct, amount, map, [...path, product.id]);
-    });
-  }
-
-  const materialMap: Record<string, MaterialOrderRow> = {};
-  ordersInPeriod.forEach((order) => {
-    order.orderLines.forEach((line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      if (product) expandProductToMaterials(product, Number(line.quantity) || 0, materialMap);
-    });
+  const [activeDate, setActiveDate] = useState(today());
+  const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice">("day");
+  const [categoryFilter, setCategoryFilter] = useState<"alle" | ProductionCategory>("alle");
+  const [invoiceFrom, setInvoiceFrom] = useState(today());
+  const [invoiceTo, setInvoiceTo] = useState(today());
+  const [invoiceWarning, setInvoiceWarning] = useState("");
+  const [newCustomer, setNewCustomer] = useState({
+    name: "",
+    orgNumber: "",
+    address: "",
+    deliveryAddress: "",
+    phone: "",
   });
+  const [newTemplateProductId, setNewTemplateProductId] = useState("");
+  const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>("smabakst");
 
-  const materialRows = Object.values(materialMap).sort((a, b) => `${a.supplier} ${a.category} ${a.name}`.localeCompare(`${b.supplier} ${b.category} ${b.name}`, "no-NO"));
+  const productionDays = data.bakeryProductionDays || {};
+  const activeDay: BakeryProductionDay = productionDays[activeDate] || {
+    date: activeDate,
+    approved: false,
+    quantities: {},
+  };
 
-  function printProductionSummary() {
-    const orderRows = ordersInPeriod.flatMap((o) => o.orderLines.map((l) => {
-      const product = data.products.find((p) => p.id === l.productId);
-      return `<tr><td>${formatDateNo(o.date)} ${o.time || ""}</td><td>${o.customerType === "bedrift" ? o.companyName || "" : o.customer}</td><td>${product?.name || "Ukjent"}</td><td>${l.quantity}</td></tr>`;
-    })).join("");
+  const storkjokkenCustomers = (data.storkjokkenCustomers || []).filter((c) => c.active !== false);
 
-    const grouped = materialRows.reduce((acc, row) => {
-      if (!acc[row.supplier]) acc[row.supplier] = [];
-      acc[row.supplier].push(row);
-      return acc;
-    }, {} as Record<string, typeof materialRows>);
+  const columns = [
+    { id: "butikk", name: "Butikk", invoice: false },
+    ...storkjokkenCustomers.map((c) => ({
+      id: c.id,
+      name: c.name,
+      invoice: true,
+    })),
+  ];
 
-    const materialHtml = Object.entries(grouped).map(([supplier, rows]) => `<tr><td colspan="4" style="background:#111827;color:white;font-weight:800;">${supplier}</td></tr>${rows.map((r) => `<tr><td>${r.category}</td><td>${r.name}</td><td>${num(r.amount)}</td><td>${r.unit}</td></tr>`).join("")}`).join("");
+function addDays(date: string, days: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  d.setDate(d.getDate() + days);
 
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+  function weekdayNo(date: string) {
+    const names = ["Søndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag"];
+    return names[new Date(date + "T00:00:00").getDay()];
+  }
+
+  function weekdayNumber(date: string) {
+    const jsDay = new Date(date + "T00:00:00").getDay();
+    return jsDay === 0 ? 7 : jsDay;
+  }
+
+  function listDates(from: string, to: string) {
+    const dates: string[] = [];
+    let current = from;
+    let guard = 0;
+
+    while (current <= to && guard < 90) {
+      dates.push(current);
+      current = addDays(current, 1);
+      guard += 1;
+    }
+
+    return dates;
+  }
+
+  function productionCategoryForProduct(product: Product): ProductionCategory {
+    const text = `${product.type} ${product.subType} ${product.category}`.toLowerCase();
+
+    if (text.includes("påsmurt") || text.includes("pasmuurt")) return "pasmuurt";
+    if (text.includes("spesial")) return "spesialbrod";
+    if (text.includes("brød") || text.includes("brod")) return "brod";
+
+    return "smabakst";
+  }
+
+  const autoTemplateLines: BakeryProductionTemplateLine[] = data.products
+    .filter((p) =>
+      ["bakst", "pasmuurt", "egenprodusert"].includes(p.type) ||
+      ["Brød", "Søtbakst", "Påsmurt"].includes(p.category)
+    )
+    .map((p, index) => ({
+      id: `auto-${p.id}`,
+      productId: p.id,
+      category: productionCategoryForProduct(p),
+      sortOrder: index,
+    }));
+
+  const templateLines =
+    (data.bakeryProductionTemplateLines || []).length > 0
+      ? data.bakeryProductionTemplateLines
+      : autoTemplateLines;
+
+  const visibleTemplateLines = templateLines
+    .filter((line) => categoryFilter === "alle" || line.category === categoryFilter)
+    .sort((a, b) => {
+      const catA = productionCategories.findIndex((c) => c.id === a.category);
+      const catB = productionCategories.findIndex((c) => c.id === b.category);
+      return catA - catB || a.sortOrder - b.sortOrder;
+    });
+
+  function saveDay(nextDay: BakeryProductionDay) {
+    updateData({
+      bakeryProductionDays: {
+        ...productionDays,
+        [nextDay.date]: nextDay,
+      },
+    });
+  }
+
+  function setCell(productId: string, columnId: string, value: number) {
+    saveDay({
+      ...activeDay,
+      quantities: {
+        ...activeDay.quantities,
+        [productId]: {
+          ...(activeDay.quantities[productId] || {}),
+          [columnId]: value,
+        },
+      },
+    });
+  }
+
+  function totalForProduct(productId: string, day: BakeryProductionDay = activeDay) {
+    const row = day.quantities[productId] || {};
+    return columns.reduce((sum, col) => sum + Number(row[col.id] || 0), 0);
+  }
+
+  function kgForProduct(product: Product, quantity: number) {
+    const unitWeight = Number(product.unitWeightKg || product.yieldAmount || 1);
+    return quantity * unitWeight;
+  }
+
+  const dayRows = templateLines
+    .map((line) => {
+      const product = data.products.find((p) => p.id === line.productId);
+      if (!product) return null;
+
+      const quantity = totalForProduct(product.id);
+
+      return {
+        line,
+        product,
+        quantity,
+        kg: kgForProduct(product, quantity),
+      };
+    })
+    .filter(Boolean) as {
+    line: BakeryProductionTemplateLine;
+    product: Product;
+    quantity: number;
+    kg: number;
+  }[];
+
+  const activeRows = dayRows.filter((r) => r.quantity > 0);
+  const totalUnits = activeRows.reduce((sum, row) => sum + row.quantity, 0);
+  const totalKg = activeRows.reduce((sum, row) => sum + row.kg, 0);
+
+  function addTemplateLine() {
+    if (!newTemplateProductId) return alert("Velg et produkt først.");
+
+    const exists = (data.bakeryProductionTemplateLines || []).some(
+      (line) => line.productId === newTemplateProductId
+    );
+
+    if (exists) return alert("Produktet ligger allerede i produksjonsmalen.");
+
+    const nextLine: BakeryProductionTemplateLine = {
+      id: `production-template-${Date.now()}`,
+      productId: newTemplateProductId,
+      category: newTemplateCategory,
+      sortOrder: (data.bakeryProductionTemplateLines || []).length + 1,
+    };
+
+    updateData({
+      bakeryProductionTemplateLines: [...(data.bakeryProductionTemplateLines || []), nextLine],
+    });
+
+    setNewTemplateProductId("");
+  }
+
+  function removeTemplateLine(id: string) {
+    updateData({
+      bakeryProductionTemplateLines: (data.bakeryProductionTemplateLines || []).filter((x) => x.id !== id),
+    });
+  }
+
+  function addCustomer() {
+    if (!newCustomer.name.trim()) return alert("Legg inn kundenavn.");
+
+    const customer: StorkjokkenCustomer = {
+      id: `customer-${Date.now()}`,
+      name: newCustomer.name.trim(),
+      orgNumber: newCustomer.orgNumber,
+      address: newCustomer.address,
+      deliveryAddress: newCustomer.deliveryAddress,
+      phone: newCustomer.phone,
+      active: true,
+    };
+
+    updateData({
+      storkjokkenCustomers: [...(data.storkjokkenCustomers || []), customer],
+    });
+
+    setNewCustomer({
+      name: "",
+      orgNumber: "",
+      address: "",
+      deliveryAddress: "",
+      phone: "",
+    });
+  }
+
+  function deleteCustomer(id: string) {
+    updateData({
+      storkjokkenCustomers: (data.storkjokkenCustomers || []).filter((x) => x.id !== id),
+    });
+  }
+
+  function priceForCustomer(productId: string, customerId: string) {
+    const special = (data.storkjokkenSpecialPrices || []).find(
+      (x) => x.customerId === customerId && x.productId === productId
+    );
+
+    if (special) return special.priceExVat;
+
+    const product = data.products.find((p) => p.id === productId);
+    if (!product) return 0;
+
+    return product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat);
+  }
+
+  function setSpecialPrice(customerId: string, productId: string, priceExVat: number) {
+    const existing = data.storkjokkenSpecialPrices || [];
+    const without = existing.filter((x) => !(x.customerId === customerId && x.productId === productId));
+
+    if (!priceExVat) {
+      updateData({ storkjokkenSpecialPrices: without });
+      return;
+    }
+
+    updateData({
+      storkjokkenSpecialPrices: [
+        ...without,
+        { customerId, productId, priceExVat },
+      ],
+    });
+  }
+
+  function invoiceRows(from: string, to: string) {
+    const dates = listDates(from, to);
+    const rows: {
+      customerId: string;
+      customerName: string;
+      productId: string;
+      productName: string;
+      quantity: number;
+      priceExVat: number;
+      sumExVat: number;
+      vat: number;
+      sumIncVat: number;
+    }[] = [];
+
+    storkjokkenCustomers.forEach((customer) => {
+      data.products.forEach((product) => {
+        let quantity = 0;
+
+        dates.forEach((date) => {
+          const day = productionDays[date];
+          if (!day?.approved) return;
+          quantity += Number(day.quantities?.[product.id]?.[customer.id] || 0);
+        });
+
+        if (!quantity) return;
+
+        const priceExVat = priceForCustomer(product.id, customer.id);
+        const sumExVat = quantity * priceExVat;
+        const vat = sumExVat * 0.15;
+
+        rows.push({
+          customerId: customer.id,
+          customerName: customer.name,
+          productId: product.id,
+          productName: product.name,
+          quantity,
+          priceExVat,
+          sumExVat,
+          vat,
+          sumIncVat: sumExVat + vat,
+        });
+      });
+    });
+
+    return rows;
+  }
+
+  function groupedInvoiceRows(from: string, to: string) {
+    const map: Record<string, {
+      customerName: string;
+      rows: ReturnType<typeof invoiceRows>;
+      sumExVat: number;
+      vat: number;
+      sumIncVat: number;
+    }> = {};
+
+    invoiceRows(from, to).forEach((row) => {
+      if (!map[row.customerId]) {
+        map[row.customerId] = {
+          customerName: row.customerName,
+          rows: [],
+          sumExVat: 0,
+          vat: 0,
+          sumIncVat: 0,
+        };
+      }
+
+      map[row.customerId].rows.push(row);
+      map[row.customerId].sumExVat += row.sumExVat;
+      map[row.customerId].vat += row.vat;
+      map[row.customerId].sumIncVat += row.sumIncVat;
+    });
+
+    return Object.values(map);
+  }
+
+  function printWindow(title: string, body: string) {
     const w = window.open("", "_blank");
     if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Produksjon ${dateFrom} - ${dateTo}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.muted{color:#64748b}table{width:100%;border-collapse:collapse;margin-top:8px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">PRODUKSJONSSAMMENDRAG</div><div class="muted">${formatDateNo(dateFrom)} til ${formatDateNo(dateTo)}</div></div><h2>Ordre</h2><table><thead><tr><th>Dato/tid</th><th>Kunde</th><th>Produkt</th><th>Antall</th></tr></thead><tbody>${orderRows}</tbody></table><h2>Varebestillingsliste per leverandør</h2><table><thead><tr><th>Kategori</th><th>Råvare</th><th>Mengde</th><th>Enhet</th></tr></thead><tbody>${materialHtml}</tbody></table></body></html>`);
+
+    w.document.write(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>${escapeHtml(title)}</title>
+<style>
+@page { size: A4; margin: 12mm; }
+body { font-family: Arial, sans-serif; color: #111827; padding: 24px; line-height: 1.35; }
+.logo { height: 90px; width: auto; object-fit: contain; margin-bottom: 8px; }
+.page { break-after: page; border: 2px solid #111827; border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+.page:last-child { break-after: auto; }
+.top { border-bottom: 2px solid #111827; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; gap: 12px; }
+h1, h2, h3 { margin-top: 0; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
+th { background: #f3f4f6; }
+.right { text-align: right; }
+.muted { color: #64748b; }
+.total { font-weight: 900; background: #f8fafc; }
+button { padding: 10px 14px; border-radius: 10px; border: 1px solid #111827; background: #111827; color: white; font-weight: 800; cursor: pointer; margin-bottom: 14px; }
+@media print {
+  button { display: none; }
+  body { padding: 0; }
+}
+</style>
+</head>
+<body>
+<button onclick="window.print()">Skriv ut</button>
+${body}
+</body>
+</html>`);
+
     w.document.close();
     w.focus();
   }
 
+  function printProductionDay() {
+  const summaryRows = activeRows.map((row) => {
+  const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
+
+  return `
+<tr>
+  <td>
+    <b>${escapeHtml(row.product.name)}</b><br>
+    <small>${escapeHtml(row.product.productNumber || "")}</small>
+  </td>
+  <td class="right">${row.quantity} stk</td>
+  <td class="right">${unitSize ? `${num(unitSize, 3)} kg/stk` : "-"}</td>
+</tr>`;
+}).join("");
+
+  const recipeMap: Record<string, {
+    recipe: Recipe;
+    totalAmount: number;
+    unit: string;
+    sources: { productName: string; quantity: number; amount: number; unit: string }[];
+  }> = {};
+
+  activeRows.forEach((row) => {
+    row.product.lines.forEach((line) => {
+      if (line.itemType !== "recipe") return;
+
+      const recipe = data.recipes.find((r) => r.id === line.itemId);
+      if (!recipe) return;
+
+      const amount = Number(line.amount || 0) * row.quantity;
+
+      if (!recipeMap[recipe.id]) {
+        recipeMap[recipe.id] = {
+          recipe,
+          totalAmount: 0,
+          unit: line.unit,
+          sources: [],
+        };
+      }
+
+      recipeMap[recipe.id].totalAmount += amount;
+      recipeMap[recipe.id].sources.push({
+        productName: row.product.name,
+        quantity: row.quantity,
+        amount,
+        unit: line.unit,
+      });
+    });
+  });
+
+  const baseRecipePages = Object.values(recipeMap).map((entry) => {
+    const recipe = entry.recipe;
+    const recipeBaseAmount =
+  recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) ||
+  Number(recipe.yieldAmount || 1) ||
+  1;
+
+const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
+
+    const sourceRows = entry.sources.map((source) => `
+<tr>
+  <td>${escapeHtml(source.productName)}</td>
+  <td class="right">${source.quantity} stk</td>
+  <td class="right">${num(source.amount, 3)} ${escapeHtml(source.unit)}</td>
+</tr>`).join("");
+
+    const ingredientRows = recipe.lines.map((line) => {
+      let name = "Ukjent";
+      let unit = recipe.yieldUnit;
+
+      if (line.itemType === "material") {
+        const material = data.materials.find((m) => m.id === line.itemId);
+        name = material?.name || "Ukjent råvare";
+        unit = material?.unit || recipe.yieldUnit;
+      }
+
+      if (line.itemType === "recipe") {
+        const subRecipe = data.recipes.find((r) => r.id === line.itemId);
+        name = subRecipe?.name || "Ukjent grunnoppskrift";
+        unit = subRecipe?.yieldUnit || recipe.yieldUnit;
+      }
+
+      const amount = Number(line.amount || 0) * scale;
+
+      return `
+<tr>
+  <td>${escapeHtml(name)}</td>
+  <td class="right">${num(amount, 3)} ${escapeHtml(unit)}</td>
+</tr>`;
+    }).join("");
+
+    return `
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1>
+      <p class="muted">Summert fra alle produkter denne dagen</p>
+    </div>
+    <div class="right">
+      <b>${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)}</b><br>
+      ${formatDateNo(activeDate)}
+    </div>
+  </div>
+
+  <h2>Brukes til</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Produkt</th>
+        <th class="right">Antall</th>
+        <th class="right">Mengde grunnoppskrift</th>
+      </tr>
+    </thead>
+    <tbody>${sourceRows}</tbody>
+  </table>
+
+  <h2>Skalert oppskrift</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Ingrediens</th>
+        <th class="right">Mengde</th>
+      </tr>
+    </thead>
+    <tbody>${ingredientRows}</tbody>
+  </table>
+</div>`;
+  }).join("");
+
+  const productPages = activeRows.map((row) => {
+    const product = row.product;
+
+    const lineRows = product.lines.map((line) => {
+      const amount = Number(line.amount || 0) * row.quantity;
+      let name = "Ukjent";
+
+      if (line.itemType === "material") {
+        name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
+      }
+
+      if (line.itemType === "recipe") {
+        name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
+      }
+
+      if (line.itemType === "product") {
+        name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
+      }
+
+      return `
+<tr>
+  <td>${escapeHtml(name)}</td>
+  <td>${escapeHtml(line.itemType)}</td>
+  <td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td>
+</tr>`;
+    }).join("");
+
+    return `
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>Produkt: ${escapeHtml(product.name)}</h1>
+      <p class="muted">
+  ${escapeHtml(product.category)} · ${row.quantity} stk · 
+  ${num(Number(product.unitWeightKg || product.yieldAmount || 0), 3)} kg/stk
+</p>
+    </div>
+    <div class="right">
+      <b>${formatDateNo(activeDate)}</b>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Innhold</th>
+        <th>Type</th>
+        <th class="right">Mengde</th>
+      </tr>
+    </thead>
+    <tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert på produktet.</td></tr>`}</tbody>
+  </table>
+</div>`;
+  }).join("");
+
+  const packingPages = storkjokkenCustomers.map((customer) => {
+    const rows = data.products.map((product) => {
+      const qty = Number(activeDay.quantities?.[product.id]?.[customer.id] || 0);
+      if (!qty) return "";
+      return `<tr><td class="right"><b>${qty}</b></td><td>${escapeHtml(product.name)}</td></tr>`;
+    }).join("");
+
+    if (!rows) return "";
+
+    return `
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>Pakkseddel</h1>
+      <p class="muted">${escapeHtml(customer.name)}</p>
+    </div>
+    <div class="right">
+      <b>${formatDateNo(activeDate)}</b><br>
+      ${escapeHtml(customer.deliveryAddress || "")}
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="right">Antall</th>
+        <th>Produkt</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <p style="margin-top:30px;">Signatur mottatt: __________________________</p>
+</div>`;
+  }).join("");
+
+  const body = `
+<div class="page">
+  <div class="top">
+    <div>
+      <img src="/logo.png" class="logo" />
+      <h1>Produksjon for dagen</h1>
+      <p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p>
+    </div>
+    <div class="right">
+      <b>${totalUnits} stk totalt</b><br>
+      Produksjonsliste
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+  <th>Produkt</th>
+  <th class="right">Antall stk</th>
+  <th class="right">Størrelse</th>
+</tr>
+    </thead>
+    <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
+  </table>
+</div>
+
+${baseRecipePages}
+${productPages}
+${packingPages}`;
+
+  printWindow(`Produksjon ${activeDate}`, body);
+}
+
+  function printInvoice() {
+    const missing = listDates(invoiceFrom, invoiceTo).filter((date) => !productionDays[date]?.approved);
+
+    if (missing.length) {
+      setInvoiceWarning(
+        `Kan ikke printe fakturagrunnlag. Disse dagene må godkjennes først: ${missing
+          .map((d) => `${weekdayNo(d)} ${formatDateNo(d)}`)
+          .join(", ")}`
+      );
+      return;
+    }
+
+    setInvoiceWarning("");
+
+    const grouped = groupedInvoiceRows(invoiceFrom, invoiceTo);
+
+    const body = grouped.map((group) => {
+      const rows = group.rows.map((row) => `
+<tr>
+  <td>${escapeHtml(row.productName)}</td>
+  <td class="right">${row.quantity}</td>
+  <td class="right">${currency(row.priceExVat)}</td>
+  <td class="right">${currency(row.sumExVat)}</td>
+  <td class="right">${currency(row.vat)}</td>
+  <td class="right"><b>${currency(row.sumIncVat)}</b></td>
+</tr>`).join("");
+
+      return `
+<div class="page">
+  <div class="top">
+    <div>
+      <img src="/logo.png" class="logo" />
+      <h1>Fakturagrunnlag</h1>
+      <p class="muted">${escapeHtml(group.customerName)}</p>
+    </div>
+    <div class="right">
+      <b>${formatDateNo(invoiceFrom)} – ${formatDateNo(invoiceTo)}</b><br>
+      MVA 15 %
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Produkt</th>
+        <th class="right">Antall totalt</th>
+        <th class="right">Pris eks.</th>
+        <th class="right">Sum eks.</th>
+        <th class="right">MVA 15%</th>
+        <th class="right">Sum inkl.</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr class="total">
+        <td colspan="3">Sum</td>
+        <td class="right">${currency(group.sumExVat)}</td>
+        <td class="right">${currency(group.vat)}</td>
+        <td class="right">${currency(group.sumIncVat)}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>`;
+    }).join("");
+
+    printWindow(`Fakturagrunnlag ${invoiceFrom} - ${invoiceTo}`, body || "<p>Ingen fakturalinjer i perioden.</p>");
+  }
+
+  function applyRecurringOrdersForDay() {
+    const dayNo = weekdayNumber(activeDate);
+    let nextDay = { ...activeDay, quantities: { ...activeDay.quantities } };
+
+    (data.recurringStorkjokkenOrders || [])
+      .filter((order) => order.active && order.weekdays.includes(dayNo))
+      .forEach((order) => {
+        order.lines.forEach((line) => {
+          nextDay.quantities[line.productId] = {
+            ...(nextDay.quantities[line.productId] || {}),
+            [order.customerId]:
+              Number(nextDay.quantities[line.productId]?.[order.customerId] || 0) +
+              Number(line.quantity || 0),
+          };
+        });
+      });
+
+    saveDay(nextDay);
+  }
+
   return (
-    <section className="card">
-      <h2>Produksjon</h2>
-      <div className="form-grid three">
-        <label>Fra dato<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></label>
-        <label>Til dato<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></label>
-        <button className="btn active" onClick={printProductionSummary}>Print produksjon/varebestilling</button>
+    <section>
+      <div className="card">
+        <div className="between">
+          <div>
+            <h2>Produksjon Bakeri</h2>
+            <p style={{ color: "#64748b" }}>
+              Produktene i gridet hentes fra Produkter-siden. Dagens dato åpnes som standard.
+            </p>
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <button className="btn" onClick={() => setPanel("day")}>Dagens produksjon</button>
+            <button className="btn" onClick={() => setPanel("template")}>Produktmal</button>
+            <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
+            <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
+            <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
+            <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
+          </div>
+        </div>
       </div>
-      <button className={showMaterials ? "btn active" : "btn"} onClick={() => setShowMaterials(!showMaterials)}>{showMaterials ? "Skjul varebestillingsliste" : "Vis varebestillingsliste"}</button>
 
-      <h3>Ordre i perioden</h3>
-      <table><thead><tr><th>Dato</th><th>Kunde</th><th>Produkt/meny</th><th>Antall</th></tr></thead><tbody>{ordersInPeriod.flatMap((o) => o.orderLines.map((l, i) => <tr key={`${o.id}-${i}`}><td>{formatDateNo(o.date)} {o.time}</td><td>{o.customerType === "bedrift" ? o.companyName : o.customer}</td><td>{data.products.find((p) => p.id === l.productId)?.name}</td><td>{l.quantity}</td></tr>))}</tbody></table>
+      <div className="card">
+        <div className="production-date-row">
+          <button className="btn" onClick={() => setActiveDate(addDays(activeDate, -1))}>← Forrige</button>
 
-      {showMaterials && <><h3>Varebestillingsliste</h3><table><thead><tr><th>Leverandør</th><th>Kategori</th><th>Råvare</th><th>Mengde</th><th>Enhet</th></tr></thead><tbody>{materialRows.map((r, i) => <tr key={i}><td>{r.supplier || "Uten leverandør"}</td><td>{r.category}</td><td>{r.name}</td><td>{num(r.amount)}</td><td>{r.unit}</td></tr>)}</tbody></table></>}
+          <div className="production-date-box">
+            <small>Valgt produksjonsdag</small>
+            <b>{weekdayNo(activeDate)} {formatDateNo(activeDate)}</b>
+          </div>
+
+          <button className="btn" onClick={() => setActiveDate(addDays(activeDate, 1))}>Neste →</button>
+
+          <input
+            type="date"
+            value={activeDate}
+            onChange={(e) => setActiveDate(e.target.value)}
+            style={{ maxWidth: 180 }}
+          />
+        </div>
+      </div>
+
+      {panel === "day" && (
+        <>
+          <div className="metric-row">
+            <Metric label="Produksjonslinjer" value={String(activeRows.length)} />
+            <Metric label="Totalt antall" value={String(totalUnits)} dark />
+            <Metric label="Total produksjon" value={`${totalUnits} stk`} />
+            <Metric label="Status" value={activeDay.approved ? "Godkjent" : "Ikke godkjent"} tone={activeDay.approved ? "good" : "warn"} />
+          </div>
+
+          <div className="card">
+            <div className="between">
+              <div>
+                <h3>Dagens produksjonsgrid</h3>
+                <p style={{ color: "#64748b" }}>
+                  Fyll inn antall per kunde/kanal. Sum per produkt brukes til oppskrifter og pakksedler.
+                </p>
+              </div>
+
+              <button className="btn" onClick={applyRecurringOrdersForDay}>
+                Legg til fastordre for denne dagen
+              </button>
+            </div>
+
+            <div className="chips">
+              <button
+                className={categoryFilter === "alle" ? "btn active" : "btn"}
+                onClick={() => setCategoryFilter("alle")}
+              >
+                Alle
+              </button>
+
+              {productionCategories.map((cat) => (
+                <button
+                  key={cat.id}
+                  className={categoryFilter === cat.id ? "btn active" : "btn"}
+                  onClick={() => setCategoryFilter(cat.id)}
+                >
+                  {cat.name}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Produkt</th>
+                    <th>Oppskrift / kategori</th>
+                    {columns.map((col) => (
+                      <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>
+                    ))}
+                    <th style={{ textAlign: "center" }}>Sum</th>
+                    
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleTemplateLines.map((line) => {
+                    const product = data.products.find((p) => p.id === line.productId);
+                    if (!product) return null;
+
+                    const qtyRow = activeDay.quantities[product.id] || {};
+                    const total = totalForProduct(product.id);
+                    const kg = kgForProduct(product, total);
+
+                    return (
+                      <tr key={line.id}>
+                        <td>
+                          <b>{product.name}</b>
+                          <br />
+                          <small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small>
+                        </td>
+                        <td>
+                          {productionCategories.find((c) => c.id === line.category)?.name}
+                          <br />
+                          <small style={{ color: "#64748b" }}>{product.category}</small>
+                        </td>
+                        {columns.map((col) => (
+                          <td key={col.id}>
+                            <input
+                              type="number"
+                              value={qtyRow[col.id] || ""}
+                              onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)}
+                              style={{ minWidth: 70, textAlign: "center" }}
+                            />
+                          </td>
+                        ))}
+                        <td style={{ textAlign: "center" }}><b>{total}</b></td>
+                        
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {panel === "template" && (
+        <div className="card">
+          <h3>Produktmal for produksjonsgrid</h3>
+          <p style={{ color: "#64748b" }}>
+            Denne listen bestemmer hvilke produkter som vises hver dag. Produktene må finnes i Produkter-siden først.
+          </p>
+
+          <div className="form-grid three">
+            <select value={newTemplateCategory} onChange={(e) => setNewTemplateCategory(e.target.value as ProductionCategory)}>
+              {productionCategories.map((cat) => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
+
+            <select value={newTemplateProductId} onChange={(e) => setNewTemplateProductId(e.target.value)}>
+              <option value="">Velg produkt fra Produkter</option>
+              {data.products.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} · {p.productNumber || "-"}</option>
+              ))}
+            </select>
+
+            <button className="btn active" onClick={addTemplateLine}>Legg til i mal</button>
+          </div>
+
+          <div className="grid two">
+            {productionCategories.map((cat) => (
+              <div key={cat.id} className="soft-box">
+                <h3>{cat.name}</h3>
+                {templateLines.filter((line) => line.category === cat.id).map((line) => {
+                  const product = data.products.find((p) => p.id === line.productId);
+                  if (!product) return null;
+
+                  return (
+                    <div key={line.id} className="editable-row">
+                      <div>
+                        <b>{product.name}</b>
+                        <br />
+                        <small>{product.productNumber || "-"}</small>
+                      </div>
+                      <button className="link danger" onClick={() => removeTemplateLine(line.id)}>Fjern</button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {panel === "customers" && (
+        <div className="card">
+          <h3>Storkjøkkenkunder</h3>
+
+          <div className="soft-box">
+            <h3>Ny kunde</h3>
+            <div className="form-grid five">
+              <input value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} placeholder="Kundenavn" />
+              <input value={newCustomer.orgNumber} onChange={(e) => setNewCustomer({ ...newCustomer, orgNumber: e.target.value })} placeholder="Org.nr" />
+              <input value={newCustomer.address} onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })} placeholder="Fakturaadresse" />
+              <input value={newCustomer.deliveryAddress} onChange={(e) => setNewCustomer({ ...newCustomer, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
+              <input value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="Telefon" />
+            </div>
+            <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Kunde</th>
+                <th>Org.nr</th>
+                <th>Levering</th>
+                <th>Telefon</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data.storkjokkenCustomers || []).map((customer) => (
+                <tr key={customer.id}>
+                  <td><b>{customer.name}</b></td>
+                  <td>{customer.orgNumber || "-"}</td>
+                  <td>{customer.deliveryAddress || "-"}</td>
+                  <td>{customer.phone || "-"}</td>
+                  <td><button className="link danger" onClick={() => deleteCustomer(customer.id)}>Slett</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
+          <p style={{ color: "#64748b" }}>Tomt felt bruker vanlig storkjøkkenpris fra produktet.</p>
+
+          {storkjokkenCustomers.map((customer) => (
+            <div key={customer.id} className="soft-box">
+              <h3>{customer.name}</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Produkt</th>
+                    <th>Standardpris eks. mva</th>
+                    <th>Spesialpris eks. mva</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.products.map((product) => {
+                    const special = (data.storkjokkenSpecialPrices || []).find(
+                      (x) => x.customerId === customer.id && x.productId === product.id
+                    );
+
+                    return (
+                      <tr key={product.id}>
+                        <td>{product.name}</td>
+                        <td>{currency(product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat))}</td>
+                        <td>
+                          <input
+                            type="number"
+                            value={special?.priceExVat || ""}
+                            onChange={(e) => setSpecialPrice(customer.id, product.id, Number(e.target.value) || 0)}
+                            placeholder="Standard"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {panel === "recurring" && (
+        <div className="card">
+          <h3>Fastordre</h3>
+          <p style={{ color: "#64748b" }}>
+            Her kan vi neste steg legge inn full redigering av faste ordre. Knappen i dagsbildet legger inn aktive fastordre for valgt ukedag.
+          </p>
+
+          {(data.recurringStorkjokkenOrders || []).length ? (
+            (data.recurringStorkjokkenOrders || []).map((order) => {
+              const customer = data.storkjokkenCustomers.find((c) => c.id === order.customerId);
+
+              return (
+                <div key={order.id} className="editable-row">
+                  <div>
+                    <b>{customer?.name || "Ukjent kunde"}</b>
+                    <br />
+                    <small>
+                      Dager: {order.weekdays.join(", ")} · Linjer: {order.lines.length}
+                    </small>
+                  </div>
+                  <span>{order.active ? "Aktiv" : "Inaktiv"}</span>
+                </div>
+              );
+            })
+          ) : (
+            <p>Ingen fastordre lagt inn ennå.</p>
+          )}
+        </div>
+      )}
+
+      {panel === "invoice" && (
+        <div className="card">
+          <div className="between">
+            <div>
+              <h3>Fakturagrunnlag</h3>
+              <p style={{ color: "#64748b" }}>
+                Velg periode. Alle dager i perioden må være godkjent før print.
+              </p>
+            </div>
+            <button className="btn active" onClick={printInvoice}>Print fakturagrunnlag</button>
+          </div>
+
+          <div className="form-grid three">
+            <label>
+              Fra dato
+              <input type="date" value={invoiceFrom} onChange={(e) => setInvoiceFrom(e.target.value)} />
+            </label>
+            <label>
+              Til dato
+              <input type="date" value={invoiceTo} onChange={(e) => setInvoiceTo(e.target.value)} />
+            </label>
+            <Metric
+              label="Godkjente dager i perioden"
+              value={String(listDates(invoiceFrom, invoiceTo).filter((d) => productionDays[d]?.approved).length)}
+            />
+          </div>
+
+          {invoiceWarning && <div className="warning">{invoiceWarning}</div>}
+
+          {groupedInvoiceRows(invoiceFrom, invoiceTo).map((group) => (
+            <div key={group.customerName} className="soft-box">
+              <div className="between">
+                <h3>{group.customerName}</h3>
+                <b>{currency(group.sumIncVat)} inkl. mva</b>
+              </div>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th>Produkt</th>
+                    <th>Antall totalt</th>
+                    <th>Pris eks.</th>
+                    <th>Sum eks.</th>
+                    <th>MVA 15%</th>
+                    <th>Sum inkl.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.rows.map((row) => (
+                    <tr key={`${row.customerId}-${row.productId}`}>
+                      <td>{row.productName}</td>
+                      <td>{row.quantity}</td>
+                      <td>{currency(row.priceExVat)}</td>
+                      <td>{currency(row.sumExVat)}</td>
+                      <td>{currency(row.vat)}</td>
+                      <td><b>{currency(row.sumIncVat)}</b></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="card">
+        <div className="production-approve-box">
+          <div>
+            <h3>Godkjenning av dag</h3>
+            <p style={{ color: "#64748b" }}>
+              Dagen må godkjennes før den kan tas med i fakturagrunnlaget.
+            </p>
+          </div>
+
+          <button
+            className={activeDay.approved ? "btn active" : "btn"}
+            onClick={() => saveDay({ ...activeDay, approved: !activeDay.approved })}
+          >
+            {activeDay.approved ? "✓ Dagen er godkjent" : "Godkjenn dag"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Print produksjon for valgt dag</h3>
+        <div className="grid two">
+          <div className="soft-box">
+            <h3>1. Forside</h3>
+            <p>Total produksjon per kategori og samlet antall.</p>
+          </div>
+          <div className="soft-box">
+            <h3>2. Oppskrifter</h3>
+            <p>Én side per produkt med skalert mengde.</p>
+          </div>
+          <div className="soft-box">
+            <h3>3. Pakksedler</h3>
+            <p>Én pakkseddel per storkjøkkenkunde.</p>
+          </div>
+        </div>
+
+        <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
+      </div>
+
+      <style jsx global>{`
+        .production-date-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 10px;
+          justify-content: space-between;
+        }
+
+        .production-date-box {
+          background: #dcfce7;
+          color: #14532d;
+          border: 1px solid #86efac;
+          border-radius: 14px;
+          padding: 10px 18px;
+          min-width: 240px;
+          text-align: center;
+          display: grid;
+          gap: 2px;
+        }
+
+        .production-date-box small {
+          color: #166534;
+          font-weight: 800;
+        }
+
+        .production-date-box b {
+          font-size: 18px;
+        }
+
+        .production-approve-box {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: center;
+          flex-wrap: wrap;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 14px;
+          padding: 16px;
+        }
+      `}</style>
     </section>
   );
 }
@@ -3126,6 +4322,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
       <div className="soft-box">
         <h3>Svinn denne måneden</h3>
+
         <div className="form-grid four">
           {accountingBuckets.map((b) => <label key={b}>{b}<input type="number" value={waste[b] || ""} onChange={(e) => updateWaste(b, Number(e.target.value) || 0)} /></label>)}
         </div>
