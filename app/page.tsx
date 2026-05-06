@@ -2385,6 +2385,34 @@ th{background:#f3f4f6}
 <button className="btn" onClick={() => printProduct(p)}>
   Print
 </button>
+<button
+  className="btn"
+  style={{
+    background: "#dc2626",
+    color: "white",
+    borderColor: "#dc2626",
+  }}
+  onClick={() => {
+    if (!confirm(`Sikker på at du vil slette "${p.name}"?`)) {
+      return;
+    }
+
+    const usedInOrders = data.orders.some((order) =>
+      (order.orderLines || []).some((line) => line.productId === p.id)
+    );
+
+    if (usedInOrders) {
+      alert("Produktet brukes i ordre og kan ikke slettes.");
+      return;
+    }
+
+    updateData({
+      products: data.products.filter((x) => x.id !== p.id),
+    });
+  }}
+>
+  Slett
+</button>
               </td>
             </tr>
           ))}
