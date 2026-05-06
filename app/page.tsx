@@ -3589,8 +3589,6 @@ const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
 </div>`;
   }).join("");
 
-  const body = `
-  
 const body = `
 <div class="print-header">
   <img src="/logo.png" class="print-logo" />
