@@ -691,6 +691,24 @@ function productCost(product: Product, visited: string[] = []) {
   />
 )}
       </div>
+      <footer
+  style={{
+    display: "flex",
+    justifyContent: "center",
+    marginTop: 40,
+    paddingBottom: 20,
+    opacity: 0.85,
+  }}
+>
+  <img
+    src="/misemetrics_logo.png"
+    alt="Misemetrics"
+    style={{
+      width: 140,
+      height: "auto",
+    }}
+  />
+</footer>
       <GlobalStyles />
     </main>
   );
