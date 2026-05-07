@@ -48,6 +48,17 @@ export default function LoginPage() {
             style={{ height: 80, objectFit: "contain" }}
           />
         </div>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+  <img
+    src="/misemetrics_logo.png"
+    alt="Misemetrics"
+    style={{
+      width: 220,
+      maxWidth: "80%",
+      height: "auto",
+    }}
+  />
+</div>
 
         <h1 style={{ textAlign: "center", marginBottom: 8 }}>
           Velkommen tilbake
