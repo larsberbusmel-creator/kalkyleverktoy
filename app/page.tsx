@@ -442,6 +442,12 @@ export default function Page() {
 
   useEffect(() => {
   async function loadData() {
+    const { data: authData } = await supabase.auth.getSession();
+
+if (!authData.session) {
+  window.location.href = "/login";
+  return;
+}
     const { data: row, error } = await supabase
       .from("app_data")
       .select("data")
