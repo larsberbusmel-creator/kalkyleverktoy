@@ -701,7 +701,7 @@ function productCost(product: Product, visited: string[] = []) {
   }}
 >
   <img
-    src="/misemetrics_logo.png"
+    src="/mise-logo.png"
     alt="Misemetrics"
     style={{
       width: 140,
