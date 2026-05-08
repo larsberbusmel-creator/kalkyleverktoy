@@ -3121,21 +3121,21 @@ function addDays(date: string, days: number) {
   }
 
   const autoTemplateLines: BakeryProductionTemplateLine[] = data.products
-    .filter((p) =>
-      ["bakst", "pasmuurt", "egenprodusert"].includes(p.type) ||
-      ["Brød", "Søtbakst", "Påsmurt"].includes(p.category)
-    )
-    .map((p, index) => ({
-      id: `auto-${p.id}`,
-      productId: p.id,
-      category: productionCategoryForProduct(p),
-      sortOrder: index,
-    }));
+  .filter((p) =>
+    ["bakst", "pasmuurt", "egenprodusert"].includes(p.type) ||
+    ["Brød", "Søtbakst", "Påsmurt"].includes(p.category)
+  )
+  .map((p, index) => ({
+    id: `auto-${p.id}`,
+    productId: p.id,
+    category: productionCategoryForProduct(p),
+    sortOrder: index,
+  }));
 
-  const templateLines =
-    (data.bakeryProductionTemplateLines || []).length > 0
-      ? data.bakeryProductionTemplateLines
-      : autoTemplateLines;
+const templateLines =
+  (data.bakeryProductionTemplateLines || []).length > 0
+    ? data.bakeryProductionTemplateLines
+    : autoTemplateLines;
 
   const visibleTemplateLines = templateLines
     .filter((line) => categoryFilter === "alle" || line.category === categoryFilter)
