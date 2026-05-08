@@ -46,7 +46,12 @@ export default function LoginPage() {
           <img
             src="/mise-logo.png"
             alt="Misemetrics"
-            style={{ height: 90, objectFit: "contain" }}
+            style={{
+  height: 90,
+  objectFit: "contain",
+  display: "block",
+  margin: "0 auto"
+}}
           />
         </div>
       
