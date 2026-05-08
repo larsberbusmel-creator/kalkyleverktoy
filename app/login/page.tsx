@@ -44,7 +44,7 @@ export default function LoginPage() {
         {/* LOGO */}
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <img
-            src="/misemetrics_logo.png"
+            src="/mise-logo.png"
             alt="Misemetrics"
             style={{ height: 90, objectFit: "contain" }}
           />
