@@ -893,8 +893,21 @@ breadScaleFlourPercent:
           priceUpdatedAt: priceChanged ? new Date().toISOString() : m.priceUpdatedAt,
         };
       }),
-    });
-  }
+     });
+}
+
+function defaultRetailMargin(category: string) {
+  const map: Record<string, number> = {
+    Deli: 50,
+    Mineralvann: 70,
+    Øl: 70,
+    Vin: 70,
+    Brennevin: 70,
+    Cider: 70,
+  };
+
+  return map[category] ?? 50;
+}
 
   return <section className="card">
     <div className="between"><h2>Råvarer</h2><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>
