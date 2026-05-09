@@ -1019,10 +1019,17 @@ function defaultRetailMargin(category: string) {
           <td><input className="inline-cell-input" type="number" value={m.pricePerUnit} onChange={(e) => { const pricePerUnit = Number(e.target.value) || 0; updateMaterialInline(m.id, { pricePerUnit, packagePrice: pricePerUnit * (m.packageSize || 1) }, true); }} /></td>
           <td><input className="inline-cell-input" type="number" value={m.retailPrice || ""} onChange={(e) => updateMaterialInline(m.id, { retailPrice: Number(e.target.value) || undefined })} placeholder="-" /></td>
 <td>
-  {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].includes(m.category)
-    ? `${num(deliMargin, 1)} %`
+  {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].includes(m.category) && m.retailPrice
+    ? `${num(
+        marginPercentFrom(
+          exVatFromIncVat(Number(m.retailPrice), data.settings.foodVat),
+          m.pricePerUnit
+        ),
+        1
+      )} %`
     : "-"}
-</td>          <td>{(m.allergens || []).join(", ") || "-"}</td>
+</td>         
+<td>{(m.allergens || []).join(", ") || "-"}</td>
           <td><button className="btn" onClick={() => { edit(m); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Rediger</button><button style={{ marginLeft: 8 }} className="btn danger" onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td>
           <td>{m.priceUpdatedAt ? formatDateNo(m.priceUpdatedAt.slice(0, 10)) : "-"}</td>
         </tr>;
