@@ -775,7 +775,7 @@ function CalendarDashboard({
 
   for (let i = 0; i < startOffset; i++) {
     const d = new Date(year, month, 1 - startOffset + i);
-    days.push(d.toISOString().slice(0, 10));
+    days.push(localDateKey(d));
   }
 
   for (let d = 1; d <= lastDay.getDate(); d++) {
@@ -784,7 +784,7 @@ function CalendarDashboard({
 
   while (days.length % 7 !== 0) {
     const d = new Date(year, month, days.length - startOffset + 1);
-    days.push(d.toISOString().slice(0, 10));
+    days.push(localDateKey(d));
   }
 
   function monthName(date: string) {
@@ -793,11 +793,16 @@ function CalendarDashboard({
       year: "numeric",
     });
   }
-
+function localDateKey(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
   function changeMonth(delta: number) {
   const base = new Date(`${monthDate.slice(0, 7)}-01T12:00:00`);
   base.setMonth(base.getMonth() + delta);
-  setMonthDate(base.toISOString().slice(0, 10));
+  setMonthDate(localDateKey(base));
 }
 
 function easterDate(year: number) {
@@ -820,7 +825,7 @@ function easterDate(year: number) {
 }
 
 function dateKey(d: Date) {
-  return d.toISOString().slice(0, 10);
+  return localDateKey(d);
 }
 
 function addDays(d: Date, days: number) {
