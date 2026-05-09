@@ -773,19 +773,14 @@ function CalendarDashboard({
 
   const days: string[] = [];
 
-  for (let i = 0; i < startOffset; i++) {
-    const d = new Date(year, month, 1 - startOffset + i);
-    days.push(localDateKey(d));
-  }
+const calendarStart = new Date(year, month, 1);
+calendarStart.setDate(calendarStart.getDate() - startOffset);
 
-  for (let d = 1; d <= lastDay.getDate(); d++) {
-    days.push(new Date(year, month, d).toISOString().slice(0, 10));
-  }
-
-  while (days.length % 7 !== 0) {
-    const d = new Date(year, month, days.length - startOffset + 1);
-    days.push(localDateKey(d));
-  }
+for (let i = 0; i < 42; i++) {
+  const d = new Date(calendarStart);
+  d.setDate(calendarStart.getDate() + i);
+  days.push(localDateKey(d));
+}
 
   function monthName(date: string) {
     return new Date(`${date.slice(0, 7)}-01T12:00:00`).toLocaleDateString("no-NO", {
