@@ -211,6 +211,13 @@ type BakeryProductionDay = {
   quantities: Record<string, Record<string, number>>;
 };
 
+type CalendarNote = {
+  id: string;
+  date: string;
+  title: string;
+  text: string;
+};
+
 type AppData = {
   materials: Material[];
   recipes: Recipe[];
@@ -226,6 +233,7 @@ type AppData = {
   productCategories: string[];
   materialCategories: string[];
   inventoryCounts?: Record<string, InventoryMonthData>;
+  calendarNotes: CalendarNote[];
 
   bakeryProductionTemplateLines: BakeryProductionTemplateLine[];
   storkjokkenCustomers: StorkjokkenCustomer[];
@@ -386,6 +394,7 @@ settings: {
   productCategories: defaultProductCategories,
   materialCategories: defaultMaterialCategories,
   inventoryCounts: {},
+  calendarNotes: [],
 
   bakeryProductionTemplateLines: [],
   storkjokkenCustomers: [],
@@ -687,7 +696,13 @@ function productCost(product: Product, visited: string[] = []) {
           {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
         </nav>
 
-        {tab === "dashboard" && <DashboardTab data={data} productCost={productCost} setTab={setTab} />}
+        {tab === "dashboard" && (
+  <CalendarDashboard
+    data={data}
+    updateData={updateData}
+    setTab={setTab}
+  />
+)}
         {tab === "materials" && <MaterialsTab data={data} updateData={updateData} />}
         {tab === "recipes" && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products" && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
@@ -732,52 +747,280 @@ function productCost(product: Product, visited: string[] = []) {
   );
 }
 
-function DashboardTab({ data, productCost, setTab }: { data: AppData; productCost: (p: Product) => number; setTab: (tab: Tab) => void }) {
-  const todaysOrders = data.orders.filter((o) => o.date === today()).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-  const todaysProduction = todaysOrders.flatMap((o) => o.orderLines.map((l) => ({ order: o, product: data.products.find((p) => p.id === l.productId), quantity: l.quantity })));
-  const todaysRevenue = todaysOrders.reduce((sum, order) => {
-    const subtotal = order.orderLines.reduce((lineSum, line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      return lineSum + (product?.customerPrice || 0) * Number(line.quantity || 0);
-    }, 0);
-    const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
-    return sum + subtotal - discount;
-  }, 0);
-  const recentMaterials = [...data.materials].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")).slice(0, 6);
+function CalendarDashboard({
+  data,
+  updateData,
+  setTab,
+}: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  setTab: (tab: Tab) => void;
+}) {
+  const todayDate = today();
+  const [view, setView] = useState<"month" | "day">("month");
+  const [selectedDate, setSelectedDate] = useState(todayDate);
+  const [monthDate, setMonthDate] = useState(todayDate);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteText, setNoteText] = useState("");
+
+  const monthStart = new Date(`${monthDate.slice(0, 7)}-01T12:00:00`);
+  const year = monthStart.getFullYear();
+  const month = monthStart.getMonth();
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startOffset = (firstDay.getDay() + 6) % 7;
+
+  const days: string[] = [];
+
+  for (let i = 0; i < startOffset; i++) {
+    const d = new Date(year, month, 1 - startOffset + i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    days.push(new Date(year, month, d).toISOString().slice(0, 10));
+  }
+
+  while (days.length % 7 !== 0) {
+    const d = new Date(year, month, days.length - startOffset + 1);
+    days.push(d.toISOString().slice(0, 10));
+  }
+
+  function monthName(date: string) {
+    return new Date(`${date.slice(0, 7)}-01T12:00:00`).toLocaleDateString("no-NO", {
+      month: "long",
+      year: "numeric",
+    });
+  }
+
+  function changeMonth(delta: number) {
+    const next = new Date(year, month + delta, 1);
+    setMonthDate(next.toISOString().slice(0, 10));
+  }
+
+  function dayOrders(date: string) {
+    return data.orders
+      .filter((o) => o.date === date)
+      .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  }
+
+  function dayNotes(date: string) {
+    return (data.calendarNotes || []).filter((n) => n.date === date);
+  }
+
+  function hasProduction(date: string) {
+    return Boolean(data.bakeryProductionDays?.[date]);
+  }
+
+  function addNote() {
+    if (!noteTitle.trim() && !noteText.trim()) return;
+
+    const next: CalendarNote = {
+      id: `note-${Date.now()}`,
+      date: selectedDate,
+      title: noteTitle.trim() || "Notat",
+      text: noteText.trim(),
+    };
+
+    updateData({
+      calendarNotes: [next, ...(data.calendarNotes || [])],
+    });
+
+    setNoteTitle("");
+    setNoteText("");
+  }
+
+  function deleteNote(id: string) {
+    updateData({
+      calendarNotes: (data.calendarNotes || []).filter((n) => n.id !== id),
+    });
+  }
+
+  const selectedOrders = dayOrders(selectedDate);
+  const selectedNotes = dayNotes(selectedDate);
+  const selectedProduction = data.bakeryProductionDays?.[selectedDate];
 
   return (
     <section>
       <div className="card">
-        <h2 className="today-title">I dag</h2>
-        <div className="metric-row three-metrics">
-          <Metric label="Ordre i dag" value={String(todaysOrders.length)} dark />
-          <Metric label="Produksjonslinjer" value={String(todaysProduction.length)} />
-          <Metric label="Total omsetning i dag" value={currency(todaysRevenue)} />
-        </div>
-        <div className="grid two">
+        <div className="between">
           <div>
-            <h3>Dagens ordre</h3>
-            <table><tbody>{todaysOrders.length ? todaysOrders.map((o) => <tr key={o.id} className="click-row" onClick={() => setTab("orders")}><td>{o.time || "-"}</td><td>{o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer}</td><td>{o.orderLines.map((l) => `${l.quantity} × ${data.products.find((p) => p.id === l.productId)?.name || "Produkt"}`).join(", ")}</td></tr>) : <tr><td>Ingen ordre i dag</td></tr>}</tbody></table>
+            <h2>Startside</h2>
+            <p style={{ color: "#64748b" }}>Kalender og dagens oversikt</p>
           </div>
-          <div>
-            <h3>Dagens produksjon</h3>
-            <table><tbody>{todaysProduction.length ? todaysProduction.map((x, i) => <tr key={i}><td>{x.quantity}</td><td>{x.product?.name}</td><td>{x.order.time || "-"}</td></tr>) : <tr><td>Ingen produksjon i dag</td></tr>}</tbody></table>
-          </div>
-        </div>
-      </div>
 
-      <div className="card">
-        <div className="metric-row"><Metric label="Råvarer" value={String(data.materials.length)} dark /><Metric label="Grunnoppskrifter" value={String(data.recipes.length)} /><Metric label="Produkter" value={String(data.products.length)} /><Metric label="Ordre" value={String(data.orders.length)} /></div>
-        <div className="grid two">
-          <div>
-            <h3>Produkter med høyest kost</h3>
-            <table><tbody>{data.products.map((p) => ({ p, cost: productCost(p) })).sort((a, b) => b.cost - a.cost).slice(0, 6).map(({ p, cost }) => <tr key={p.id}><td>{p.name}</td><td>{p.type}</td><td style={{ textAlign: "right" }}>{currency(cost)}</td></tr>)}</tbody></table>
-          </div>
-          <div>
-            <h3>Nylig lagt til / endret råvarer</h3>
-            <table><tbody>{recentMaterials.map((m) => <tr key={m.id}><td>{m.name}</td><td>{m.category}</td><td>{m.updatedAt ? formatDateNo(m.updatedAt.slice(0, 10)) : "-"}</td></tr>)}</tbody></table>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className={view === "month" ? "btn active" : "btn"} onClick={() => setView("month")}>
+              Måned
+            </button>
+            <button className={view === "day" ? "btn active" : "btn"} onClick={() => setView("day")}>
+              Dag
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                setSelectedDate(todayDate);
+                setMonthDate(todayDate);
+              }}
+            >
+              I dag
+            </button>
           </div>
         </div>
+
+        {view === "month" && (
+          <>
+            <div className="between" style={{ marginTop: 16 }}>
+              <button className="btn" onClick={() => changeMonth(-1)}>Forrige</button>
+              <h2 style={{ textTransform: "capitalize" }}>{monthName(monthDate)}</h2>
+              <button className="btn" onClick={() => changeMonth(1)}>Neste</button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(7, 1fr)",
+                gap: 8,
+                marginTop: 16,
+              }}
+            >
+              {["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"].map((d) => (
+                <b key={d} style={{ padding: 8 }}>{d}</b>
+              ))}
+
+              {days.map((date) => {
+                const inMonth = date.slice(0, 7) === monthDate.slice(0, 7);
+                const orders = dayOrders(date);
+                const notes = dayNotes(date);
+                const production = hasProduction(date);
+
+                return (
+                  <button
+                    key={date}
+                    onClick={() => {
+                      setSelectedDate(date);
+                      setView("day");
+                    }}
+                    style={{
+                      minHeight: 110,
+                      textAlign: "left",
+                      padding: 10,
+                      borderRadius: 14,
+                      border: date === todayDate ? "2px solid #0f172a" : "1px solid #dbe4ef",
+                      background: inMonth ? "white" : "#f1f5f9",
+                      opacity: inMonth ? 1 : 0.55,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <b>{Number(date.slice(8, 10))}</b>
+
+                    {production && (
+                      <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800 }}>
+                        🥖 Produksjon
+                      </div>
+                    )}
+
+                    {orders.slice(0, 3).map((o) => (
+                      <div key={o.id} style={{ marginTop: 4, fontSize: 12 }}>
+                        {o.time || "--"} Ordre
+                      </div>
+                    ))}
+
+                    {notes.slice(0, 2).map((n) => (
+                      <div key={n.id} style={{ marginTop: 4, fontSize: 12, color: "#166534" }}>
+                        📝 {n.title}
+                      </div>
+                    ))}
+
+                    {orders.length + notes.length > 5 && (
+                      <small>+ flere</small>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {view === "day" && (
+          <div style={{ marginTop: 20 }}>
+            <div className="between">
+              <h2>{formatDateNo(selectedDate)}</h2>
+              <button className="btn" onClick={() => setView("month")}>Til måned</button>
+            </div>
+
+            <div className="grid two">
+              <div className="soft-box">
+                <h3>Produksjon</h3>
+                {selectedProduction ? (
+                  <button className="btn active" onClick={() => setTab("production")}>
+                    Åpne dagens produksjon
+                  </button>
+                ) : (
+                  <p style={{ color: "#64748b" }}>Ingen produksjonsordre registrert denne dagen.</p>
+                )}
+              </div>
+
+              <div className="soft-box">
+                <h3>Ordre</h3>
+                {selectedOrders.length ? (
+                  <table>
+                    <tbody>
+                      {selectedOrders.map((o) => (
+                        <tr key={o.id} className="click-row" onClick={() => setTab("orders")}>
+                          <td>{o.time || "-"}</td>
+                          <td>{o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer}</td>
+                          <td>
+                            {o.orderLines.map((l) => {
+                              const p = data.products.find((x) => x.id === l.productId);
+                              return `${l.quantity} × ${p?.name || "Produkt"}`;
+                            }).join(", ")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p style={{ color: "#64748b" }}>Ingen ordre denne dagen.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="soft-box" style={{ marginTop: 16 }}>
+              <h3>Huskelapper / notiser</h3>
+
+              <div className="form-grid three">
+                <input
+                  value={noteTitle}
+                  onChange={(e) => setNoteTitle(e.target.value)}
+                  placeholder="Tittel"
+                />
+                <input
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="Notat"
+                />
+                <button className="btn active" onClick={addNote}>Legg til</button>
+              </div>
+
+              {selectedNotes.length ? (
+                selectedNotes.map((n) => (
+                  <div key={n.id} className="editable-row">
+                    <div>
+                      <b>{n.title}</b>
+                      <br />
+                      <small>{n.text}</small>
+                    </div>
+                    <button className="link danger" onClick={() => deleteNote(n.id)}>Slett</button>
+                  </div>
+                ))
+              ) : (
+                <p style={{ color: "#64748b" }}>Ingen notater denne dagen.</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
