@@ -795,9 +795,61 @@ function CalendarDashboard({
   }
 
   function changeMonth(delta: number) {
-    const next = new Date(year, month + delta, 1);
-    setMonthDate(next.toISOString().slice(0, 10));
-  }
+  const base = new Date(`${monthDate.slice(0, 7)}-01T12:00:00`);
+  base.setMonth(base.getMonth() + delta);
+  setMonthDate(base.toISOString().slice(0, 10));
+}
+
+function easterDate(year: number) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+
+  return new Date(year, month - 1, day, 12);
+}
+
+function dateKey(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
+function addDays(d: Date, days: number) {
+  const next = new Date(d);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function norwegianHolidayName(date: string) {
+  const y = Number(date.slice(0, 4));
+  const easter = easterDate(y);
+
+  const holidays: Record<string, string> = {
+    [`${y}-01-01`]: "1. nyttårsdag",
+    [`${y}-05-01`]: "Arbeidernes dag",
+    [`${y}-05-17`]: "17. mai",
+    [`${y}-12-25`]: "1. juledag",
+    [`${y}-12-26`]: "2. juledag",
+    [dateKey(addDays(easter, -3))]: "Skjærtorsdag",
+    [dateKey(addDays(easter, -2))]: "Langfredag",
+    [dateKey(easter)]: "1. påskedag",
+    [dateKey(addDays(easter, 1))]: "2. påskedag",
+    [dateKey(addDays(easter, 39))]: "Kristi himmelfartsdag",
+    [dateKey(addDays(easter, 49))]: "1. pinsedag",
+    [dateKey(addDays(easter, 50))]: "2. pinsedag",
+  };
+
+  return holidays[date] || "";
+}
 
   function dayOrders(date: string) {
     return data.orders
@@ -845,10 +897,7 @@ function CalendarDashboard({
     <section>
       <div className="card">
         <div className="between">
-          <div>
-            <h2>Startside</h2>
-            <p style={{ color: "#64748b" }}>Kalender og dagens oversikt</p>
-          </div>
+          
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className={view === "month" ? "btn active" : "btn"} onClick={() => setView("month")}>
@@ -873,7 +922,9 @@ function CalendarDashboard({
           <>
             <div className="between" style={{ marginTop: 16 }}>
               <button className="btn" onClick={() => changeMonth(-1)}>Forrige</button>
-              <h2 style={{ textTransform: "capitalize" }}>{monthName(monthDate)}</h2>
+              <h1 style={{ textTransform: "capitalize", fontSize: 38, fontWeight: 900, margin: 0 }}>
+  {monthName(monthDate)}
+</h1>
               <button className="btn" onClick={() => changeMonth(1)}>Neste</button>
             </div>
 
@@ -894,6 +945,21 @@ function CalendarDashboard({
                 const orders = dayOrders(date);
                 const notes = dayNotes(date);
                 const production = hasProduction(date);
+                const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
+const isSunday = dayOfWeek === 0;
+const isToday = date === todayDate;
+const isPast = date < todayDate;
+const holidayName = norwegianHolidayName(date);
+
+const dayBackground = isToday
+  ? "#dcfce7"
+  : holidayName || isSunday
+    ? "#fee2e2"
+    : isPast
+      ? "#f5efe3"
+      : inMonth
+        ? "white"
+        : "#f1f5f9";
 
                 return (
                   <button
@@ -907,14 +973,18 @@ function CalendarDashboard({
                       textAlign: "left",
                       padding: 10,
                       borderRadius: 14,
-                      border: date === todayDate ? "2px solid #0f172a" : "1px solid #dbe4ef",
-                      background: inMonth ? "white" : "#f1f5f9",
+                      border: isToday ? "2px solid #166534" : holidayName ? "2px solid #dc2626" : "1px solid #dbe4ef",
+                      background: dayBackground,
                       opacity: inMonth ? 1 : 0.55,
                       cursor: "pointer",
                     }}
                   >
                     <b>{Number(date.slice(8, 10))}</b>
-
+{holidayName && (
+  <div style={{ marginTop: 4, fontSize: 11, color: "#991b1b", fontWeight: 800 }}>
+    {holidayName}
+  </div>
+)}
                     {production && (
                       <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800 }}>
                         🥖 Produksjon
