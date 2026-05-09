@@ -4521,141 +4521,81 @@ return (
 
     <Section id="personell" title="Personell">
       <div className="form-grid">
-        <label>
-          MVA mat
-          <input
-            type="number"
-            value={s.foodVat}
-            onChange={(e) =>
-              updateData({
-                settings: {
-                  ...s,
-                  foodVat: Number(e.target.value),
-                },
-              })
-            }
-          />
-        </label>
-
-        <label>
-          Kostnad kokker/time
-          <input
-            type="number"
-            value={s.chefHourlyRate}
-            onChange={(e) =>
-              updateData({
-                settings: {
-                  ...s,
-                  chefHourlyRate: Number(e.target.value),
-                },
-              })
-            }
-          />
-        </label>
-
-        <label>
-          Grunntid kokker/min
-          <input
-            type="number"
-            value={s.chefBaseMinutes}
-            onChange={(e) =>
-              updateData({
-                settings: {
-                  ...s,
-                  chefBaseMinutes: Number(e.target.value),
-                },
-              })
-            }
-          />
-        </label>
-
-        <label>
-          Tillegg min pr 10 pers
-          <input
-            type="number"
-            value={s.chefExtraMinutesPer10}
-            onChange={(e) =>
-              updateData({
-                settings: {
-                  ...s,
-                  chefExtraMinutesPer10: Number(e.target.value),
-                },
-              })
-            }
-          />
-        </label>
-
-        <label>
-          2 kokker over antall
-          <input
-            type="number"
-            value={s.twoChefsOverGuestCount}
-            onChange={(e) =>
-              updateData({
-                settings: {
-                  ...s,
-                  twoChefsOverGuestCount: Number(e.target.value),
-                },
-              })
-            }
-          />
-        </label>
-
-        <label>
-          Servitør/time
-          <input
-            type="number"
-            value={s.waiterHourlyRate}
-            onChange={(e) =>
-              updateData({
-                settings: {
-                  ...s,
-                  waiterHourlyRate: Number(e.target.value),
-                },
-              })
-            }
-          />
-        </label>
-
-        <label>
-          Servitør etter midnatt
-          <input
-            type="number"
-            value={s.waiterAfterMidnightHourlyRate}
-            onChange={(e) =>
-              updateData({
-                settings: {
-                  ...s,
-                  waiterAfterMidnightHourlyRate: Number(e.target.value),
-                },
-              })
-            }
-          />
-        </label>
+        <label>MVA mat<input type="number" value={s.foodVat} onChange={(e) => updateData({ settings: { ...s, foodVat: Number(e.target.value) } })} /></label>
+        <label>Kostnad kokker/time<input type="number" value={s.chefHourlyRate} onChange={(e) => updateData({ settings: { ...s, chefHourlyRate: Number(e.target.value) } })} /></label>
+        <label>Grunntid kokker/min<input type="number" value={s.chefBaseMinutes} onChange={(e) => updateData({ settings: { ...s, chefBaseMinutes: Number(e.target.value) } })} /></label>
+        <label>Tillegg min pr 10 pers<input type="number" value={s.chefExtraMinutesPer10} onChange={(e) => updateData({ settings: { ...s, chefExtraMinutesPer10: Number(e.target.value) } })} /></label>
+        <label>2 kokker over antall<input type="number" value={s.twoChefsOverGuestCount} onChange={(e) => updateData({ settings: { ...s, twoChefsOverGuestCount: Number(e.target.value) } })} /></label>
+        <label>Servitør/time<input type="number" value={s.waiterHourlyRate} onChange={(e) => updateData({ settings: { ...s, waiterHourlyRate: Number(e.target.value) } })} /></label>
+        <label>Servitør etter midnatt<input type="number" value={s.waiterAfterMidnightHourlyRate} onChange={(e) => updateData({ settings: { ...s, waiterAfterMidnightHourlyRate: Number(e.target.value) } })} /></label>
       </div>
-    </Section>  <h3>Database</h3>
+    </Section>
 
-  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-    <button className="btn active" onClick={exportData}>
-      Eksporter database
-    </button>
+    <Section id="retailMargins" title="Standard marginer for videresalg">
+      <div className="form-grid">
+        {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].map((cat) => (
+          <label key={cat}>
+            {cat}
+            <input
+              type="number"
+              value={s.retailMargins?.[cat] ?? 50}
+              onChange={(e) =>
+                updateData({
+                  settings: {
+                    ...s,
+                    retailMargins: {
+                      ...(s.retailMargins || {}),
+                      [cat]: Number(e.target.value),
+                    },
+                  },
+                })
+              }
+            />
+          </label>
+        ))}
+      </div>
+    </Section>
 
-    <label className="btn">
-      Importer database
-      <input
-        type="file"
-        accept="application/json"
-        hidden
-        onChange={(e) => importData(e.target.files?.[0] || null)}
-      />
-    </label>
-  </div>
+    <Section id="venues" title="Leie av lokaler, priser">
+      <div>{data.venues.map((v, i) => <div key={v.id} className="editable-row"><input value={v.name} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={v.price} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ venues: data.venues.filter((x) => x.id !== v.id) })}>Slett</button></div>)}</div>
+      <div className="form-grid three"><input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} /><input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newVenue.name.trim()) return; updateData({ venues: [...data.venues, { id: `${idFromName(newVenue.name)}-${Date.now()}`, name: newVenue.name.trim(), price: Number(newVenue.price) || 0 }] }); setNewVenue({ name: "", price: "0" }); }}>Legg til</button></div>
+    </Section>
 
-          <p style={{ fontSize: 12, color: "#64748b" }}>
-          Tips: Ta backup før du importerer ny fil.
-        </p>
+    <Section id="rentalAddons" title="Leie av lokale, tillegg">
+      <div>{data.rentalAddons.map((addon, i) => <div key={addon.id} className="editable-row"><input value={addon.name} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={addon.price} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ rentalAddons: data.rentalAddons.filter((x) => x.id !== addon.id) })}>Slett</button></div>)}</div>
+      <div className="form-grid three"><input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} /><input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newRentalAddon.name.trim()) return; updateData({ rentalAddons: [...data.rentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0 }] }); setNewRentalAddon({ name: "", price: "0" }); }}>Legg til</button></div>
+    </Section>
+
+    <Section id="materialCats" title="Kategorier for råvarer">
+      <CategoryEditor values={data.materialCategories} newValue={newMaterialCategory} setNewValue={setNewMaterialCategory} onSave={(next) => updateData({ materialCategories: next })} />
+    </Section>
+
+    <Section id="productCats" title="Kategorier for produkter/menyer">
+      <h3>Produktkategorier</h3>
+      <CategoryEditor values={data.productCategories} newValue={newProductCategory} setNewValue={setNewProductCategory} onSave={(next) => updateData({ productCategories: next })} />
+      <h3>Menykategorier</h3>
+      <CategoryEditor values={data.menuCategories} newValue={newMenuCategory} setNewValue={setNewMenuCategory} onSave={(next) => updateData({ menuCategories: next })} />
+    </Section>
+
+    <Section id="packaging" title="Priser på emballasje">
+      <div>{data.packaging.map((p, i) => <div key={p.id} className="editable-row"><input value={p.name} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={p.price} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ packaging: data.packaging.filter((x) => x.id !== p.id) })}>Slett</button></div>)}</div>
+      <div className="form-grid three"><input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} /><input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newPackaging.name.trim()) return; updateData({ packaging: [...data.packaging, { id: `${idFromName(newPackaging.name)}-${Date.now()}`, name: newPackaging.name.trim(), price: Number(newPackaging.price) || 0 }] }); setNewPackaging({ name: "", price: "0" }); }}>Legg til</button></div>
+    </Section>
+
+    <h3>Database</h3>
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <button className="btn active" onClick={exportData}>Eksporter database</button>
+      <label className="btn">
+        Importer database
+        <input type="file" accept="application/json" hidden onChange={(e) => importData(e.target.files?.[0] || null)} />
+      </label>
+    </div>
+
+    <p style={{ fontSize: 12, color: "#64748b" }}>
+      Tips: Ta backup før du importerer ny fil.
+    </p>
     </section>
-  );
+);
 }
 
 function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void }) {
