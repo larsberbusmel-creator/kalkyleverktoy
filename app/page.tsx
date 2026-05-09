@@ -910,7 +910,7 @@ breadScaleFlourPercent:
         <Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} />
       </div>
 
-      {form.category === "Deli" && (() => {
+      {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].includes(form.category) && (() => {
         const costExVat = (Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1);
         const selectedMargin = Math.max(Number(form.deliMargin) || 50, 0);
         const suggestedIncVat = selectedMargin >= 100 ? 0 : Math.ceil((costExVat / (1 - selectedMargin / 100)) * (1 + data.settings.foodVat / 100));
