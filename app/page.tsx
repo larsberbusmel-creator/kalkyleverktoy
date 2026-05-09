@@ -145,9 +145,10 @@ type Settings = {
   chefHourlyRate: number;
   chefBaseMinutes: number;
   chefExtraMinutesPer10: number;
-  twoChefsOverGuests: number;
-  waiterRate: number;
-  waiterAfterMidnightRate: number;
+  twoChefsOverGuestCount: number;
+  waiterHourlyRate: number;
+  waiterAfterMidnightHourlyRate: number;
+  retailMargins?: Record<string, number>;
 };
 
 type InventoryCount = { packages: number; loose: number; packagePrice: number; pricePerUnit: number };
@@ -358,7 +359,24 @@ const initialData: AppData = {
     { id: "tapas", productNumber: "3001", name: "Tapasbuffet", type: "cateringmeny", subType: "", category: "Catering", yieldAmount: 1, yieldUnit: "porsjoner", customerPrice: 595, targetMargin: 70, lines: [{ itemType: "product", itemId: "mandelbolle", amount: 1, unit: "stk" }], packaging: [] },
   ],
   orders: [],
-  settings: { foodVat: 15, chefHourlyRate: 350, chefBaseMinutes: 60, chefExtraMinutesPer10: 30, twoChefsOverGuests: 40, waiterRate: 580, waiterAfterMidnightRate: 950 },
+settings: {
+  foodVat: 15,
+  chefHourlyRate: 350,
+  chefBaseMinutes: 60,
+  chefExtraMinutesPer10: 30,
+  twoChefsOverGuestCount: 30,
+  waiterHourlyRate: 350,
+  waiterAfterMidnightHourlyRate: 500,
+
+  retailMargins: {
+    Deli: 50,
+    Mineralvann: 70,
+    Øl: 70,
+    Vin: 70,
+    Brennevin: 70,
+    Cider: 70,
+  },
+},
   rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterHours: 0, waiterAfterMidnightHours: 0, productLines: [{ productId: "", guests: 0 }], extraLines: [{ text: "", amount: 0 }] },
   venues: [{ id: "kafeen", name: "Kaféen", price: 11000 }, { id: "oscarshall", name: "Oscarshall", price: 18000 }, { id: "gammelfloya", name: "Gammelfløya", price: 18000 }, { id: "bodogaard", name: "Bodøgaard hel helg", price: 24000 }],
   packaging: [{ id: "glass", name: "Glass", price: 8 }, { id: "brodpose", name: "Brødpose", price: 2.5 }, { id: "aluminiumsbakke", name: "Aluminiumsbakke", price: 12 }],
@@ -897,16 +915,7 @@ breadScaleFlourPercent:
 }
 
 function defaultRetailMargin(category: string) {
-  const map: Record<string, number> = {
-    Deli: 50,
-    Mineralvann: 70,
-    Øl: 70,
-    Vin: 70,
-    Brennevin: 70,
-    Cider: 70,
-  };
-
-  return map[category] ?? 50;
+  return data.settings.retailMargins?.[category] ?? 50;
 }
 
   return <section className="card">
@@ -4434,8 +4443,17 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
 
   const addonLines = rental.extraLines || [];
   const addonTotal = addonLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+ const waiterAfterMidnightHours = Number(rental.waiterAfterMidnightHours || 0);
   const food = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0);
-  const waiters = rental.waiters * (rental.waiterHours * data.settings.waiterRate + rental.waiterAfterMidnightHours * data.settings.waiterAfterMidnightRate);
+  const waiters = rental.productLines.reduce(
+  (sum, l) =>
+    sum +
+    (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) *
+      l.guests,
+  0
+)
++ rental.waiterHours * data.settings.waiterHourlyRate
++ waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
   const total = rental.venuePrice + food + waiters + addonTotal;
 
   const quantityAddons = ["Tøyservietter", "Vinpakke 3 glass", "Alkoholfri drikkepakke 3 glass"];
@@ -4497,8 +4515,125 @@ function SettingsTab({
   const s = data.settings;
   const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) => <div className="settings-section"><button className="settings-toggle" onClick={() => setOpen(open === id ? "" : id)}>{title}<span>{open === id ? "−" : "+"}</span></button>{open === id && <div className="settings-content">{children}</div>}</div>;
 
-  return <section className="card"><h2>Innstillinger</h2><Section id="personell" title="Personell"><div className="form-grid"><label>MVA mat<input type="number" value={s.foodVat} onChange={(e) => updateData({ settings: { ...s, foodVat: Number(e.target.value) } })} /></label><label>Kostnad kokker/time<input type="number" value={s.chefHourlyRate} onChange={(e) => updateData({ settings: { ...s, chefHourlyRate: Number(e.target.value) } })} /></label><label>Grunntid kokker/min<input type="number" value={s.chefBaseMinutes} onChange={(e) => updateData({ settings: { ...s, chefBaseMinutes: Number(e.target.value) } })} /></label><label>Tillegg min pr 10 pers<input type="number" value={s.chefExtraMinutesPer10} onChange={(e) => updateData({ settings: { ...s, chefExtraMinutesPer10: Number(e.target.value) } })} /></label><label>2 kokker over antall<input type="number" value={s.twoChefsOverGuests} onChange={(e) => updateData({ settings: { ...s, twoChefsOverGuests: Number(e.target.value) } })} /></label><label>Servitør/time<input type="number" value={s.waiterRate} onChange={(e) => updateData({ settings: { ...s, waiterRate: Number(e.target.value) } })} /></label><label>Servitør etter midnatt<input type="number" value={s.waiterAfterMidnightRate} onChange={(e) => updateData({ settings: { ...s, waiterAfterMidnightRate: Number(e.target.value) } })} /></label></div></Section><Section id="venues" title="Leie av lokaler, priser"><div>{data.venues.map((v, i) => <div key={v.id} className="editable-row"><input value={v.name} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={v.price} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ venues: data.venues.filter((x) => x.id !== v.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} /><input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newVenue.name.trim()) return; updateData({ venues: [...data.venues, { id: `${idFromName(newVenue.name)}-${Date.now()}`, name: newVenue.name.trim(), price: Number(newVenue.price) || 0 }] }); setNewVenue({ name: "", price: "0" }); }}>Legg til</button></div></Section><Section id="rentalAddons" title="Leie av lokale, tillegg"><div>{data.rentalAddons.map((addon, i) => <div key={addon.id} className="editable-row"><input value={addon.name} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={addon.price} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ rentalAddons: data.rentalAddons.filter((x) => x.id !== addon.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} /><input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newRentalAddon.name.trim()) return; updateData({ rentalAddons: [...data.rentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0 }] }); setNewRentalAddon({ name: "", price: "0" }); }}>Legg til</button></div></Section><Section id="materialCats" title="Kategorier for råvarer"><CategoryEditor values={data.materialCategories} newValue={newMaterialCategory} setNewValue={setNewMaterialCategory} onSave={(next) => updateData({ materialCategories: next })} /></Section><Section id="productCats" title="Kategorier for produkter/menyer"><h3>Produktkategorier</h3><CategoryEditor values={data.productCategories} newValue={newProductCategory} setNewValue={setNewProductCategory} onSave={(next) => updateData({ productCategories: next })} /><h3>Menykategorier</h3><CategoryEditor values={data.menuCategories} newValue={newMenuCategory} setNewValue={setNewMenuCategory} onSave={(next) => updateData({ menuCategories: next })} /></Section><Section id="packaging" title="Priser på emballasje"><div>{data.packaging.map((p, i) => <div key={p.id} className="editable-row"><input value={p.name} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={p.price} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ packaging: data.packaging.filter((x) => x.id !== p.id) })}>Slett</button></div>)}</div><div className="form-grid three"><input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} /><input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newPackaging.name.trim()) return; updateData({ packaging: [...data.packaging, { id: `${idFromName(newPackaging.name)}-${Date.now()}`, name: newPackaging.name.trim(), price: Number(newPackaging.price) || 0 }] }); setNewPackaging({ name: "", price: "0" }); }}>Legg til</button></div></Section><div style={{ marginTop: 40 }}>
-  <h3>Database</h3>
+return (
+  <section className="card">
+    <h2>Innstillinger</h2>
+
+    <Section id="personell" title="Personell">
+      <div className="form-grid">
+        <label>
+          MVA mat
+          <input
+            type="number"
+            value={s.foodVat}
+            onChange={(e) =>
+              updateData({
+                settings: {
+                  ...s,
+                  foodVat: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </label>
+
+        <label>
+          Kostnad kokker/time
+          <input
+            type="number"
+            value={s.chefHourlyRate}
+            onChange={(e) =>
+              updateData({
+                settings: {
+                  ...s,
+                  chefHourlyRate: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </label>
+
+        <label>
+          Grunntid kokker/min
+          <input
+            type="number"
+            value={s.chefBaseMinutes}
+            onChange={(e) =>
+              updateData({
+                settings: {
+                  ...s,
+                  chefBaseMinutes: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </label>
+
+        <label>
+          Tillegg min pr 10 pers
+          <input
+            type="number"
+            value={s.chefExtraMinutesPer10}
+            onChange={(e) =>
+              updateData({
+                settings: {
+                  ...s,
+                  chefExtraMinutesPer10: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </label>
+
+        <label>
+          2 kokker over antall
+          <input
+            type="number"
+            value={s.twoChefsOverGuestCount}
+            onChange={(e) =>
+              updateData({
+                settings: {
+                  ...s,
+                  twoChefsOverGuestCount: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </label>
+
+        <label>
+          Servitør/time
+          <input
+            type="number"
+            value={s.waiterHourlyRate}
+            onChange={(e) =>
+              updateData({
+                settings: {
+                  ...s,
+                  waiterHourlyRate: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </label>
+
+        <label>
+          Servitør etter midnatt
+          <input
+            type="number"
+            value={s.waiterAfterMidnightHourlyRate}
+            onChange={(e) =>
+              updateData({
+                settings: {
+                  ...s,
+                  waiterAfterMidnightHourlyRate: Number(e.target.value),
+                },
+              })
+            }
+          />
+        </label>
+      </div>
+    </Section>  <h3>Database</h3>
 
   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
     <button className="btn active" onClick={exportData}>
@@ -4516,10 +4651,11 @@ function SettingsTab({
     </label>
   </div>
 
-  <p style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
-    Tips: Ta backup før du importerer ny fil.
-  </p>
-</div></section>;
+          <p style={{ fontSize: 12, color: "#64748b" }}>
+          Tips: Ta backup før du importerer ny fil.
+        </p>
+    </section>
+  );
 }
 
 function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void }) {
