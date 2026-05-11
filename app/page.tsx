@@ -3587,6 +3587,7 @@ th{background:#f3f4f6}
           <button className="btn active" onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>{editingOrderId && <button className="btn" onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt redigering</button>}
         </div>
       )}
+      
 
       <div className="card">
         <h2>Ordrearkiv</h2>
