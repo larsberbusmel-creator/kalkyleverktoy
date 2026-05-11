@@ -5080,6 +5080,67 @@ function GlobalStyles() {
   border-color: #facc15;
 }
     }
+@media (max-width: 768px) {
+  main {
+    padding: 10px !important;
+  }
+
+  .card {
+    padding: 14px !important;
+    border-radius: 14px !important;
+  }
+
+  nav {
+    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    padding-bottom: 6px;
+  }
+
+  nav .btn {
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+
+  .form-grid,
+  .form-grid.three,
+  .form-grid.four,
+  .form-grid.five,
+  .grid.two,
+  .metric-row,
+  .metric-row.three-metrics {
+    grid-template-columns: 1fr !important;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  th,
+  td {
+    padding: 7px !important;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px !important;
+  }
+
+  .between {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 10px;
+  }
+
+  footer img {
+    width: 100px !important;
+  }
+}
   `}</style>
   );
 }
+
