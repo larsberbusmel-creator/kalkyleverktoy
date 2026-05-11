@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Micemetrics",
+  title: "Misemetrics",
   description: "Kalkulering",
     icons: {
     icon: "/logo.png",
