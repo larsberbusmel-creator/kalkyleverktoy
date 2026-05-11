@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "webshop" | "production" | "inventory" | "rental" | "settings";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert";
@@ -693,7 +693,7 @@ function productCost(product: Product, visited: string[] = []) {
 </header>
 
         <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "18px 0" }}>
-          {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
+          {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["webshop", "Webshopimport"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
         </nav>
 
         {tab === "dashboard" && (
@@ -707,6 +707,13 @@ function productCost(product: Product, visited: string[] = []) {
         {tab === "recipes" && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products" && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders" && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
+        {tab === "webshop" && (
+  <WebshopImportTab
+    data={data}
+    updateData={updateData}
+    setTab={setTab}
+  />
+)}
         {tab === "production" && (
   <ProductionTab
     data={data}
@@ -2980,7 +2987,247 @@ function formatTimeInput(value: string) {
 
   return `Kl ${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
 }
+function WebshopImportTab({
+  data,
+  updateData,
+  setTab,
+}: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  setTab: (tab: Tab) => void;
+}) {
+  const [rawText, setRawText] = useState("");
+  const [preview, setPreview] = useState<Order | null>(null);
+  const [unmatched, setUnmatched] = useState<string[]>([]);
 
+  function parseNorwegianDate(text: string) {
+    const months: Record<string, string> = {
+      januar: "01",
+      februar: "02",
+      mars: "03",
+      april: "04",
+      mai: "05",
+      juni: "06",
+      juli: "07",
+      august: "08",
+      september: "09",
+      oktober: "10",
+      november: "11",
+      desember: "12",
+    };
+
+    const match = text.match(/(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå]+)\s+(\d{1,2}:\d{2})/i);
+
+    if (!match) {
+      return { date: today(), time: "" };
+    }
+
+    const day = match[1].padStart(2, "0");
+    const month = months[match[2].toLowerCase()] || "01";
+    const year = new Date().getFullYear();
+    const time = match[3];
+
+    return {
+      date: `${year}-${month}-${day}`,
+      time,
+    };
+  }
+
+  function normalizePhone(value: string) {
+    return value.replace(/[^\d+]/g, "");
+  }
+
+  function findProduct(line: string) {
+    const cleaned = line.trim().toLowerCase();
+
+    const byNumber = data.products.find((p) =>
+      p.productNumber && cleaned.includes(String(p.productNumber).toLowerCase())
+    );
+
+    if (byNumber) return byNumber;
+
+    return data.products.find((p) =>
+      cleaned.includes(p.name.toLowerCase())
+    );
+  }
+
+  function parseWebshopOrder() {
+    const text = rawText;
+    const lines = text
+      .split(/\n/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    const orderNumberMatch = text.match(/(?:Bestilling|Ordre|Order)\s*#?\s*(\d{4,})/i) || text.match(/\b(\d{5,})\b/);
+    const orderNumber = orderNumberMatch?.[1] || String(Date.now());
+
+    const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    const phoneMatch = text.match(/(?:\+47)?\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/);
+
+    const dateInfo = parseNorwegianDate(text);
+
+    let customer = "";
+
+    const customerInfoIndex = lines.findIndex((l) => /kundeinformasjon/i.test(l));
+    if (customerInfoIndex >= 0 && lines[customerInfoIndex + 1]) {
+      customer = lines[customerInfoIndex + 1];
+    }
+
+    if (!customer) {
+      const orderHeader = lines.find((l) => /\d+\s*\/\s*/.test(l));
+      customer = orderHeader?.split("/")[1]?.trim() || "";
+    }
+
+    const nextUnmatched: string[] = [];
+
+    const orderLines = lines.flatMap((line) => {
+      const product = findProduct(line);
+
+      if (!product) return [];
+
+      const quantityMatch =
+        line.match(/\b(?:x|×)?\s*(\d+)\b/) ||
+        line.match(/\s(\d+)\s+\d+[,.]?\d*/);
+
+      const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+
+      return [
+        {
+          productId: product.id,
+          quantity,
+        },
+      ];
+    });
+
+    const uniqueLines = orderLines.filter(
+      (line, index, arr) =>
+        arr.findIndex((x) => x.productId === line.productId) === index
+    );
+
+    lines.forEach((line) => {
+      const looksLikeProductLine =
+        /\d+/.test(line) &&
+        !/telefon|mva|total|sum|pris|bestilling|ordre|dato|butikk|kunde|hent/i.test(line);
+
+      if (looksLikeProductLine && !findProduct(line)) {
+        nextUnmatched.push(line);
+      }
+    });
+
+    const nextOrder: Order = {
+      id: `webshop-${orderNumber}-${Date.now()}`,
+      type: "bakeri",
+      customerType: "privat",
+      customer: customer || "Webshopkunde",
+      companyName: "",
+      orgNumber: "",
+      companyAddress: "",
+      phone: phoneMatch ? normalizePhone(phoneMatch[0]) : "",
+      deliveryAddress: "",
+      date: dateInfo.date,
+      time: dateInfo.time,
+      guests: 1,
+      productId: uniqueLines[0]?.productId || data.products[0]?.id || "",
+      orderLines: uniqueLines,
+      discountPercent: 0,
+      isRecurring: false,
+      recurringDays: [],
+      recurringNote: `Importert fra webshop. Ordrenr: ${orderNumber}`,
+      allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
+      dietVegan: "0",
+      dietVegetarian: "0",
+      dietPregnant: "0",
+      dietOther: "",
+    };
+
+    setPreview(nextOrder);
+    setUnmatched(nextUnmatched);
+  }
+
+  function createOrder() {
+    if (!preview) return;
+    if (!preview.orderLines.length) {
+      return alert("Fant ingen produktlinjer. Sjekk at produktnavn eller varenummer finnes i Misemetrics.");
+    }
+
+    updateData({
+      orders: [preview, ...data.orders],
+    });
+
+    alert("Webshopordre opprettet.");
+    setTab("orders");
+  }
+
+  return (
+    <section className="card">
+      <h2>Importer webshopordre</h2>
+      <p style={{ color: "#64748b" }}>
+        Lim inn tekst fra ordrebekreftelsen. Systemet forsøker å matche mot produktnummer først, deretter produktnavn.
+      </p>
+
+      <textarea
+        className="textarea"
+        value={rawText}
+        onChange={(e) => setRawText(e.target.value)}
+        placeholder="Lim inn e-posttekst her..."
+        style={{ minHeight: 240 }}
+      />
+
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <button className="btn active" onClick={parseWebshopOrder}>
+          Les ordre
+        </button>
+        <button className="btn" onClick={() => setRawText("")}>
+          Tøm
+        </button>
+      </div>
+
+      {preview && (
+        <div className="soft-box" style={{ marginTop: 18 }}>
+          <h3>Forhåndsvisning</h3>
+
+          <p><b>Kunde:</b> {preview.customer}</p>
+          <p><b>Telefon:</b> {preview.phone || "-"}</p>
+          <p><b>Dato/tid:</b> {preview.date} {preview.time}</p>
+
+          <h4>Produkter</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Produkt</th>
+                <th>Antall</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.orderLines.map((line, i) => {
+                const product = data.products.find((p) => p.id === line.productId);
+                return (
+                  <tr key={i}>
+                    <td>{product?.productNumber ? `${product.productNumber} · ` : ""}{product?.name || "Ukjent produkt"}</td>
+                    <td>{line.quantity}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {unmatched.length > 0 && (
+            <div style={{ marginTop: 12, color: "#991b1b" }}>
+              <b>Linjer som ikke ble matchet:</b>
+              <ul>
+                {unmatched.map((line, i) => <li key={i}>{line}</li>)}
+              </ul>
+            </div>
+          )}
+
+          <button className="btn active" onClick={createOrder}>
+            Opprett ordre
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
 function OrdersTab({ data, updateData, productAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; productAllergens: (p: Product) => string[] }) {
   const emptyOrder = (): Order => ({
     id: "",
