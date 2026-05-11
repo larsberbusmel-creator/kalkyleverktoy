@@ -3062,7 +3062,14 @@ function WebshopImportTab({
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
     const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    const phoneMatch = text.match(/(?:\+47)?\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/);
+    const phoneMatches = Array.from(
+  text.matchAll(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/g)
+).map((m) => m[0]);
+
+const phoneMatch =
+  phoneMatches.find((p) => !p.replace(/\D/g, "").startsWith("68")) ||
+  phoneMatches[0] ||
+  "";
 
     const dateInfo = parseNorwegianDate(text);
 
@@ -3080,24 +3087,27 @@ function WebshopImportTab({
 
     const nextUnmatched: string[] = [];
 
-    const orderLines = lines.flatMap((line) => {
-      const product = findProduct(line);
+    const orderLines: OrderLine[] = [];
 
-      if (!product) return [];
+for (let i = 0; i < lines.length; i++) {
+  const line = lines[i];
+  const nextLine = lines[i + 1] || "";
+  const combined = `${line} ${nextLine}`;
 
-      const quantityMatch =
-        line.match(/\b(?:x|×)?\s*(\d+)\b/) ||
-        line.match(/\s(\d+)\s+\d+[,.]?\d*/);
+  const product = findProduct(combined);
+  if (!product) continue;
 
-      const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+  const productNumber = product.productNumber || "";
+  const lineWithoutProductNumber = combined.replace(productNumber, "").trim();
 
-      return [
-        {
-          productId: product.id,
-          quantity,
-        },
-      ];
-    });
+  const quantityMatch = lineWithoutProductNumber.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
+  const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+
+  orderLines.push({
+    productId: product.id,
+    quantity,
+  });
+}
 
     const uniqueLines = orderLines.filter(
       (line, index, arr) =>
@@ -3122,7 +3132,7 @@ function WebshopImportTab({
       companyName: "",
       orgNumber: "",
       companyAddress: "",
-      phone: phoneMatch ? normalizePhone(phoneMatch[0]) : "",
+      phone: phoneMatch ? normalizePhone(phoneMatch) : "",
       deliveryAddress: "",
       date: dateInfo.date,
       time: dateInfo.time,
@@ -3587,7 +3597,7 @@ th{background:#f3f4f6}
           <button className="btn active" onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>{editingOrderId && <button className="btn" onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt redigering</button>}
         </div>
       )}
-      
+
 
       <div className="card">
         <h2>Ordrearkiv</h2>
