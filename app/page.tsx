@@ -3062,16 +3062,17 @@ function WebshopImportTab({
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
     const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    const phoneMatches = Array.from(
+   const phoneMatches = Array.from(
   text.matchAll(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/g)
 ).map((m) => m[0]);
 
 const phoneMatch =
-  phoneMatches.find((p) => !p.replace(/\D/g, "").startsWith("68")) ||
-  phoneMatches[0] ||
-  "";
+  phoneMatches.find((p) => p.replace(/\D/g, "").length === 8) || "";
 
-    const dateInfo = parseNorwegianDate(text);
+    const deliveryMatch = text.match(/Tidspunkt:\s*(.+)/i);
+const dateInfo = parseNorwegianDate(
+  deliveryMatch?.[1] || text
+);
 
     let customer = "";
 
@@ -3097,11 +3098,13 @@ for (let i = 0; i < lines.length; i++) {
   const product = findProduct(combined);
   if (!product) continue;
 
-  const productNumber = product.productNumber || "";
-  const lineWithoutProductNumber = combined.replace(productNumber, "").trim();
+  // Eksempel:
+  // "Crispy Chicken Sandwich 18 195 kr 3 510 kr"
+  const quantityMatch = combined.match(/(\d+)\s+\d+[,.]?\d*\s*kr/i);
 
-  const quantityMatch = lineWithoutProductNumber.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
-  const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+  const quantity = quantityMatch
+    ? Number(quantityMatch[1])
+    : 1;
 
   orderLines.push({
     productId: product.id,
@@ -3133,7 +3136,8 @@ for (let i = 0; i < lines.length; i++) {
       orgNumber: "",
       companyAddress: "",
       phone: phoneMatch ? normalizePhone(phoneMatch) : "",
-      deliveryAddress: "",
+      deliveryAddress:
+  text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() || "",
       date: dateInfo.date,
       time: dateInfo.time,
       guests: 1,
