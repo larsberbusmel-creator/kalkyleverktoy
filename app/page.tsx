@@ -3100,8 +3100,9 @@ const dateInfo = parseNorwegianDate(
 
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
-  const nextLine = lines[i + 1] || "";
-  const combined = `${line} ${nextLine}`;
+ const nextLine = lines[i + 1] || "";
+const nextNextLine = lines[i + 2] || "";
+const combined = `${line} ${nextLine} ${nextNextLine}`;
 
   const product = findProduct(combined);
   if (!product) continue;
@@ -3132,10 +3133,14 @@ const quantity = quantityMatch
   });
 }
 
-    const uniqueLines = orderLines.filter(
-      (line, index, arr) =>
-        arr.findIndex((x) => x.productId === line.productId) === index
-    );
+    const uniqueLines = Object.values(
+  orderLines.reduce((acc, line) => {
+    if (!acc[line.productId] || line.quantity > acc[line.productId].quantity) {
+      acc[line.productId] = line;
+    }
+    return acc;
+  }, {} as Record<string, OrderLine>)
+);
 
     lines.forEach((line) => {
       const looksLikeProductLine =
