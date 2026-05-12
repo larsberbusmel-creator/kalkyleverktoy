@@ -3620,10 +3620,7 @@ th{background:#f3f4f6}
             <Metric label="Sum eks. mva" value={currency(exVatFromIncVat(orderTotalIncVat(form), data.settings.foodVat))} />
           </div>
 
-          <button className="btn" onClick={() => printOrder(o, true)}>Print med grunnlag</button>
-<button className="btn" onClick={() => printOrder(o, false)}>Print uten grunnlag</button>
-
-          <h3>Produksjonsgrunnlag for denne ordren</h3>
+                    <h3>Produksjonsgrunnlag for denne ordren</h3>
           <table>
             <thead><tr><th>Fra produkt</th><th>Element</th><th>Mengde</th></tr></thead>
             <tbody>{productionRowsForOrder(form).map((r, i) => <tr key={i}><td>{r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody>
@@ -3646,8 +3643,32 @@ th{background:#f3f4f6}
                   <b>{formatDateNo(o.date)} {o.time} · {o.customerType === "bedrift" ? o.companyName : o.customer}</b><br />
                   <small>{o.type} · {o.guests} pers · {o.phone || "telefon mangler"} · {o.deliveryAddress || "adresse mangler"}</small>
                 </div>
-                <div><button className="link" onClick={() => editOrder(o)}>Rediger</button><button className="link" onClick={() => printOrder(o)}>Print</button><button className="link danger" onClick={() => { if (confirm("Slette ordren?")) updateData({ orders: data.orders.filter((x) => x.id !== o.id) }); }}>Slett</button></div>
-              </div>
+<div>
+  <button className="link" onClick={() => editOrder(o)}>
+    Rediger
+  </button>
+
+  <button className="link" onClick={() => printOrder(o, true)}>
+    Print med grunnlag
+  </button>
+
+  <button className="link" onClick={() => printOrder(o, false)}>
+    Print uten grunnlag
+  </button>
+
+  <button
+    className="link danger"
+    onClick={() => {
+      if (confirm("Slette ordren?")) {
+        updateData({
+          orders: data.orders.filter((x) => x.id !== o.id),
+        });
+      }
+    }}
+  >
+    Slett
+  </button>
+</div>              </div>
               <div style={{ marginTop: 8 }}>
                 {o.orderLines.map((l, i) => <span key={i} className="pill">{l.quantity} × {productName(l.productId)}</span>)}
               </div>
