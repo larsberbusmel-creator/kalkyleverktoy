@@ -3108,14 +3108,23 @@ for (let i = 0; i < lines.length; i++) {
 
   // Eksempel:
   // "Crispy Chicken Sandwich 18 195 kr 3 510 kr"
-  const productName = product.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const productNamePattern = product.name.replace(
+  /[.*+?^${}()|[\]\\]/g,
+  "\\$&"
+);
+
 const quantityMatch =
-  combined.match(new RegExp(`${productName}\\s+(\\d+)\\s+\\d+[,.]?\\d*\\s*kr`, "i")) ||
+  combined.match(
+    new RegExp(
+      `${productNamePattern}\\s+(\\d+)\\s+\\d+[,.]?\\d*\\s*kr`,
+      "i"
+    )
+  ) ||
   combined.match(/\s(\d+)\s+\d+[,.]?\d*\s*kr/i);
 
-  const quantity = quantityMatch
-    ? Number(quantityMatch[1])
-    : 1;
+const quantity = quantityMatch
+  ? Number(quantityMatch[1])
+  : 1;
 
   orderLines.push({
     productId: product.id,
