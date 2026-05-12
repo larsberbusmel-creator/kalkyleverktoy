@@ -3171,7 +3171,12 @@ const quantity = quantityMatch
       discountPercent: 0,
       isRecurring: false,
       recurringDays: [],
-      recurringNote: `Importert fra webshop. Ordrenr: ${orderNumber}`,
+      recurringNote: [
+  `Importert fra webshop. Ordrenr: ${orderNumber}`,
+  nextUnmatched.length
+    ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
+    : "",
+].filter(Boolean).join("\n\n"),
       allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
       dietVegan: "0",
       dietVegetarian: "0",
@@ -3360,8 +3365,8 @@ function OrdersTab({ data, updateData, productAllergens }: { data: AppData; upda
     return orderSubtotalIncVat(order) - orderDiscountAmount(order);
   }
 
-  function printOrder(order: Order) {
-    const rows = order.orderLines.map((line) => {
+function printOrder(order: Order, includeProduction = true) {
+      const rows = order.orderLines.map((line) => {
       const product = data.products.find((p) => p.id === line.productId);
       const lineTotal = (product?.customerPrice || 0) * line.quantity;
       return `<tr><td>${line.quantity}</td><td>${product?.name || "Ukjent"}</td><td>${currency(product?.customerPrice || 0)}</td><td>${currency(lineTotal)}</td></tr>`;
@@ -3385,7 +3390,7 @@ function OrdersTab({ data, updateData, productAllergens }: { data: AppData; upda
 
     const w = window.open("", "_blank");
     if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{display:flex;justify-content:space-between;border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.muted{color:#64748b}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}.warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:12px;margin:12px 0}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div><div class="logo">KJØKKENORDRE</div><div class="muted">${today()}</div></div><div class="right"><h1>${formatDateNo(order.date)} ${order.time || ""}</h1><p>${order.type}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${customerName || "Ikke angitt"}</b></p><p>Kontakt: ${order.customer || "-"}</p><p>Telefon: ${order.phone || "-"}</p><p>Levering: ${order.deliveryAddress || "-"}</p></div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${diets}</p><p><b>Allergier:</b> ${allergens}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table><div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div><h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{display:flex;justify-content:space-between;border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.muted{color:#64748b}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}.warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:12px;margin:12px 0}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div><div class="logo">KJØKKENORDRE</div><div class="muted">${today()}</div></div><div class="right"><h1>${formatDateNo(order.date)} ${order.time || ""}</h1><p>${order.type}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${customerName || "Ikke angitt"}</b></p><p>Kontakt: ${order.customer || "-"}</p><p>Telefon: ${order.phone || "-"}</p><p>Levering: ${order.deliveryAddress || "-"}</p></div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${diets}</p><p><b>Allergier:</b> ${allergens}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table><div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${includeProduction ? `<h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table>` : ""}</body></html>`);
     w.document.close();
     w.focus();
   }
@@ -3615,7 +3620,8 @@ th{background:#f3f4f6}
             <Metric label="Sum eks. mva" value={currency(exVatFromIncVat(orderTotalIncVat(form), data.settings.foodVat))} />
           </div>
 
-          <button className="btn" onClick={() => printOrder({ ...form, id: editingOrderId || "preview" })}>Print ordre</button>
+          <button className="btn" onClick={() => printOrder(o, true)}>Print med grunnlag</button>
+<button className="btn" onClick={() => printOrder(o, false)}>Print uten grunnlag</button>
 
           <h3>Produksjonsgrunnlag for denne ordren</h3>
           <table>
