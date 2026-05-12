@@ -3062,12 +3062,20 @@ function WebshopImportTab({
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
     const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-   const phoneMatches = Array.from(
-  text.matchAll(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/g)
-).map((m) => m[0]);
 
-const phoneMatch =
-  phoneMatches.find((p) => p.replace(/\D/g, "").length === 8) || "";
+let phoneMatch = "";
+
+if (emailMatch?.index !== undefined) {
+  const afterEmail = text.slice(emailMatch.index + emailMatch[0].length);
+
+  phoneMatch =
+    afterEmail.match(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/)?.[0] || "";
+}
+
+if (!phoneMatch) {
+  phoneMatch =
+    text.match(/Mottakers telefon:\s*((?:\+47\s*)?\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/i)?.[1] || "";
+}
 
     const deliveryMatch = text.match(/Tidspunkt:\s*(.+)/i);
 const dateInfo = parseNorwegianDate(
@@ -3100,7 +3108,10 @@ for (let i = 0; i < lines.length; i++) {
 
   // Eksempel:
   // "Crispy Chicken Sandwich 18 195 kr 3 510 kr"
-  const quantityMatch = combined.match(/(\d+)\s+\d+[,.]?\d*\s*kr/i);
+  const productName = product.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const quantityMatch =
+  combined.match(new RegExp(`${productName}\\s+(\\d+)\\s+\\d+[,.]?\\d*\\s*kr`, "i")) ||
+  combined.match(/\s(\d+)\s+\d+[,.]?\d*\s*kr/i);
 
   const quantity = quantityMatch
     ? Number(quantityMatch[1])
