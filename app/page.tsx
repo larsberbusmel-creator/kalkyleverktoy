@@ -3169,6 +3169,10 @@ const deliveryAddress =
     : "",
 ].filter(Boolean).join("\n\n");
 
+const unmatchedNote = nextUnmatched.length
+  ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
+  : "";
+
     const nextOrder: Order = {
       id: `webshop-${orderNumber}-${Date.now()}`,
       type: "bakeri",
@@ -3182,6 +3186,7 @@ const deliveryAddress =
       deliveryAddress,
       date: dateInfo.date,
       time: dateInfo.time,
+      note: [note, unmatchedNote].filter(Boolean).join("\n\n"),
       guests: 1,
       productId: uniqueLines[0]?.productId || data.products[0]?.id || "",
       orderLines: uniqueLines,
@@ -3189,7 +3194,6 @@ const deliveryAddress =
       isRecurring: false,
       recurringDays: [],
       recurringNote: [
-        note,
   `Importert fra webshop. Ordrenr: ${orderNumber}`,
   nextUnmatched.length
     ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
@@ -3252,6 +3256,13 @@ const deliveryAddress =
           <p><b>Telefon:</b> {preview.phone || "-"}</p>
           <p><b>Dato/tid:</b> {preview.date} {preview.time}</p>
 
+{preview.note && (
+  <p style={{ whiteSpace: "pre-wrap" }}>
+    <b>Notat:</b><br />
+    {preview.note}
+  </p>
+)}
+
           <h4>Produkter</h4>
           <table>
             <thead>
@@ -3303,6 +3314,8 @@ function OrdersTab({ data, updateData, productAllergens }: { data: AppData; upda
     deliveryAddress: "",
     date: today(),
     time: "",
+    note: "",
+paymentInfo: "",
     guests: 10,
     productId: data.products[0]?.id || "",
     orderLines: [],
@@ -3554,6 +3567,24 @@ th{background:#f3f4f6}
           <div className="form-grid four">
             <label>Telefon<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefonnummer" /></label>
             <label>Leveringsadresse<input value={form.deliveryAddress} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" /></label>
+            <label>
+  Betalingsinfo
+  <input
+    value={form.paymentInfo || ""}
+    onChange={(e) => setForm({ ...form, paymentInfo: e.target.value })}
+    placeholder="F.eks. Betalt på nett / Betales ved henting"
+  />
+</label>
+
+<label style={{ gridColumn: "1 / -1" }}>
+  Notat / fritekst
+  <textarea
+    className="textarea"
+    value={form.note || ""}
+    onChange={(e) => setForm({ ...form, note: e.target.value })}
+    placeholder="Fritekst, beskjed, info fra webshop osv."
+  />
+</label>
             <label>Antall gjester / porsjoner<input type="number" value={form.guests} onChange={(e) => setForm({ ...form, guests: Number(e.target.value) || 0 })} /></label>
             <label>Rabatt %<input type="number" value={form.discountPercent || 0} onChange={(e) => setForm({ ...form, discountPercent: Number(e.target.value) || 0 })} /></label>
           </div>
