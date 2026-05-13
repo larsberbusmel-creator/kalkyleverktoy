@@ -3171,8 +3171,8 @@ const deliveryAddress =
       orgNumber: "",
       companyAddress: "",
       phone: phoneMatch ? normalizePhone(phoneMatch) : "",
-      deliveryAddress:
       paymentInfo,
+      deliveryAddress,
       date: dateInfo.date,
       time: dateInfo.time,
       guests: 1,
