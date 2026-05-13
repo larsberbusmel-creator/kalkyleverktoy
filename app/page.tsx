@@ -110,6 +110,8 @@ type Order = {
   deliveryAddress: string;
   date: string;
   time: string;
+  paymentInfo?: string;
+note?: string;
   guests: number;
   productId: string;
   orderLines: OrderLine[];
@@ -3099,33 +3101,31 @@ const dateInfo = parseNorwegianDate(
     const orderLines: OrderLine[] = [];
 
 for (let i = 0; i < lines.length; i++) {
-  const line = lines[i];
- const nextLine = lines[i + 1] || "";
-const nextNextLine = lines[i + 2] || "";
-const combined = `${line} ${nextLine} ${nextNextLine}`;
+  const productCodeMatch = lines[i].match(/^([A-ZÆØÅ]{1,4}\d{3,})$/i);
+  if (!productCodeMatch) continue;
 
-  const product = findProduct(combined);
-  if (!product) continue;
+  const productCode = productCodeMatch[1];
 
-  // Eksempel:
-  // "Crispy Chicken Sandwich 18 195 kr 3 510 kr"
-  const productNamePattern = product.name.replace(
-  /[.*+?^${}()|[\]\\]/g,
-  "\\$&"
-);
+  const product = data.products.find(
+    (p) => p.productNumber?.toLowerCase() === productCode.toLowerCase()
+  );
 
-const quantityMatch =
-  combined.match(
-    new RegExp(
-      `${productNamePattern}\\s+(\\d+)\\s+\\d+[,.]?\\d*\\s*kr`,
-      "i"
-    )
-  ) ||
-  combined.match(/\s(\d+)\s+\d+[,.]?\d*\s*kr/i);
+  if (!product) {
+    nextUnmatched.push(lines[i]);
+    continue;
+  }
 
-const quantity = quantityMatch
-  ? Number(quantityMatch[1])
-  : 1;
+  const nextLines = [
+    lines[i + 1] || "",
+    lines[i + 2] || "",
+    lines[i + 3] || "",
+  ];
+
+  const combined = nextLines.join(" ");
+
+  const quantityMatch = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
+
+  const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
 
   orderLines.push({
     productId: product.id,
