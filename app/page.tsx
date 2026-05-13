@@ -3169,10 +3169,6 @@ const deliveryAddress =
     : "",
 ].filter(Boolean).join("\n\n");
 
-const unmatchedNote = nextUnmatched.length
-  ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
-  : "";
-
     const nextOrder: Order = {
       id: `webshop-${orderNumber}-${Date.now()}`,
       type: "bakeri",
@@ -3186,7 +3182,7 @@ const unmatchedNote = nextUnmatched.length
       deliveryAddress,
       date: dateInfo.date,
       time: dateInfo.time,
-      note: [note, unmatchedNote].filter(Boolean).join("\n\n"),
+      note,
       guests: 1,
       productId: uniqueLines[0]?.productId || data.products[0]?.id || "",
       orderLines: uniqueLines,
