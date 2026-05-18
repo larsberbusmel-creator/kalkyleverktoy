@@ -244,6 +244,7 @@ type AppData = {
   storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
+  seenOrderDates: string[];
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
@@ -405,6 +406,7 @@ settings: {
   storkjokkenSpecialPrices: [],
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
+  seenOrderDates: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -450,6 +452,7 @@ function migrateData(raw: Partial<AppData>): AppData {
     materialCategories: raw.materialCategories || defaultMaterialCategories,
     inventoryCounts: raw.inventoryCounts || {},
     bakeryProductionTemplateLines:
+    
   (raw as any).bakeryProductionTemplateLines || [],
 
 storkjokkenCustomers:
@@ -463,6 +466,7 @@ recurringStorkjokkenOrders:
 
 bakeryProductionDays:
   (raw as any).bakeryProductionDays || {},
+  seenOrderDates: (raw as any).seenOrderDates || [],
   };
 }
 
@@ -770,94 +774,76 @@ function CalendarDashboard({
   const monthStart = new Date(`${monthDate.slice(0, 7)}-01T12:00:00`);
   const year = monthStart.getFullYear();
   const month = monthStart.getMonth();
-
   const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
   const startOffset = (firstDay.getDay() + 6) % 7;
-
   const days: string[] = [];
-
-const calendarStart = new Date(year, month, 1);
-calendarStart.setDate(calendarStart.getDate() - startOffset);
-
-for (let i = 0; i < 42; i++) {
-  const d = new Date(calendarStart);
-  d.setDate(calendarStart.getDate() + i);
-  days.push(localDateKey(d));
-}
+  const calendarStart = new Date(year, month, 1);
+  calendarStart.setDate(calendarStart.getDate() - startOffset);
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(calendarStart);
+    d.setDate(calendarStart.getDate() + i);
+    days.push(localDateKey(d));
+  }
 
   function monthName(date: string) {
-    return new Date(`${date.slice(0, 7)}-01T12:00:00`).toLocaleDateString("no-NO", {
-      month: "long",
-      year: "numeric",
-    });
+    return new Date(`${date.slice(0, 7)}-01T12:00:00`).toLocaleDateString("no-NO", { month: "long", year: "numeric" });
   }
-function localDateKey(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+
+  function localDateKey(d: Date) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
   function changeMonth(delta: number) {
-  const base = new Date(`${monthDate.slice(0, 7)}-01T12:00:00`);
-  base.setMonth(base.getMonth() + delta);
-  setMonthDate(localDateKey(base));
-}
+    const base = new Date(`${monthDate.slice(0, 7)}-01T12:00:00`);
+    base.setMonth(base.getMonth() + delta);
+    setMonthDate(localDateKey(base));
+  }
 
-function easterDate(year: number) {
-  const a = year % 19;
-  const b = Math.floor(year / 100);
-  const c = year % 100;
-  const d = Math.floor(b / 4);
-  const e = b % 4;
-  const f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3);
-  const h = (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4);
-  const k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7;
-  const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31);
-  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  function easterDate(year: number) {
+    const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+    const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const mo = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(year, mo - 1, day, 12);
+  }
 
-  return new Date(year, month - 1, day, 12);
-}
+  function dateKey(d: Date) { return localDateKey(d); }
 
-function dateKey(d: Date) {
-  return localDateKey(d);
-}
+  function addDaysDate(d: Date, days: number) {
+    const next = new Date(d);
+    next.setDate(next.getDate() + days);
+    return next;
+  }
 
-function addDays(d: Date, days: number) {
-  const next = new Date(d);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function norwegianHolidayName(date: string) {
-  const y = Number(date.slice(0, 4));
-  const easter = easterDate(y);
-
-  const holidays: Record<string, string> = {
-    [`${y}-01-01`]: "1. nyttårsdag",
-    [`${y}-05-01`]: "Arbeidernes dag",
-    [`${y}-05-17`]: "17. mai",
-    [`${y}-12-25`]: "1. juledag",
-    [`${y}-12-26`]: "2. juledag",
-    [dateKey(addDays(easter, -3))]: "Skjærtorsdag",
-    [dateKey(addDays(easter, -2))]: "Langfredag",
-    [dateKey(easter)]: "1. påskedag",
-    [dateKey(addDays(easter, 1))]: "2. påskedag",
-    [dateKey(addDays(easter, 39))]: "Kristi himmelfartsdag",
-    [dateKey(addDays(easter, 49))]: "1. pinsedag",
-    [dateKey(addDays(easter, 50))]: "2. pinsedag",
-  };
-
-  return holidays[date] || "";
-}
+  function norwegianHolidayName(date: string) {
+    const y = Number(date.slice(0, 4));
+    const easter = easterDate(y);
+    const holidays: Record<string, string> = {
+      [`${y}-01-01`]: "1. nyttårsdag",
+      [`${y}-05-01`]: "Arbeidernes dag",
+      [`${y}-05-17`]: "17. mai",
+      [`${y}-12-25`]: "1. juledag",
+      [`${y}-12-26`]: "2. juledag",
+      [dateKey(addDaysDate(easter, -3))]: "Skjærtorsdag",
+      [dateKey(addDaysDate(easter, -2))]: "Langfredag",
+      [dateKey(easter)]: "1. påskedag",
+      [dateKey(addDaysDate(easter, 1))]: "2. påskedag",
+      [dateKey(addDaysDate(easter, 39))]: "Kristi himmelfartsdag",
+      [dateKey(addDaysDate(easter, 49))]: "1. pinsedag",
+      [dateKey(addDaysDate(easter, 50))]: "2. pinsedag",
+    };
+    return holidays[date] || "";
+  }
 
   function dayOrders(date: string) {
     return data.orders
-      .filter((o) => o.date === date)
+      .filter((o) => o.date === date && !o.deletedAt)
       .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }
 
@@ -869,28 +855,40 @@ function norwegianHolidayName(date: string) {
     return Boolean(data.bakeryProductionDays?.[date]);
   }
 
+  // Finn datoer med nye webshopordre som ikke er sett
+  function hasUnseenWebshopOrder(date: string): boolean {
+    const seenDates = data.seenOrderDates || [];
+    if (seenDates.includes(date)) return false;
+    return data.orders.some(
+      (o) =>
+        o.date === date &&
+        !o.deletedAt &&
+        o.recurringNote?.startsWith("Importert fra webshop")
+    );
+  }
+
+  // Merk dato som sett
+  function markDateAsSeen(date: string) {
+    const seenDates = data.seenOrderDates || [];
+    if (!seenDates.includes(date)) {
+      updateData({ seenOrderDates: [...seenDates, date] });
+    }
+  }
+
   function addNote() {
     if (!noteTitle.trim() && !noteText.trim()) return;
-
     const next: CalendarNote = {
       id: `note-${Date.now()}`,
       date: selectedDate,
       title: noteTitle.trim() || "Notat",
       text: noteText.trim(),
     };
-
-    updateData({
-      calendarNotes: [next, ...(data.calendarNotes || [])],
-    });
-
-    setNoteTitle("");
-    setNoteText("");
+    updateData({ calendarNotes: [next, ...(data.calendarNotes || [])] });
+    setNoteTitle(""); setNoteText("");
   }
 
   function deleteNote(id: string) {
-    updateData({
-      calendarNotes: (data.calendarNotes || []).filter((n) => n.id !== id),
-    });
+    updateData({ calendarNotes: (data.calendarNotes || []).filter((n) => n.id !== id) });
   }
 
   const selectedOrders = dayOrders(selectedDate);
@@ -901,24 +899,10 @@ function norwegianHolidayName(date: string) {
     <section>
       <div className="card">
         <div className="between">
-          
-
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className={view === "month" ? "btn active" : "btn"} onClick={() => setView("month")}>
-              Måned
-            </button>
-            <button className={view === "day" ? "btn active" : "btn"} onClick={() => setView("day")}>
-              Dag
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                setSelectedDate(todayDate);
-                setMonthDate(todayDate);
-              }}
-            >
-              I dag
-            </button>
+            <button className={view === "month" ? "btn active" : "btn"} onClick={() => setView("month")}>Måned</button>
+            <button className={view === "day" ? "btn active" : "btn"} onClick={() => setView("day")}>Dag</button>
+            <button className="btn" onClick={() => { setSelectedDate(todayDate); setMonthDate(todayDate); }}>I dag</button>
           </div>
         </div>
 
@@ -927,43 +911,36 @@ function norwegianHolidayName(date: string) {
             <div className="between" style={{ marginTop: 16 }}>
               <button className="btn" onClick={() => changeMonth(-1)}>Forrige</button>
               <h1 style={{ textTransform: "capitalize", fontSize: 38, fontWeight: 900, margin: 0 }}>
-  {monthName(monthDate)}
-</h1>
+                {monthName(monthDate)}
+              </h1>
               <button className="btn" onClick={() => changeMonth(1)}>Neste</button>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(7, 1fr)",
-                gap: 8,
-                marginTop: 16,
-              }}
-            >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginTop: 16 }}>
               {["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"].map((d) => (
                 <b key={d} style={{ padding: 8 }}>{d}</b>
               ))}
-
               {days.map((date) => {
                 const inMonth = date.slice(0, 7) === monthDate.slice(0, 7);
                 const orders = dayOrders(date);
                 const notes = dayNotes(date);
                 const production = hasProduction(date);
                 const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
-const isSunday = dayOfWeek === 0;
-const isToday = date === todayDate;
-const isPast = date < todayDate;
-const holidayName = norwegianHolidayName(date);
+                const isSunday = dayOfWeek === 0;
+                const isToday = date === todayDate;
+                const isPast = date < todayDate;
+                const holidayName = norwegianHolidayName(date);
+                const unseenWebshop = hasUnseenWebshopOrder(date);
 
-const dayBackground = isToday
-  ? "#dcfce7"
-  : holidayName || isSunday
-    ? "#fee2e2"
-    : isPast
-      ? "#f5efe3"
-      : inMonth
-        ? "white"
-        : "#f1f5f9";
+                const dayBackground = isToday
+                  ? "#dcfce7"
+                  : holidayName || isSunday
+                    ? "#fee2e2"
+                    : isPast
+                      ? "#f5efe3"
+                      : inMonth
+                        ? "white"
+                        : "#f1f5f9";
 
                 return (
                   <button
@@ -971,45 +948,68 @@ const dayBackground = isToday
                     onClick={() => {
                       setSelectedDate(date);
                       setView("day");
+                      markDateAsSeen(date); // ← merk som sett ved klikk
                     }}
                     style={{
                       minHeight: 110,
                       textAlign: "left",
                       padding: 10,
                       borderRadius: 14,
-                      border: isToday ? "2px solid #166534" : holidayName ? "2px solid #dc2626" : "1px solid #dbe4ef",
+                      border: isToday
+                        ? "2px solid #166534"
+                        : unseenWebshop
+                          ? "2px solid #f59e0b"  // ← gul kant ved ny webshopordre
+                          : holidayName
+                            ? "2px solid #dc2626"
+                            : "1px solid #dbe4ef",
                       background: dayBackground,
                       opacity: inMonth ? 1 : 0.55,
                       cursor: "pointer",
+                      position: "relative",
                     }}
                   >
                     <b>{Number(date.slice(8, 10))}</b>
-{holidayName && (
-  <div style={{ marginTop: 4, fontSize: 11, color: "#991b1b", fontWeight: 800 }}>
-    {holidayName}
-  </div>
-)}
-                    {production && (
-                      <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800 }}>
-                        🥖 Produksjon
+
+                    {/* Varsellampe – rød prikk med antall nye webshopordre */}
+                    {unseenWebshop && (
+                      <div style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        background: "#f59e0b",
+                        color: "white",
+                        borderRadius: "999px",
+                        width: 20,
+                        height: 20,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 11,
+                        fontWeight: 900,
+                      }}>
+                        🔔
                       </div>
                     )}
 
+                    {holidayName && (
+                      <div style={{ marginTop: 4, fontSize: 11, color: "#991b1b", fontWeight: 800 }}>
+                        {holidayName}
+                      </div>
+                    )}
+                    {production && (
+                      <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800 }}>🥖 Produksjon</div>
+                    )}
                     {orders.slice(0, 3).map((o) => (
                       <div key={o.id} style={{ marginTop: 4, fontSize: 12 }}>
-                        {o.time || "--"} Ordre
+                        {o.time || "--"} {o.customerType === "bedrift" ? o.companyName || o.customer : o.customer}
                       </div>
                     ))}
-
                     {notes.slice(0, 2).map((n) => (
                       <div key={n.id} style={{ marginTop: 4, fontSize: 12, color: "#166534" }}>
                         📝 {n.title}
                       </div>
                     ))}
-
-                    {orders.length + notes.length > 5 && (
-                      <small>+ flere</small>
-                    )}
+                    {orders.length + notes.length > 5 && <small>+ flere</small>}
                   </button>
                 );
               })}
@@ -1027,13 +1027,9 @@ const dayBackground = isToday
             <div className="grid two">
               <div className="soft-box">
                 <h3>Produksjon</h3>
-                {selectedProduction ? (
-                  <button className="btn active" onClick={() => setTab("production")}>
-                    Åpne dagens produksjon
-                  </button>
-                ) : (
-                  <p style={{ color: "#64748b" }}>Ingen produksjonsordre registrert denne dagen.</p>
-                )}
+                {selectedProduction
+                  ? <button className="btn active" onClick={() => setTab("production")}>Åpne dagens produksjon</button>
+                  : <p style={{ color: "#64748b" }}>Ingen produksjonsordre registrert denne dagen.</p>}
               </div>
 
               <div className="soft-box">
@@ -1044,13 +1040,21 @@ const dayBackground = isToday
                       {selectedOrders.map((o) => (
                         <tr key={o.id} className="click-row" onClick={() => setTab("orders")}>
                           <td>{o.time || "-"}</td>
-                          <td>{o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer}</td>
+                          <td>{o.customerType === "bedrift" || o.customerType === "storkjokken"
+                            ? o.companyName || o.customer
+                            : o.customer}
+                          </td>
                           <td>
                             {o.orderLines.map((l) => {
                               const p = data.products.find((x) => x.id === l.productId);
                               return `${l.quantity} × ${p?.name || "Produkt"}`;
                             }).join(", ")}
                           </td>
+                          {/* Varselindikator i dagvisning */}
+                          {o.recurringNote?.startsWith("Importert fra webshop") &&
+                            !(data.seenOrderDates || []).includes(o.date) && (
+                              <td><span style={{ color: "#f59e0b", fontWeight: 900 }}>🔔 Ny</span></td>
+                            )}
                         </tr>
                       ))}
                     </tbody>
@@ -1063,29 +1067,15 @@ const dayBackground = isToday
 
             <div className="soft-box" style={{ marginTop: 16 }}>
               <h3>Huskelapper / notiser</h3>
-
               <div className="form-grid three">
-                <input
-                  value={noteTitle}
-                  onChange={(e) => setNoteTitle(e.target.value)}
-                  placeholder="Tittel"
-                />
-                <input
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Notat"
-                />
+                <input value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="Tittel" />
+                <input value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Notat" />
                 <button className="btn active" onClick={addNote}>Legg til</button>
               </div>
-
               {selectedNotes.length ? (
                 selectedNotes.map((n) => (
                   <div key={n.id} className="editable-row">
-                    <div>
-                      <b>{n.title}</b>
-                      <br />
-                      <small>{n.text}</small>
-                    </div>
+                    <div><b>{n.title}</b><br /><small>{n.text}</small></div>
                     <button className="link danger" onClick={() => deleteNote(n.id)}>Slett</button>
                   </div>
                 ))
@@ -4065,54 +4055,45 @@ function ProductionTab({
   ];
 
   const [activeDate, setActiveDate] = useState(today());
+  const [mainPanel, setMainPanel] = useState<"bakeri" | "catering">("bakeri");
   const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice">("day");
   const [categoryFilter, setCategoryFilter] = useState<"alle" | ProductionCategory>("alle");
   const [invoiceFrom, setInvoiceFrom] = useState(today());
   const [invoiceTo, setInvoiceTo] = useState(today());
   const [invoiceWarning, setInvoiceWarning] = useState("");
-  const [newCustomer, setNewCustomer] = useState({
-    name: "",
-    orgNumber: "",
-    address: "",
-    deliveryAddress: "",
-    phone: "",
-  });
+  const [newCustomer, setNewCustomer] = useState({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "" });
   const [newTemplateProductId, setNewTemplateProductId] = useState("");
   const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>("smabakst");
+  const [expandedCateringOrderId, setExpandedCateringOrderId] = useState<string | null>(null);
 
   const productionDays = data.bakeryProductionDays || {};
   const activeDay: BakeryProductionDay = productionDays[activeDate] || {
-    date: activeDate,
-    approved: false,
-    quantities: {},
+    date: activeDate, approved: false, quantities: {},
   };
 
   const storkjokkenCustomers = (data.storkjokkenCustomers || []).filter((c) => c.active !== false);
-
   const columns = [
     { id: "butikk", name: "Butikk", invoice: false },
-    ...storkjokkenCustomers.map((c) => ({
-      id: c.id,
-      name: c.name,
-      invoice: true,
-    })),
+    ...storkjokkenCustomers.map((c) => ({ id: c.id, name: c.name, invoice: true })),
   ];
 
-function addDays(date: string, days: number) {
-  const [year, month, day] = date.split("-").map(Number);
-  const d = new Date(year, month - 1, day);
-  d.setDate(d.getDate() + days);
+  // Cateringordre for valgt dag
+  const cateringOrders = data.orders.filter(
+    (o) => o.date === activeDate && !o.deletedAt && (o.type === "catering" || o.type === "pasmuurt")
+  ).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
 
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-
-  return `${yyyy}-${mm}-${dd}`;
-}
+  function addDays(date: string, days: number) {
+    const [year, month, day] = date.split("-").map(Number);
+    const d = new Date(year, month - 1, day);
+    d.setDate(d.getDate() + days);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
 
   function weekdayNo(date: string) {
-    const names = ["Søndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag"];
-    return names[new Date(date + "T00:00:00").getDay()];
+    return ["Søndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag"][new Date(date + "T00:00:00").getDay()];
   }
 
   function weekdayNumber(date: string) {
@@ -4121,31 +4102,12 @@ function addDays(date: string, days: number) {
   }
 
   function listDates(from: string, to: string) {
-    const dates: string[] = [];
-    let current = from;
-    let guard = 0;
-
-    while (current <= to && guard < 90) {
-      dates.push(current);
-      current = addDays(current, 1);
-      guard += 1;
-    }
-
+    const dates: string[] = []; let current = from; let guard = 0;
+    while (current <= to && guard < 90) { dates.push(current); current = addDays(current, 1); guard++; }
     return dates;
   }
 
-  function productionCategoryForProduct(product: Product): ProductionCategory {
-    const text = `${product.type} ${product.subType} ${product.category}`.toLowerCase();
-
-    if (text.includes("påsmurt") || text.includes("pasmuurt")) return "pasmuurt";
-    if (text.includes("spesial")) return "spesialbrod";
-    if (text.includes("brød") || text.includes("brod")) return "brod";
-
-    return "smabakst";
-  }
-
   const templateLines = data.bakeryProductionTemplateLines || [];
-
   const visibleTemplateLines = templateLines
     .filter((line) => categoryFilter === "alle" || line.category === categoryFilter)
     .sort((a, b) => {
@@ -4155,12 +4117,7 @@ function addDays(date: string, days: number) {
     });
 
   function saveDay(nextDay: BakeryProductionDay) {
-    updateData({
-      bakeryProductionDays: {
-        ...productionDays,
-        [nextDay.date]: nextDay,
-      },
-    });
+    updateData({ bakeryProductionDays: { ...productionDays, [nextDay.date]: nextDay } });
   }
 
   function setCell(productId: string, columnId: string, value: number) {
@@ -4168,10 +4125,7 @@ function addDays(date: string, days: number) {
       ...activeDay,
       quantities: {
         ...activeDay.quantities,
-        [productId]: {
-          ...(activeDay.quantities[productId] || {}),
-          [columnId]: value,
-        },
+        [productId]: { ...(activeDay.quantities[productId] || {}), [columnId]: value },
       },
     });
   }
@@ -4182,1042 +4136,703 @@ function addDays(date: string, days: number) {
   }
 
   function kgForProduct(product: Product, quantity: number) {
-    const unitWeight = Number(product.unitWeightKg || product.yieldAmount || 1);
-    return quantity * unitWeight;
+    return quantity * Number(product.unitWeightKg || product.yieldAmount || 1);
   }
 
-  const dayRows = templateLines
-    .map((line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      if (!product) return null;
-
-      const quantity = totalForProduct(product.id);
-
-      return {
-        line,
-        product,
-        quantity,
-        kg: kgForProduct(product, quantity),
-      };
-    })
-    .filter(Boolean) as {
-    line: BakeryProductionTemplateLine;
-    product: Product;
-    quantity: number;
-    kg: number;
-  }[];
+  const dayRows = templateLines.map((line) => {
+    const product = data.products.find((p) => p.id === line.productId);
+    if (!product) return null;
+    const quantity = totalForProduct(product.id);
+    return { line, product, quantity, kg: kgForProduct(product, quantity) };
+  }).filter(Boolean) as { line: BakeryProductionTemplateLine; product: Product; quantity: number; kg: number }[];
 
   const activeRows = dayRows.filter((r) => r.quantity > 0);
   const totalUnits = activeRows.reduce((sum, row) => sum + row.quantity, 0);
-  const totalKg = activeRows.reduce((sum, row) => sum + row.kg, 0);
 
   function addTemplateLine() {
     if (!newTemplateProductId) return alert("Velg et produkt først.");
-
-    const exists = (data.bakeryProductionTemplateLines || []).some(
-      (line) => line.productId === newTemplateProductId
-    );
-
+    const exists = (data.bakeryProductionTemplateLines || []).some((line) => line.productId === newTemplateProductId);
     if (exists) return alert("Produktet ligger allerede i produksjonsmalen.");
-
     const nextLine: BakeryProductionTemplateLine = {
       id: `production-template-${Date.now()}`,
       productId: newTemplateProductId,
       category: newTemplateCategory,
       sortOrder: (data.bakeryProductionTemplateLines || []).length + 1,
     };
-
-    updateData({
-      bakeryProductionTemplateLines: [...(data.bakeryProductionTemplateLines || []), nextLine],
-    });
-
+    updateData({ bakeryProductionTemplateLines: [...(data.bakeryProductionTemplateLines || []), nextLine] });
     setNewTemplateProductId("");
   }
 
   function removeTemplateLine(id: string) {
-    updateData({
-      bakeryProductionTemplateLines: (data.bakeryProductionTemplateLines || []).filter((x) => x.id !== id),
-    });
+    updateData({ bakeryProductionTemplateLines: (data.bakeryProductionTemplateLines || []).filter((x) => x.id !== id) });
   }
 
   function addCustomer() {
     if (!newCustomer.name.trim()) return alert("Legg inn kundenavn.");
-
     const customer: StorkjokkenCustomer = {
-      id: `customer-${Date.now()}`,
-      name: newCustomer.name.trim(),
-      orgNumber: newCustomer.orgNumber,
-      address: newCustomer.address,
-      deliveryAddress: newCustomer.deliveryAddress,
-      phone: newCustomer.phone,
-      active: true,
+      id: `customer-${Date.now()}`, name: newCustomer.name.trim(), orgNumber: newCustomer.orgNumber,
+      address: newCustomer.address, deliveryAddress: newCustomer.deliveryAddress, phone: newCustomer.phone, active: true,
     };
-
-    updateData({
-      storkjokkenCustomers: [...(data.storkjokkenCustomers || []), customer],
-    });
-
-    setNewCustomer({
-      name: "",
-      orgNumber: "",
-      address: "",
-      deliveryAddress: "",
-      phone: "",
-    });
+    updateData({ storkjokkenCustomers: [...(data.storkjokkenCustomers || []), customer] });
+    setNewCustomer({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "" });
   }
 
   function deleteCustomer(id: string) {
-    updateData({
-      storkjokkenCustomers: (data.storkjokkenCustomers || []).filter((x) => x.id !== id),
-    });
+    updateData({ storkjokkenCustomers: (data.storkjokkenCustomers || []).filter((x) => x.id !== id) });
   }
 
   function priceForCustomer(productId: string, customerId: string) {
-    const special = (data.storkjokkenSpecialPrices || []).find(
-      (x) => x.customerId === customerId && x.productId === productId
-    );
-
+    const special = (data.storkjokkenSpecialPrices || []).find((x) => x.customerId === customerId && x.productId === productId);
     if (special) return special.priceExVat;
-
     const product = data.products.find((p) => p.id === productId);
     if (!product) return 0;
-
     return product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat);
   }
 
   function setSpecialPrice(customerId: string, productId: string, priceExVat: number) {
     const existing = data.storkjokkenSpecialPrices || [];
     const without = existing.filter((x) => !(x.customerId === customerId && x.productId === productId));
-
-    if (!priceExVat) {
-      updateData({ storkjokkenSpecialPrices: without });
-      return;
-    }
-
-    updateData({
-      storkjokkenSpecialPrices: [
-        ...without,
-        { customerId, productId, priceExVat },
-      ],
-    });
+    if (!priceExVat) { updateData({ storkjokkenSpecialPrices: without }); return; }
+    updateData({ storkjokkenSpecialPrices: [...without, { customerId, productId, priceExVat }] });
   }
 
   function invoiceRows(from: string, to: string) {
     const dates = listDates(from, to);
-    const rows: {
-      customerId: string;
-      customerName: string;
-      productId: string;
-      productName: string;
-      quantity: number;
-      priceExVat: number;
-      sumExVat: number;
-      vat: number;
-      sumIncVat: number;
-    }[] = [];
-
+    const rows: { customerId: string; customerName: string; productId: string; productName: string; quantity: number; priceExVat: number; sumExVat: number; vat: number; sumIncVat: number }[] = [];
     storkjokkenCustomers.forEach((customer) => {
       data.products.forEach((product) => {
         let quantity = 0;
-
-        dates.forEach((date) => {
-          const day = productionDays[date];
-          if (!day?.approved) return;
-          quantity += Number(day.quantities?.[product.id]?.[customer.id] || 0);
-        });
-
+        dates.forEach((date) => { const day = productionDays[date]; if (!day?.approved) return; quantity += Number(day.quantities?.[product.id]?.[customer.id] || 0); });
         if (!quantity) return;
-
         const priceExVat = priceForCustomer(product.id, customer.id);
-        const sumExVat = quantity * priceExVat;
-        const vat = sumExVat * 0.15;
-
-        rows.push({
-          customerId: customer.id,
-          customerName: customer.name,
-          productId: product.id,
-          productName: product.name,
-          quantity,
-          priceExVat,
-          sumExVat,
-          vat,
-          sumIncVat: sumExVat + vat,
-        });
+        const sumExVat = quantity * priceExVat; const vat = sumExVat * 0.15;
+        rows.push({ customerId: customer.id, customerName: customer.name, productId: product.id, productName: product.name, quantity, priceExVat, sumExVat, vat, sumIncVat: sumExVat + vat });
       });
     });
-
     return rows;
   }
 
   function groupedInvoiceRows(from: string, to: string) {
-    const map: Record<string, {
-      customerName: string;
-      rows: ReturnType<typeof invoiceRows>;
-      sumExVat: number;
-      vat: number;
-      sumIncVat: number;
-    }> = {};
-
+    const map: Record<string, { customerName: string; rows: ReturnType<typeof invoiceRows>; sumExVat: number; vat: number; sumIncVat: number }> = {};
     invoiceRows(from, to).forEach((row) => {
-      if (!map[row.customerId]) {
-        map[row.customerId] = {
-          customerName: row.customerName,
-          rows: [],
-          sumExVat: 0,
-          vat: 0,
-          sumIncVat: 0,
-        };
-      }
-
+      if (!map[row.customerId]) map[row.customerId] = { customerName: row.customerName, rows: [], sumExVat: 0, vat: 0, sumIncVat: 0 };
       map[row.customerId].rows.push(row);
       map[row.customerId].sumExVat += row.sumExVat;
       map[row.customerId].vat += row.vat;
       map[row.customerId].sumIncVat += row.sumIncVat;
     });
-
     return Object.values(map);
   }
 
   function printWindow(title: string, body: string) {
-    const w = window.open("", "_blank");
-    if (!w) return;
+    const w = window.open("", "_blank"); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title><style>
+@page{size:A4;margin:12mm}
+body{font-family:Arial,sans-serif;color:#111827;padding:24px;line-height:1.35}
+.print-header{display:flex;justify-content:center;align-items:center;margin-bottom:20px}
+.print-logo{max-width:220px;max-height:90px;object-fit:contain}
+.logo{height:90px;width:auto;object-fit:contain;margin-bottom:8px}
+.page{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px}
+.page:last-child{break-after:auto}
+.top{border-bottom:2px solid #111827;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;gap:12px}
+h1,h2,h3{margin-top:0}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
+th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left;vertical-align:top}
+th{background:#f3f4f6}
+.right{text-align:right}.muted{color:#64748b}
+.total{font-weight:900;background:#f8fafc}
+.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}
+.recipe-block h3{margin:0 0 8px;font-size:14px}
+button{padding:10px 14px;border-radius:10px;border:1px solid #111827;background:#111827;color:white;font-weight:800;cursor:pointer;margin-bottom:14px}
+@media print{button{display:none}body{padding:0}}
+</style></head><body><button onclick="window.print()">Skriv ut</button>${body}</body></html>`);
+    w.document.close(); w.focus();
+  }
 
-    w.document.write(`<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<title>${escapeHtml(title)}</title>
-<style>
-@page { size: A4; margin: 12mm; }
-body { font-family: Arial, sans-serif; color: #111827; padding: 24px; line-height: 1.35; }
-.print-header {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 20px;
-}
+  // ── Skalert oppskrift for ett produkt (brukes i catering-print) ───────────
+  function scaledRecipeHtml(product: Product, quantity: number): string {
+    let html = "";
+    product.lines.forEach((pl) => {
+      if (pl.itemType === "recipe") {
+        const recipe = data.recipes.find((r) => r.id === pl.itemId);
+        if (!recipe) return;
+        const totalAmount = Number(pl.amount || 0) * quantity;
+        const recipeBase = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+        const scale = totalAmount / Math.max(recipeBase, 1);
+        const ingredientRows = recipe.lines.map((rl) => {
+          let name = "Ukjent"; let unit = recipe.yieldUnit;
+          if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
+          if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
+          return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(rl.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
+        }).join("");
+        html += `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(recipe.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)} (for ${quantity} porsjoner)</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
+      }
+      if (pl.itemType === "material") {
+        const m = data.materials.find((x) => x.id === pl.itemId);
+        if (m) html += `<div class="recipe-block"><h3>Råvare: ${escapeHtml(m.name)}</h3><p>${num(Number(pl.amount || 0) * quantity, 3)} ${escapeHtml(pl.unit)}</p></div>`;
+      }
+    });
+    return html || "<p>Ingen oppskriftslinjer registrert på produktet.</p>";
+  }
 
-.print-logo {
-  max-width: 220px;
-  max-height: 90px;
-  object-fit: contain;
-}
-.logo { height: 90px; width: auto; object-fit: contain; margin-bottom: 8px; }
-.page { break-after: page; border: 2px solid #111827; border-radius: 14px; padding: 18px; margin-bottom: 18px; }
-.page:last-child { break-after: auto; }
-.top { border-bottom: 2px solid #111827; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; gap: 12px; }
-h1, h2, h3 { margin-top: 0; }
-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
-th { background: #f3f4f6; }
-.right { text-align: right; }
-.muted { color: #64748b; }
-.total { font-weight: 900; background: #f8fafc; }
-button { padding: 10px 14px; border-radius: 10px; border: 1px solid #111827; background: #111827; color: white; font-weight: 800; cursor: pointer; margin-bottom: 14px; }
-@media print {
-  button { display: none; }
-  body { padding: 0; }
-}
-</style>
-</head>
-<body>
-<button onclick="window.print()">Skriv ut</button>
-${body}
-</body>
-</html>`);
+  // ── Print én cateringordre med skalert oppskrift ──────────────────────────
+  function printCateringOrder(order: Order) {
+    const customerName = order.customerType === "bedrift" ? order.companyName || order.customer : order.customer;
+    const orderPages = order.orderLines.map((ol) => {
+      const product = data.products.find((p) => p.id === ol.productId);
+      if (!product) return "";
+      return `
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>${escapeHtml(product.name)}</h1>
+      <p class="muted">${escapeHtml(customerName || "")} · ${formatDateNo(order.date)} ${order.time || ""}</p>
+    </div>
+    <div class="right"><b>${ol.quantity} porsjoner / stk</b></div>
+  </div>
+  ${scaledRecipeHtml(product, ol.quantity)}
+</div>`;
+    }).join("");
 
-    w.document.close();
-    w.focus();
+    const body = `
+<div class="print-header"><img src="/logo.png" class="print-logo" /></div>
+<div class="page">
+  <div class="top">
+    <div>
+      <img src="/logo.png" class="logo" />
+      <h1>Cateringordre</h1>
+      <p class="muted">${escapeHtml(customerName || "")}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
+    </div>
+    <div class="right">
+      <b>${formatDateNo(order.date)} ${order.time || ""}</b><br>
+      ${escapeHtml(order.deliveryAddress || "")}
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>Produkt</th><th class="right">Antall</th></tr></thead>
+    <tbody>
+      ${order.orderLines.map((ol) => {
+        const product = data.products.find((p) => p.id === ol.productId);
+        return `<tr><td>${escapeHtml(product?.name || "Ukjent")}</td><td class="right">${ol.quantity}</td></tr>`;
+      }).join("")}
+    </tbody>
+  </table>
+  ${order.note ? `<p><b>Notat:</b> ${escapeHtml(order.note)}</p>` : ""}
+</div>
+${orderPages}`;
+
+    printWindow(`Catering ${formatDateNo(order.date)} – ${customerName}`, body);
+  }
+
+  // ── Print alle cateringordre for dagen ───────────────────────────────────
+  function printCateringDay() {
+    if (!cateringOrders.length) return alert("Ingen cateringordre denne dagen.");
+
+    // Forside – oversikt
+    const forsideRows = cateringOrders.map((o) => {
+      const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
+      return `
+<tr>
+  <td>${o.time || "-"}</td>
+  <td><b>${escapeHtml(customerName || "")}</b><br><small>${escapeHtml(o.phone || "")}</small></td>
+  <td>${o.orderLines.map((ol) => { const p = data.products.find((x) => x.id === ol.productId); return `${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}`; }).join("<br>")}</td>
+  <td>${escapeHtml(o.deliveryAddress || "-")}</td>
+  <td>${escapeHtml(o.paymentInfo || "-")}</td>
+</tr>`;
+    }).join("");
+
+    // Én side per ordre med oppskrift
+    const orderPages = cateringOrders.map((o) => {
+      const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
+      const productPages = o.orderLines.map((ol) => {
+        const product = data.products.find((p) => p.id === ol.productId);
+        if (!product) return "";
+        return `
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>${escapeHtml(product.name)}</h1>
+      <p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p>
+    </div>
+    <div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div>
+  </div>
+  ${scaledRecipeHtml(product, ol.quantity)}
+</div>`;
+      }).join("");
+      return productPages;
+    }).join("");
+
+    const body = `
+<div class="print-header"><img src="/logo.png" class="print-logo" /></div>
+<div class="page">
+  <div class="top">
+    <div>
+      <img src="/logo.png" class="logo" />
+      <h1>Catering – oversikt for dagen</h1>
+      <p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p>
+    </div>
+    <div class="right"><b>${cateringOrders.length} ordre</b></div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Tid</th>
+        <th>Kunde</th>
+        <th>Produkter</th>
+        <th>Levering</th>
+        <th>Betaling</th>
+      </tr>
+    </thead>
+    <tbody>${forsideRows}</tbody>
+  </table>
+</div>
+${orderPages}`;
+
+    printWindow(`Catering ${formatDateNo(activeDate)}`, body);
   }
 
   function printProductionDay() {
-  const summaryRows = activeRows.map((row) => {
-  const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
+    const summaryRows = activeRows.map((row) => {
+      const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
+      return `<tr><td><b>${escapeHtml(row.product.name)}</b><br><small>${escapeHtml(row.product.productNumber || "")}</small></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${num(unitSize, 3)} kg/stk` : "-"}</td></tr>`;
+    }).join("");
 
-  return `
-<tr>
-  <td>
-    <b>${escapeHtml(row.product.name)}</b><br>
-    <small>${escapeHtml(row.product.productNumber || "")}</small>
-  </td>
-  <td class="right">${row.quantity} stk</td>
-  <td class="right">${unitSize ? `${num(unitSize, 3)} kg/stk` : "-"}</td>
-</tr>`;
-}).join("");
-
-  const recipeMap: Record<string, {
-    recipe: Recipe;
-    totalAmount: number;
-    unit: string;
-    sources: { productName: string; quantity: number; amount: number; unit: string }[];
-  }> = {};
-
-  activeRows.forEach((row) => {
-    row.product.lines.forEach((line) => {
-      if (line.itemType !== "recipe") return;
-
-      const recipe = data.recipes.find((r) => r.id === line.itemId);
-      if (!recipe) return;
-
-      const amount = Number(line.amount || 0) * row.quantity;
-
-      if (!recipeMap[recipe.id]) {
-        recipeMap[recipe.id] = {
-          recipe,
-          totalAmount: 0,
-          unit: line.unit,
-          sources: [],
-        };
-      }
-
-      recipeMap[recipe.id].totalAmount += amount;
-      recipeMap[recipe.id].sources.push({
-        productName: row.product.name,
-        quantity: row.quantity,
-        amount,
-        unit: line.unit,
+    const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string }[] }> = {};
+    activeRows.forEach((row) => {
+      row.product.lines.forEach((line) => {
+        if (line.itemType !== "recipe") return;
+        const recipe = data.recipes.find((r) => r.id === line.itemId); if (!recipe) return;
+        const amount = Number(line.amount || 0) * row.quantity;
+        if (!recipeMap[recipe.id]) recipeMap[recipe.id] = { recipe, totalAmount: 0, unit: line.unit, sources: [] };
+        recipeMap[recipe.id].totalAmount += amount;
+        recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit });
       });
     });
-  });
 
-  const baseRecipePages = Object.values(recipeMap).map((entry) => {
-    const recipe = entry.recipe;
-    const recipeBaseAmount =
-  recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) ||
-  Number(recipe.yieldAmount || 1) ||
-  1;
-
-const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
-
-    const sourceRows = entry.sources.map((source) => `
-<tr>
-  <td>${escapeHtml(source.productName)}</td>
-  <td class="right">${source.quantity} stk</td>
-  <td class="right">${num(source.amount, 3)} ${escapeHtml(source.unit)}</td>
-</tr>`).join("");
-
-    const ingredientRows = recipe.lines.map((line) => {
-      let name = "Ukjent";
-      let unit = recipe.yieldUnit;
-
-      if (line.itemType === "material") {
-        const material = data.materials.find((m) => m.id === line.itemId);
-        name = material?.name || "Ukjent råvare";
-        unit = material?.unit || recipe.yieldUnit;
-      }
-
-      if (line.itemType === "recipe") {
-        const subRecipe = data.recipes.find((r) => r.id === line.itemId);
-        name = subRecipe?.name || "Ukjent grunnoppskrift";
-        unit = subRecipe?.yieldUnit || recipe.yieldUnit;
-      }
-
-      const amount = Number(line.amount || 0) * scale;
-
-      return `
-<tr>
-  <td>${escapeHtml(name)}</td>
-  <td class="right">${num(amount, 3)} ${escapeHtml(unit)}</td>
-</tr>`;
+    const baseRecipePages = Object.values(recipeMap).map((entry) => {
+      const recipe = entry.recipe;
+      const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+      const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
+      const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk</td><td class="right">${num(source.amount, 3)} ${escapeHtml(source.unit)}</td></tr>`).join("");
+      const ingredientRows = recipe.lines.map((line) => {
+        let name = "Ukjent"; let unit = recipe.yieldUnit;
+        if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
+        if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
+        return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(line.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
+      }).join("");
+      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1><p class="muted">Summert fra alle produkter denne dagen</p></div><div class="right"><b>${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
     }).join("");
 
-    return `
-<div class="page">
-  <div class="top">
-    <div>
-      <h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1>
-      <p class="muted">Summert fra alle produkter denne dagen</p>
-    </div>
-    <div class="right">
-      <b>${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)}</b><br>
-      ${formatDateNo(activeDate)}
-    </div>
-  </div>
-
-  <h2>Brukes til</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Produkt</th>
-        <th class="right">Antall</th>
-        <th class="right">Mengde grunnoppskrift</th>
-      </tr>
-    </thead>
-    <tbody>${sourceRows}</tbody>
-  </table>
-
-  <h2>Skalert oppskrift</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Ingrediens</th>
-        <th class="right">Mengde</th>
-      </tr>
-    </thead>
-    <tbody>${ingredientRows}</tbody>
-  </table>
-</div>`;
-  }).join("");
-
-  const productPages = activeRows.map((row) => {
-    const product = row.product;
-
-    const lineRows = product.lines.map((line) => {
-      const amount = Number(line.amount || 0) * row.quantity;
-      let name = "Ukjent";
-
-      if (line.itemType === "material") {
-        name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
-      }
-
-      if (line.itemType === "recipe") {
-        name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
-      }
-
-      if (line.itemType === "product") {
-        name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
-      }
-
-      return `
-<tr>
-  <td>${escapeHtml(name)}</td>
-  <td>${escapeHtml(line.itemType)}</td>
-  <td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td>
-</tr>`;
+    const productPages = activeRows.map((row) => {
+      const product = row.product;
+      const lineRows = product.lines.map((line) => {
+        const amount = Number(line.amount || 0) * row.quantity;
+        let name = "Ukjent";
+        if (line.itemType === "material") name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
+        if (line.itemType === "recipe") name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
+        if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
+        return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(line.itemType)}</td><td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td></tr>`;
+      }).join("");
+      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk · ${num(Number(product.unitWeightKg || product.yieldAmount || 0), 3)} kg/stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th>Innhold</th><th>Type</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
     }).join("");
 
-    return `
-<div class="page">
-  <div class="top">
-    <div>
-      <h1>Produkt: ${escapeHtml(product.name)}</h1>
-      <p class="muted">
-  ${escapeHtml(product.category)} · ${row.quantity} stk · 
-  ${num(Number(product.unitWeightKg || product.yieldAmount || 0), 3)} kg/stk
-</p>
-    </div>
-    <div class="right">
-      <b>${formatDateNo(activeDate)}</b>
-    </div>
-  </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th>Innhold</th>
-        <th>Type</th>
-        <th class="right">Mengde</th>
-      </tr>
-    </thead>
-    <tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert på produktet.</td></tr>`}</tbody>
-  </table>
-</div>`;
-  }).join("");
-
-  const packingPages = storkjokkenCustomers.map((customer) => {
-    const rows = data.products.map((product) => {
-      const qty = Number(activeDay.quantities?.[product.id]?.[customer.id] || 0);
-      if (!qty) return "";
-      return `<tr><td class="right"><b>${qty}</b></td><td>${escapeHtml(product.name)}</td></tr>`;
+    const packingPages = storkjokkenCustomers.map((customer) => {
+      const rows = data.products.map((product) => { const qty = Number(activeDay.quantities?.[product.id]?.[customer.id] || 0); if (!qty) return ""; return `<tr><td class="right"><b>${qty}</b></td><td>${escapeHtml(product.name)}</td></tr>`; }).join("");
+      if (!rows) return "";
+      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customer.name)}</p></div><div class="right"><b>${formatDateNo(activeDate)}</b><br>${escapeHtml(customer.deliveryAddress || "")}</div></div><table><thead><tr><th class="right">Antall</th><th>Produkt</th></tr></thead><tbody>${rows}</tbody></table><p style="margin-top:30px;">Signatur mottatt: __________________________</p></div>`;
     }).join("");
 
-    if (!rows) return "";
-
-    return `
+    const body = `
+<div class="print-header"><img src="/logo.png" class="print-logo" /></div>
 <div class="page">
   <div class="top">
-    <div>
-      <h1>Pakkseddel</h1>
-      <p class="muted">${escapeHtml(customer.name)}</p>
-    </div>
-    <div class="right">
-      <b>${formatDateNo(activeDate)}</b><br>
-      ${escapeHtml(customer.deliveryAddress || "")}
-    </div>
+    <div><img src="/logo.png" class="logo" /><h1>Produksjon for dagen</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
+    <div class="right"><b>${totalUnits} stk totalt</b><br>Produksjonsliste</div>
   </div>
-
   <table>
-    <thead>
-      <tr>
-        <th class="right">Antall</th>
-        <th>Produkt</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-
-  <p style="margin-top:30px;">Signatur mottatt: __________________________</p>
-</div>`;
-  }).join("");
-
-const body = `
-<div class="print-header">
-  <img src="/logo.png" class="print-logo" />
-</div>
-
-<div class="page">
-  <div class="top">
-    <div>
-      <img src="/logo.png" class="logo" />
-      <h1>Produksjon for dagen</h1>
-      <p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p>
-    </div>
-    <div class="right">
-      <b>${totalUnits} stk totalt</b><br>
-      Produksjonsliste
-    </div>
-  </div>
-
-  <table>
-    <thead>
-      <tr>
-  <th>Produkt</th>
-  <th class="right">Antall stk</th>
-  <th class="right">Størrelse</th>
-</tr>
-    </thead>
+    <thead><tr><th>Produkt</th><th class="right">Antall stk</th><th class="right">Størrelse</th></tr></thead>
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
 </div>
+${baseRecipePages}${productPages}${packingPages}`;
 
-${baseRecipePages}
-${productPages}
-${packingPages}`;
-
-  printWindow(`Produksjon ${activeDate}`, body);
-}
+    printWindow(`Produksjon ${activeDate}`, body);
+  }
 
   function printInvoice() {
     const missing = listDates(invoiceFrom, invoiceTo).filter((date) => !productionDays[date]?.approved);
-
-    if (missing.length) {
-      setInvoiceWarning(
-        `Kan ikke printe fakturagrunnlag. Disse dagene må godkjennes først: ${missing
-          .map((d) => `${weekdayNo(d)} ${formatDateNo(d)}`)
-          .join(", ")}`
-      );
-      return;
-    }
-
+    if (missing.length) { setInvoiceWarning(`Kan ikke printe fakturagrunnlag. Disse dagene må godkjennes først: ${missing.map((d) => `${weekdayNo(d)} ${formatDateNo(d)}`).join(", ")}`); return; }
     setInvoiceWarning("");
-
     const grouped = groupedInvoiceRows(invoiceFrom, invoiceTo);
-
     const body = grouped.map((group) => {
-      const rows = group.rows.map((row) => `
-<tr>
-  <td>${escapeHtml(row.productName)}</td>
-  <td class="right">${row.quantity}</td>
-  <td class="right">${currency(row.priceExVat)}</td>
-  <td class="right">${currency(row.sumExVat)}</td>
-  <td class="right">${currency(row.vat)}</td>
-  <td class="right"><b>${currency(row.sumIncVat)}</b></td>
-</tr>`).join("");
-
-      return `
-<div class="page">
-  <div class="top">
-    <div>
-      <img src="/logo.png" class="logo" />
-      <h1>Fakturagrunnlag</h1>
-      <p class="muted">${escapeHtml(group.customerName)}</p>
-    </div>
-    <div class="right">
-      <b>${formatDateNo(invoiceFrom)} – ${formatDateNo(invoiceTo)}</b><br>
-      MVA 15 %
-    </div>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>Produkt</th>
-        <th class="right">Antall totalt</th>
-        <th class="right">Pris eks.</th>
-        <th class="right">Sum eks.</th>
-        <th class="right">MVA 15%</th>
-        <th class="right">Sum inkl.</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-    <tfoot>
-      <tr class="total">
-        <td colspan="3">Sum</td>
-        <td class="right">${currency(group.sumExVat)}</td>
-        <td class="right">${currency(group.vat)}</td>
-        <td class="right">${currency(group.sumIncVat)}</td>
-      </tr>
-    </tfoot>
-  </table>
-</div>`;
+      const rows = group.rows.map((row) => `<tr><td>${escapeHtml(row.productName)}</td><td class="right">${row.quantity}</td><td class="right">${currency(row.priceExVat)}</td><td class="right">${currency(row.sumExVat)}</td><td class="right">${currency(row.vat)}</td><td class="right"><b>${currency(row.sumIncVat)}</b></td></tr>`).join("");
+      return `<div class="page"><div class="top"><div><img src="/logo.png" class="logo" /><h1>Fakturagrunnlag</h1><p class="muted">${escapeHtml(group.customerName)}</p></div><div class="right"><b>${formatDateNo(invoiceFrom)} – ${formatDateNo(invoiceTo)}</b><br>MVA 15 %</div></div><table><thead><tr><th>Produkt</th><th class="right">Antall totalt</th><th class="right">Pris eks.</th><th class="right">Sum eks.</th><th class="right">MVA 15%</th><th class="right">Sum inkl.</th></tr></thead><tbody>${rows}</tbody><tfoot><tr class="total"><td colspan="3">Sum</td><td class="right">${currency(group.sumExVat)}</td><td class="right">${currency(group.vat)}</td><td class="right">${currency(group.sumIncVat)}</td></tr></tfoot></table></div>`;
     }).join("");
-
     printWindow(`Fakturagrunnlag ${invoiceFrom} - ${invoiceTo}`, body || "<p>Ingen fakturalinjer i perioden.</p>");
   }
 
   function applyRecurringOrdersForDay() {
     const dayNo = weekdayNumber(activeDate);
     let nextDay = { ...activeDay, quantities: { ...activeDay.quantities } };
-
-    (data.recurringStorkjokkenOrders || [])
-      .filter((order) => order.active && order.weekdays.includes(dayNo))
-      .forEach((order) => {
-        order.lines.forEach((line) => {
-          nextDay.quantities[line.productId] = {
-            ...(nextDay.quantities[line.productId] || {}),
-            [order.customerId]:
-              Number(nextDay.quantities[line.productId]?.[order.customerId] || 0) +
-              Number(line.quantity || 0),
-          };
-        });
+    (data.recurringStorkjokkenOrders || []).filter((order) => order.active && order.weekdays.includes(dayNo)).forEach((order) => {
+      order.lines.forEach((line) => {
+        nextDay.quantities[line.productId] = { ...(nextDay.quantities[line.productId] || {}), [order.customerId]: Number(nextDay.quantities[line.productId]?.[order.customerId] || 0) + Number(line.quantity || 0) };
       });
-
+    });
     saveDay(nextDay);
   }
 
   return (
     <section>
+      {/* Topplinje med dato og hovedvalg */}
       <div className="card">
         <div className="between">
           <div>
-            <h2>Produksjon Bakeri</h2>
-            <p style={{ color: "#64748b" }}>
-              Produktene i gridet hentes fra Produkter-siden. Dagens dato åpnes som standard.
-            </p>
+            <h2>Produksjon</h2>
+            <p style={{ color: "#64748b" }}>Velg dag og kategori.</p>
           </div>
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <button className="btn" onClick={() => setPanel("day")}>Dagens produksjon</button>
-            <button className="btn" onClick={() => setPanel("template")}>Produktmal</button>
-            <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
-            <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
-            <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
-            <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {/* Bakeri / Catering hovedvalg */}
+            <button className={mainPanel === "bakeri" ? "btn active" : "btn"} onClick={() => setMainPanel("bakeri")}>🥖 Bakeri</button>
+            <button className={mainPanel === "catering" ? "btn active" : "btn"} onClick={() => setMainPanel("catering")}>
+              🍽 Catering {cateringOrders.length > 0 && `(${cateringOrders.length})`}
+            </button>
           </div>
         </div>
       </div>
 
+      {/* Datovelger */}
       <div className="card">
         <div className="production-date-row">
           <button className="btn" onClick={() => setActiveDate(addDays(activeDate, -1))}>← Forrige</button>
-
           <div className="production-date-box">
             <small>Valgt produksjonsdag</small>
             <b>{weekdayNo(activeDate)} {formatDateNo(activeDate)}</b>
           </div>
-
           <button className="btn" onClick={() => setActiveDate(addDays(activeDate, 1))}>Neste →</button>
-
-          <input
-            type="date"
-            value={activeDate}
-            onChange={(e) => setActiveDate(e.target.value)}
-            style={{ maxWidth: 180 }}
-          />
+          <input type="date" value={activeDate} onChange={(e) => setActiveDate(e.target.value)} style={{ maxWidth: 180 }} />
         </div>
       </div>
 
-      {panel === "day" && (
+      {/* ── BAKERI-PANEL ────────────────────────────────────────────────────── */}
+      {mainPanel === "bakeri" && (
         <>
-          <div className="metric-row">
-            <Metric label="Produksjonslinjer" value={String(activeRows.length)} />
-            <Metric label="Totalt antall" value={String(totalUnits)} dark />
-            <Metric label="Total produksjon" value={`${totalUnits} stk`} />
-            <Metric label="Status" value={activeDay.approved ? "Godkjent" : "Ikke godkjent"} tone={activeDay.approved ? "good" : "warn"} />
-          </div>
-
           <div className="card">
             <div className="between">
-              <div>
-                <h3>Dagens produksjonsgrid</h3>
-                <p style={{ color: "#64748b" }}>
-                  Fyll inn antall per kunde/kanal. Sum per produkt brukes til oppskrifter og pakksedler.
-                </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn" onClick={() => setPanel("day")}>Dagens produksjon</button>
+                <button className="btn" onClick={() => setPanel("template")}>Produktmal</button>
+                <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
+                <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
+                <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
+              </div>
+              <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
+            </div>
+          </div>
+
+          {panel === "day" && (
+            <>
+              <div className="metric-row">
+                <Metric label="Produksjonslinjer" value={String(activeRows.length)} />
+                <Metric label="Totalt antall" value={String(totalUnits)} dark />
+                <Metric label="Total produksjon" value={`${totalUnits} stk`} />
+                <Metric label="Status" value={activeDay.approved ? "Godkjent" : "Ikke godkjent"} tone={activeDay.approved ? "good" : "warn"} />
               </div>
 
-              <button className="btn" onClick={applyRecurringOrdersForDay}>
-                Legg til fastordre for denne dagen
-              </button>
-            </div>
+              <div className="card">
+                <div className="between">
+                  <div>
+                    <h3>Dagens produksjonsgrid</h3>
+                    <p style={{ color: "#64748b" }}>Fyll inn antall per kunde/kanal.</p>
+                  </div>
+                  <button className="btn" onClick={applyRecurringOrdersForDay}>Legg til fastordre for denne dagen</button>
+                </div>
 
-            <div className="chips">
-              <button
-                className={categoryFilter === "alle" ? "btn active" : "btn"}
-                onClick={() => setCategoryFilter("alle")}
-              >
-                Alle
-              </button>
+                <div className="chips">
+                  <button className={categoryFilter === "alle" ? "btn active" : "btn"} onClick={() => setCategoryFilter("alle")}>Alle</button>
+                  {productionCategories.map((cat) => (
+                    <button key={cat.id} className={categoryFilter === cat.id ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat.id)}>{cat.name}</button>
+                  ))}
+                </div>
 
-              {productionCategories.map((cat) => (
-                <button
-                  key={cat.id}
-                  className={categoryFilter === cat.id ? "btn active" : "btn"}
-                  onClick={() => setCategoryFilter(cat.id)}
-                >
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Produkt</th>
-                    <th>Oppskrift / kategori</th>
-                    {columns.map((col) => (
-                      <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>
-                    ))}
-                    <th style={{ textAlign: "center" }}>Sum</th>
-                    
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleTemplateLines.map((line) => {
-                    const product = data.products.find((p) => p.id === line.productId);
-                    if (!product) return null;
-
-                    const qtyRow = activeDay.quantities[product.id] || {};
-                    const total = totalForProduct(product.id);
-                    const kg = kgForProduct(product, total);
-
-                    return (
-                      <tr key={line.id}>
-                        <td>
-                          <b>{product.name}</b>
-                          <br />
-                          <small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small>
-                        </td>
-                        <td>
-                          {productionCategories.find((c) => c.id === line.category)?.name}
-                          <br />
-                          <small style={{ color: "#64748b" }}>{product.category}</small>
-                        </td>
-                        {columns.map((col) => (
-                          <td key={col.id}>
-                            <input
-                              type="number"
-                              value={qtyRow[col.id] || ""}
-                              onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)}
-                              style={{ minWidth: 70, textAlign: "center" }}
-                            />
-                          </td>
-                        ))}
-                        <td style={{ textAlign: "center" }}><b>{total}</b></td>
-                        
+                <div style={{ overflowX: "auto" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Produkt</th>
+                        <th>Kategori</th>
+                        {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
+                        <th style={{ textAlign: "center" }}>Sum</th>
                       </tr>
-                    );
-                  })}
+                    </thead>
+                    <tbody>
+                      {visibleTemplateLines.map((line) => {
+                        const product = data.products.find((p) => p.id === line.productId);
+                        if (!product) return null;
+                        const qtyRow = activeDay.quantities[product.id] || {};
+                        const total = totalForProduct(product.id);
+                        return (
+                          <tr key={line.id}>
+                            <td><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                            <td>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                            {columns.map((col) => (
+                              <td key={col.id}>
+                                <input type="number" value={qtyRow[col.id] || ""} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                              </td>
+                            ))}
+                            <td style={{ textAlign: "center" }}><b>{total}</b></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {panel === "template" && (
+            <div className="card">
+              <h3>Produktmal for produksjonsgrid</h3>
+              <div className="form-grid three">
+                <select value={newTemplateCategory} onChange={(e) => setNewTemplateCategory(e.target.value as ProductionCategory)}>
+                  {productionCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                </select>
+                <select value={newTemplateProductId} onChange={(e) => setNewTemplateProductId(e.target.value)}>
+                  <option value="">Velg produkt</option>
+                  {data.products.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.productNumber || "-"}</option>)}
+                </select>
+                <button className="btn active" onClick={addTemplateLine}>Legg til i mal</button>
+              </div>
+              <div className="grid two">
+                {productionCategories.map((cat) => (
+                  <div key={cat.id} className="soft-box">
+                    <h3>{cat.name}</h3>
+                    {templateLines.filter((line) => line.category === cat.id).map((line) => {
+                      const product = data.products.find((p) => p.id === line.productId);
+                      if (!product) return null;
+                      return (
+                        <div key={line.id} className="editable-row">
+                          <div><b>{product.name}</b><br /><small>{product.productNumber || "-"}</small></div>
+                          <button className="link danger" onClick={() => removeTemplateLine(line.id)}>Fjern</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {panel === "customers" && (
+            <div className="card">
+              <h3>Storkjøkkenkunder</h3>
+              <div className="soft-box">
+                <h3>Ny kunde</h3>
+                <div className="form-grid five">
+                  <input value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} placeholder="Kundenavn" />
+                  <input value={newCustomer.orgNumber} onChange={(e) => setNewCustomer({ ...newCustomer, orgNumber: e.target.value })} placeholder="Org.nr" />
+                  <input value={newCustomer.address} onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })} placeholder="Fakturaadresse" />
+                  <input value={newCustomer.deliveryAddress} onChange={(e) => setNewCustomer({ ...newCustomer, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
+                  <input value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="Telefon" />
+                </div>
+                <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
+              </div>
+              <table>
+                <thead><tr><th>Kunde</th><th>Org.nr</th><th>Levering</th><th>Telefon</th><th></th></tr></thead>
+                <tbody>
+                  {(data.storkjokkenCustomers || []).map((customer) => (
+                    <tr key={customer.id}>
+                      <td><b>{customer.name}</b></td>
+                      <td>{customer.orgNumber || "-"}</td>
+                      <td>{customer.deliveryAddress || "-"}</td>
+                      <td>{customer.phone || "-"}</td>
+                      <td><button className="link danger" onClick={() => deleteCustomer(customer.id)}>Slett</button></td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+              <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
+              {storkjokkenCustomers.map((customer) => (
+                <div key={customer.id} className="soft-box">
+                  <h3>{customer.name}</h3>
+                  <table>
+                    <thead><tr><th>Produkt</th><th>Standardpris eks. mva</th><th>Spesialpris eks. mva</th></tr></thead>
+                    <tbody>
+                      {data.products.map((product) => {
+                        const special = (data.storkjokkenSpecialPrices || []).find((x) => x.customerId === customer.id && x.productId === product.id);
+                        return (
+                          <tr key={product.id}>
+                            <td>{product.name}</td>
+                            <td>{currency(product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat))}</td>
+                            <td><input type="number" value={special?.priceExVat || ""} onChange={(e) => setSpecialPrice(customer.id, product.id, Number(e.target.value) || 0)} placeholder="Standard" /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {panel === "recurring" && (
+            <div className="card">
+              <h3>Fastordre</h3>
+              <p style={{ color: "#64748b" }}>Knappen i dagsbildet legger inn aktive fastordre for valgt ukedag.</p>
+              {(data.recurringStorkjokkenOrders || []).length ? (
+                (data.recurringStorkjokkenOrders || []).map((order) => {
+                  const customer = data.storkjokkenCustomers.find((c) => c.id === order.customerId);
+                  return (
+                    <div key={order.id} className="editable-row">
+                      <div><b>{customer?.name || "Ukjent kunde"}</b><br /><small>Dager: {order.weekdays.join(", ")} · Linjer: {order.lines.length}</small></div>
+                      <span>{order.active ? "Aktiv" : "Inaktiv"}</span>
+                    </div>
+                  );
+                })
+              ) : <p>Ingen fastordre lagt inn ennå.</p>}
+            </div>
+          )}
+
+          {panel === "invoice" && (
+            <div className="card">
+              <div className="between">
+                <div><h3>Fakturagrunnlag</h3><p style={{ color: "#64748b" }}>Alle dager i perioden må være godkjent før print.</p></div>
+                <button className="btn active" onClick={printInvoice}>Print fakturagrunnlag</button>
+              </div>
+              <div className="form-grid three">
+                <label>Fra dato<input type="date" value={invoiceFrom} onChange={(e) => setInvoiceFrom(e.target.value)} /></label>
+                <label>Til dato<input type="date" value={invoiceTo} onChange={(e) => setInvoiceTo(e.target.value)} /></label>
+                <Metric label="Godkjente dager i perioden" value={String(listDates(invoiceFrom, invoiceTo).filter((d) => productionDays[d]?.approved).length)} />
+              </div>
+              {invoiceWarning && <div className="warning">{invoiceWarning}</div>}
+              {groupedInvoiceRows(invoiceFrom, invoiceTo).map((group) => (
+                <div key={group.customerName} className="soft-box">
+                  <div className="between"><h3>{group.customerName}</h3><b>{currency(group.sumIncVat)} inkl. mva</b></div>
+                  <table>
+                    <thead><tr><th>Produkt</th><th>Antall totalt</th><th>Pris eks.</th><th>Sum eks.</th><th>MVA 15%</th><th>Sum inkl.</th></tr></thead>
+                    <tbody>
+                      {group.rows.map((row) => (
+                        <tr key={`${row.customerId}-${row.productId}`}>
+                          <td>{row.productName}</td><td>{row.quantity}</td><td>{currency(row.priceExVat)}</td>
+                          <td>{currency(row.sumExVat)}</td><td>{currency(row.vat)}</td><td><b>{currency(row.sumIncVat)}</b></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Godkjenning */}
+          <div className="card">
+            <div className="production-approve-box">
+              <div><h3>Godkjenning av dag</h3><p style={{ color: "#64748b" }}>Dagen må godkjennes før den kan tas med i fakturagrunnlaget.</p></div>
+              <button className={activeDay.approved ? "btn active" : "btn"} onClick={() => saveDay({ ...activeDay, approved: !activeDay.approved })}>
+                {activeDay.approved ? "✓ Dagen er godkjent" : "Godkjenn dag"}
+              </button>
             </div>
           </div>
         </>
       )}
 
-      {panel === "template" && (
-        <div className="card">
-          <h3>Produktmal for produksjonsgrid</h3>
-          <p style={{ color: "#64748b" }}>
-            Denne listen bestemmer hvilke produkter som vises hver dag. Produktene må finnes i Produkter-siden først.
-          </p>
+      {/* ── CATERING-PANEL ──────────────────────────────────────────────────── */}
+      {mainPanel === "catering" && (
+        <>
+          <div className="card">
+            <div className="between">
+              <div>
+                <h3>Cateringordre for {weekdayNo(activeDate)} {formatDateNo(activeDate)}</h3>
+                <p style={{ color: "#64748b" }}>Ordre av type Catering og Påsmurt vises automatisk på leveringsdatoen.</p>
+              </div>
+              <button className="btn active" onClick={printCateringDay}>
+                Print alle ordre for dagen
+              </button>
+            </div>
 
-          <div className="form-grid three">
-            <select value={newTemplateCategory} onChange={(e) => setNewTemplateCategory(e.target.value as ProductionCategory)}>
-              {productionCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
-            </select>
-
-            <select value={newTemplateProductId} onChange={(e) => setNewTemplateProductId(e.target.value)}>
-              <option value="">Velg produkt fra Produkter</option>
-              {data.products.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} · {p.productNumber || "-"}</option>
-              ))}
-            </select>
-
-            <button className="btn active" onClick={addTemplateLine}>Legg til i mal</button>
-          </div>
-
-          <div className="grid two">
-            {productionCategories.map((cat) => (
-              <div key={cat.id} className="soft-box">
-                <h3>{cat.name}</h3>
-                {templateLines.filter((line) => line.category === cat.id).map((line) => {
-                  const product = data.products.find((p) => p.id === line.productId);
-                  if (!product) return null;
-
-                  return (
-                    <div key={line.id} className="editable-row">
-                      <div>
-                        <b>{product.name}</b>
-                        <br />
-                        <small>{product.productNumber || "-"}</small>
+            {cateringOrders.length === 0 ? (
+              <p style={{ color: "#64748b" }}>Ingen cateringordre denne dagen.</p>
+            ) : (
+              cateringOrders.map((o) => {
+                const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
+                const isExpanded = expandedCateringOrderId === o.id;
+                return (
+                  <div key={o.id} className="order-row">
+                    <button
+                      className="order-row-header"
+                      onClick={() => setExpandedCateringOrderId(isExpanded ? null : o.id)}
+                    >
+                      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <b>{o.time || "--"}</b>
+                        <span>{customerName}</span>
+                        {o.orderNumber && <span style={{ background: "#f1f5f9", borderRadius: 6, padding: "2px 8px", fontSize: 12 }}>#{o.orderNumber}</span>}
+                        <span style={{ color: "#64748b", fontSize: 13 }}>
+                          {o.orderLines.map((l) => {
+                            const p = data.products.find((x) => x.id === l.productId);
+                            return `${l.quantity} × ${p?.name || "Ukjent"}`;
+                          }).join(", ")}
+                        </span>
                       </div>
-                      <button className="link danger" onClick={() => removeTemplateLine(line.id)}>Fjern</button>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+                      <span style={{ color: "#64748b" }}>{isExpanded ? "▲" : "▼"}</span>
+                    </button>
 
-      {panel === "customers" && (
-        <div className="card">
-          <h3>Storkjøkkenkunder</h3>
+                    {isExpanded && (
+                      <div className="order-row-body">
+                        <div style={{ marginBottom: 10 }}>
+                          <p><b>Telefon:</b> {o.phone || "-"}</p>
+                          <p><b>Levering:</b> {o.deliveryAddress || "-"}</p>
+                          <p><b>Betaling:</b> {o.paymentInfo || "-"}</p>
+                          {o.note && <p style={{ whiteSpace: "pre-wrap" }}><b>Notat:</b><br />{o.note}</p>}
+                        </div>
 
-          <div className="soft-box">
-            <h3>Ny kunde</h3>
-            <div className="form-grid five">
-              <input value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} placeholder="Kundenavn" />
-              <input value={newCustomer.orgNumber} onChange={(e) => setNewCustomer({ ...newCustomer, orgNumber: e.target.value })} placeholder="Org.nr" />
-              <input value={newCustomer.address} onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })} placeholder="Fakturaadresse" />
-              <input value={newCustomer.deliveryAddress} onChange={(e) => setNewCustomer({ ...newCustomer, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
-              <input value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="Telefon" />
-            </div>
-            <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
-          </div>
+                        <table>
+                          <thead><tr><th>Produkt</th><th>Antall</th></tr></thead>
+                          <tbody>
+                            {o.orderLines.map((l, i) => {
+                              const product = data.products.find((p) => p.id === l.productId);
+                              return <tr key={i}><td>{product?.name || "Ukjent"}</td><td>{l.quantity}</td></tr>;
+                            })}
+                          </tbody>
+                        </table>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Kunde</th>
-                <th>Org.nr</th>
-                <th>Levering</th>
-                <th>Telefon</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data.storkjokkenCustomers || []).map((customer) => (
-                <tr key={customer.id}>
-                  <td><b>{customer.name}</b></td>
-                  <td>{customer.orgNumber || "-"}</td>
-                  <td>{customer.deliveryAddress || "-"}</td>
-                  <td>{customer.phone || "-"}</td>
-                  <td><button className="link danger" onClick={() => deleteCustomer(customer.id)}>Slett</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
-          <p style={{ color: "#64748b" }}>Tomt felt bruker vanlig storkjøkkenpris fra produktet.</p>
-
-          {storkjokkenCustomers.map((customer) => (
-            <div key={customer.id} className="soft-box">
-              <h3>{customer.name}</h3>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Produkt</th>
-                    <th>Standardpris eks. mva</th>
-                    <th>Spesialpris eks. mva</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.products.map((product) => {
-                    const special = (data.storkjokkenSpecialPrices || []).find(
-                      (x) => x.customerId === customer.id && x.productId === product.id
-                    );
-
-                    return (
-                      <tr key={product.id}>
-                        <td>{product.name}</td>
-                        <td>{currency(product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat))}</td>
-                        <td>
-                          <input
-                            type="number"
-                            value={special?.priceExVat || ""}
-                            onChange={(e) => setSpecialPrice(customer.id, product.id, Number(e.target.value) || 0)}
-                            placeholder="Standard"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {panel === "recurring" && (
-        <div className="card">
-          <h3>Fastordre</h3>
-          <p style={{ color: "#64748b" }}>
-            Her kan vi neste steg legge inn full redigering av faste ordre. Knappen i dagsbildet legger inn aktive fastordre for valgt ukedag.
-          </p>
-
-          {(data.recurringStorkjokkenOrders || []).length ? (
-            (data.recurringStorkjokkenOrders || []).map((order) => {
-              const customer = data.storkjokkenCustomers.find((c) => c.id === order.customerId);
-
-              return (
-                <div key={order.id} className="editable-row">
-                  <div>
-                    <b>{customer?.name || "Ukjent kunde"}</b>
-                    <br />
-                    <small>
-                      Dager: {order.weekdays.join(", ")} · Linjer: {order.lines.length}
-                    </small>
+                        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                          <button className="btn active" onClick={() => printCateringOrder(o)}>
+                            Print denne ordren med oppskrift
+                          </button>
+                          {o.orderLines.map((l, i) => {
+                            const product = data.products.find((p) => p.id === l.productId);
+                            if (!product) return null;
+                            return (
+                              <button key={i} className="btn" onClick={() => {
+                                const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${l.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)}</b></div></div>${scaledRecipeHtml(product, l.quantity)}</div>`;
+                                printWindow(`Oppskrift: ${product.name}`, body);
+                              }}>
+                                Oppskrift: {product.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <span>{order.active ? "Aktiv" : "Inaktiv"}</span>
-                </div>
-              );
-            })
-          ) : (
-            <p>Ingen fastordre lagt inn ennå.</p>
-          )}
-        </div>
+                );
+              })
+            )}
+          </div>
+        </>
       )}
-
-      {panel === "invoice" && (
-        <div className="card">
-          <div className="between">
-            <div>
-              <h3>Fakturagrunnlag</h3>
-              <p style={{ color: "#64748b" }}>
-                Velg periode. Alle dager i perioden må være godkjent før print.
-              </p>
-            </div>
-            <button className="btn active" onClick={printInvoice}>Print fakturagrunnlag</button>
-          </div>
-
-          <div className="form-grid three">
-            <label>
-              Fra dato
-              <input type="date" value={invoiceFrom} onChange={(e) => setInvoiceFrom(e.target.value)} />
-            </label>
-            <label>
-              Til dato
-              <input type="date" value={invoiceTo} onChange={(e) => setInvoiceTo(e.target.value)} />
-            </label>
-            <Metric
-              label="Godkjente dager i perioden"
-              value={String(listDates(invoiceFrom, invoiceTo).filter((d) => productionDays[d]?.approved).length)}
-            />
-          </div>
-
-          {invoiceWarning && <div className="warning">{invoiceWarning}</div>}
-
-          {groupedInvoiceRows(invoiceFrom, invoiceTo).map((group) => (
-            <div key={group.customerName} className="soft-box">
-              <div className="between">
-                <h3>{group.customerName}</h3>
-                <b>{currency(group.sumIncVat)} inkl. mva</b>
-              </div>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th>Produkt</th>
-                    <th>Antall totalt</th>
-                    <th>Pris eks.</th>
-                    <th>Sum eks.</th>
-                    <th>MVA 15%</th>
-                    <th>Sum inkl.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.rows.map((row) => (
-                    <tr key={`${row.customerId}-${row.productId}`}>
-                      <td>{row.productName}</td>
-                      <td>{row.quantity}</td>
-                      <td>{currency(row.priceExVat)}</td>
-                      <td>{currency(row.sumExVat)}</td>
-                      <td>{currency(row.vat)}</td>
-                      <td><b>{currency(row.sumIncVat)}</b></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="card">
-        <div className="production-approve-box">
-          <div>
-            <h3>Godkjenning av dag</h3>
-            <p style={{ color: "#64748b" }}>
-              Dagen må godkjennes før den kan tas med i fakturagrunnlaget.
-            </p>
-          </div>
-
-          <button
-            className={activeDay.approved ? "btn active" : "btn"}
-            onClick={() => saveDay({ ...activeDay, approved: !activeDay.approved })}
-          >
-            {activeDay.approved ? "✓ Dagen er godkjent" : "Godkjenn dag"}
-          </button>
-        </div>
-      </div>
-
-      <div className="card">
-        <h3>Print produksjon for valgt dag</h3>
-        <div className="grid two">
-          <div className="soft-box">
-            <h3>1. Forside</h3>
-            <p>Total produksjon per kategori og samlet antall.</p>
-          </div>
-          <div className="soft-box">
-            <h3>2. Oppskrifter</h3>
-            <p>Én side per produkt med skalert mengde.</p>
-          </div>
-          <div className="soft-box">
-            <h3>3. Pakksedler</h3>
-            <p>Én pakkseddel per storkjøkkenkunde.</p>
-          </div>
-        </div>
-
-        <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
-      </div>
 
       <style jsx global>{`
-        .production-date-row {
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          gap: 10px;
-          justify-content: space-between;
-        }
-
-        .production-date-box {
-          background: #dcfce7;
-          color: #14532d;
-          border: 1px solid #86efac;
-          border-radius: 14px;
-          padding: 10px 18px;
-          min-width: 240px;
-          text-align: center;
-          display: grid;
-          gap: 2px;
-        }
-
-        .production-date-box small {
-          color: #166534;
-          font-weight: 800;
-        }
-
-        .production-date-box b {
-          font-size: 18px;
-        }
-
-        .production-approve-box {
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          align-items: center;
-          flex-wrap: wrap;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          padding: 16px;
-        }
+        .production-date-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
+        .production-date-box { background: #dcfce7; color: #14532d; border: 1px solid #86efac; border-radius: 14px; padding: 10px 18px; min-width: 240px; text-align: center; display: grid; gap: 2px; }
+        .production-date-box small { color: #166534; font-weight: 800; }
+        .production-date-box b { font-size: 18px; }
+        .production-approve-box { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px; }
+        .order-row { border: 1px solid #e2e8f0; border-radius: 14px; margin: 8px 0; overflow: hidden; background: white; }
+        .order-row-header { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: white; border: 0; cursor: pointer; text-align: left; gap: 12px; }
+        .order-row-header:hover { background: #f8fafc; }
+        .order-row-body { padding: 0 16px 16px; border-top: 1px solid #e2e8f0; background: #fafafa; }
       `}</style>
     </section>
   );
