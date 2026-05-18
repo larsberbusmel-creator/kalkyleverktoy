@@ -1,8 +1,9 @@
-export type MatchableProduct = {
-  id: string;
-  name: string;
-  productNumber?: string;
-};
+/**
+ * parseWebshopEmail.ts UPDATED
+ *
+ * Delt parsing-logikk for webshop-ordrer fra e-post.
+ * Brukes både i WebshopImportTab (frontend) og /api/inbound-email (backend).
+ */
 
 export type ParsedOrderLine = {
   productId: string;
@@ -35,6 +36,13 @@ export type ParsedOrder = {
   dietVegetarian: string;
   dietPregnant: string;
   dietOther: string;
+};
+
+// Minimalt produktobjekt – kun det vi trenger for matching
+export type MatchableProduct = {
+  id: string;
+  name: string;
+  productNumber?: string;
 };
 
 const DEFAULT_ALLERGENS = [
@@ -72,6 +80,10 @@ function normalizePhone(value: string): string {
   return value.replace(/[^\d+]/g, "");
 }
 
+/**
+ * Hovedfunksjonen. Tar inn e-posttekst og produktliste, returnerer en ParsedOrder.
+ * Returnerer null hvis ingen produktlinjer ble funnet.
+ */
 export function parseWebshopEmail(
   text: string,
   products: MatchableProduct[]
@@ -81,11 +93,13 @@ export function parseWebshopEmail(
     .map((x) => x.trim())
     .filter(Boolean);
 
+  // Ordrenummer
   const orderNumberMatch =
     text.match(/(?:Bestilling|Ordre|Order)\s*#?\s*(\d{4,})/i) ||
     text.match(/\b(\d{5,})\b/);
   const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
+  // E-post og telefon
   const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
 
   let phoneMatch = "";
@@ -99,9 +113,11 @@ export function parseWebshopEmail(
       text.match(/Mottakers telefon:\s*((?:\+47\s*)?\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/i)?.[1] || "";
   }
 
+  // Leveringstidspunkt
   const deliveryMatch = text.match(/Tidspunkt:\s*(.+)/i);
   const dateInfo = parseNorwegianDate(deliveryMatch?.[1] || text);
 
+  // Kundenavn
   let customer = "";
   const customerInfoIndex = lines.findIndex((l) => /kundeinformasjon/i.test(l));
   if (customerInfoIndex >= 0 && lines[customerInfoIndex + 1]) {
@@ -112,6 +128,7 @@ export function parseWebshopEmail(
     customer = orderHeader?.split("/")[1]?.trim() || "";
   }
 
+  // Produktlinjer – matcher på produktnummer (f.eks. BA000001)
   const nextUnmatched: string[] = [];
   const orderLines: ParsedOrderLine[] = [];
 
@@ -141,6 +158,7 @@ export function parseWebshopEmail(
     orderLines.push({ productId: product.id, quantity });
   }
 
+  // Dedupliser – behold høyeste antall per produkt
   const uniqueLines = Object.values(
     orderLines.reduce((acc, line) => {
       if (!acc[line.productId] || line.quantity > acc[line.productId].quantity) {
@@ -152,6 +170,7 @@ export function parseWebshopEmail(
 
   if (uniqueLines.length === 0) return null;
 
+  // Betalingsinformasjon og leveringsadresse
   const paymentInfo =
     text.match(
       /Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Leveringsinformasjon|Tidspunkt:|Produkt|$)/i
