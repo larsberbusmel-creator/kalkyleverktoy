@@ -8,6 +8,10 @@ const WEBHOOK_SECRET = process.env.INBOUND_EMAIL_SECRET || "";
 
 export async function POST(req: NextRequest) {
   try {
+    if (!supabaseAdmin) {
+      return NextResponse.json({ error: "Supabase ikke konfigurert" }, { status: 500 });
+    }
+
     const { searchParams } = new URL(req.url);
     const incomingSecret = searchParams.get("secret") || "";
 
@@ -24,6 +28,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Ingen e-posttekst" }, { status: 400 });
     }
 
+    // Hent gjeldende app-data
     const { data: row, error: fetchError } = await supabaseAdmin
       .from("app_data")
       .select("data")
@@ -31,23 +36,50 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (fetchError || !row?.data) {
+      console.error("Kunne ikke hente app_data:", fetchError);
       return NextResponse.json({ error: "Kunne ikke hente app-data" }, { status: 500 });
     }
 
     const appData = row.data as {
       products: { id: string; name: string; productNumber?: string }[];
-      orders: unknown[];
+      orders: any[];
     };
 
+    // Parser e-posten
     const result = parseWebshopEmail(textBody, appData.products);
 
     if (!result) {
       console.warn(`Ingen produkter matchet. Fra: ${from}, Emne: ${subject}`);
-      return NextResponse.json({ ok: false, message: "Ingen produkter matchet" });
+      return NextResponse.json({
+        ok: false,
+        message: "Ingen produkter matchet – ordre ikke opprettet",
+      });
     }
 
     const { order, unmatched } = result;
-    const updatedOrders = [order, ...(appData.orders as unknown[])];
+
+    // Sjekk om ordre med samme ordrenr allerede finnes
+    const existingIndex = appData.orders.findIndex(
+      (o: any) => o.orderNumber && o.orderNumber === order.orderNumber && !o.deletedAt
+    );
+
+    let updatedOrders: any[];
+    let action: "created" | "updated";
+
+    if (existingIndex >= 0) {
+      // Oppdater eksisterende ordre – behold id
+      const existingId = appData.orders[existingIndex].id;
+      updatedOrders = appData.orders.map((o: any, i: number) =>
+        i === existingIndex ? { ...order, id: existingId } : o
+      );
+      action = "updated";
+      console.log(`🔄 Ordre oppdatert: ${order.orderNumber} | Kunde: ${order.customer}`);
+    } else {
+      // Ny ordre
+      updatedOrders = [order, ...appData.orders];
+      action = "created";
+      console.log(`✅ Ordre opprettet: ${order.id} | Kunde: ${order.customer}`);
+    }
 
     const { error: saveError } = await supabaseAdmin
       .from("app_data")
@@ -58,16 +90,20 @@ export async function POST(req: NextRequest) {
       .eq("id", "main");
 
     if (saveError) {
+      console.error("Kunne ikke lagre ordre:", saveError);
       return NextResponse.json({ error: "Kunne ikke lagre ordre" }, { status: 500 });
     }
 
     return NextResponse.json({
       ok: true,
+      action,
       orderId: order.id,
+      orderNumber: order.orderNumber,
       customer: order.customer,
       orderLines: order.orderLines.length,
       unmatched,
     });
+
   } catch (err) {
     console.error("Inbound email feil:", err);
     return NextResponse.json({ error: "Intern serverfeil" }, { status: 500 });

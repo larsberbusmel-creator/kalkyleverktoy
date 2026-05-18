@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "webshop" | "production" | "inventory" | "rental" | "settings";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert";
@@ -99,7 +99,9 @@ type Product = {
 type OrderLine = { productId: string; quantity: number };
 
 type Order = {
-  id: string;
+   id: string;
+  orderNumber?: string;        // ← NY
+  deletedAt?: string;          // ← NY (satt når ordre slettes, brukes til papirkurv)
   type: "catering" | "bakeri" | "pasmuurt" | "egenprodusert" | "storkjokken";
   customerType: "privat" | "bedrift" | "storkjokken";
   customer: string;
@@ -695,7 +697,7 @@ function productCost(product: Product, visited: string[] = []) {
 </header>
 
         <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "18px 0" }}>
-          {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["webshop", "Webshopimport"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
+          {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
         </nav>
 
         {tab === "dashboard" && (
@@ -709,13 +711,6 @@ function productCost(product: Product, visited: string[] = []) {
         {tab === "recipes" && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products" && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders" && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
-        {tab === "webshop" && (
-  <WebshopImportTab
-    data={data}
-    updateData={updateData}
-    setTab={setTab}
-  />
-)}
         {tab === "production" && (
   <ProductionTab
     data={data}
@@ -2978,17 +2973,7 @@ th{background:#f3f4f6}
 );
 }
 
-function formatTimeInput(value: string) {
-  const digits = value.replace(/[^0-9]/g, "");
 
-  if (!digits) return "";
-  if (digits.length <= 2) return `Kl ${digits.padStart(2, "0")}:00`;
-  if (digits.length === 3) {
-    return `Kl ${digits.slice(0, 1)}:${digits.slice(1).padEnd(2, "0")}`;
-  }
-
-  return `Kl ${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
-}
 function WebshopImportTab({
   data,
   updateData,
@@ -3297,49 +3282,171 @@ const deliveryAddress =
     </section>
   );
 }
-function OrdersTab({ data, updateData, productAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; productAllergens: (p: Product) => string[] }) {
+function formatTimeInput(value: string) {
+  const digits = value.replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  if (digits.length <= 2) return `Kl ${digits.padStart(2, "0")}:00`;
+  if (digits.length === 3) return `Kl ${digits.slice(0, 1)}:${digits.slice(1).padEnd(2, "0")}`;
+  return `Kl ${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
+}
+
+function parseNorwegianDateGlobal(text: string): { date: string; time: string } {
+  const months: Record<string, string> = {
+    januar: "01", februar: "02", mars: "03", april: "04", mai: "05", juni: "06",
+    juli: "07", august: "08", september: "09", oktober: "10", november: "11", desember: "12",
+  };
+  const match = text.match(/(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå]+)\s+(\d{1,2}:\d{2})/i);
+  if (!match) return { date: today(), time: "" };
+  const day = match[1].padStart(2, "0");
+  const month = months[match[2].toLowerCase()] || "01";
+  const year = new Date().getFullYear();
+  return { date: `${year}-${month}-${day}`, time: match[3] };
+}
+
+function OrdersTab({ data, updateData, productAllergens }: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  productAllergens: (p: Product) => string[];
+}) {
   const emptyOrder = (): Order => ({
-    id: "",
-    type: "catering",
-    customerType: "privat",
-    customer: "",
-    companyName: "",
-    orgNumber: "",
-    companyAddress: "",
-    phone: "",
-    deliveryAddress: "",
-    date: today(),
-    time: "",
-    note: "",
-paymentInfo: "",
-    guests: 10,
-    productId: data.products[0]?.id || "",
-    orderLines: [],
-    discountPercent: 0,
-    isRecurring: false,
-    recurringDays: [],
-    recurringNote: "",
+    id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
+    companyName: "", orgNumber: "", companyAddress: "", phone: "", deliveryAddress: "",
+    date: today(), time: "", note: "", paymentInfo: "", guests: 10,
+    productId: data.products[0]?.id || "", orderLines: [], discountPercent: 0,
+    isRecurring: false, recurringDays: [], recurringNote: "",
     allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
-    dietVegan: "0",
-    dietVegetarian: "0",
-    dietPregnant: "0",
-    dietOther: "",
+    dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
   });
 
-  const [form, setForm] = useState<Order>(emptyOrder);
+  const [form, setForm] = useState<Order>(emptyOrder());
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [lineToAdd, setLineToAdd] = useState({ productId: "", quantity: 1 });
   const [showNewOrder, setShowNewOrder] = useState(false);
+  const [showWebshopImport, setShowWebshopImport] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
+
+  // Webshop import state
+  const [webshopRawText, setWebshopRawText] = useState("");
+  const [webshopPreview, setWebshopPreview] = useState<Order | null>(null);
+  const [webshopUnmatched, setWebshopUnmatched] = useState<string[]>([]);
+
+  // Liste-state
+  const [orderSearch, setOrderSearch] = useState("");
+  const [sortField, setSortField] = useState<"date" | "customer" | "orderNumber">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [orderPage, setOrderPage] = useState(1);
-  const pageSize = 20;
+  const pageSize = 30;
 
-  function addOrderLine() {
-    setForm({ ...form, orderLines: [...form.orderLines, { productId: data.products[0]?.id || "", quantity: form.guests || 1 }] });
+  // ── Webshop import ────────────────────────────────────────────────────────
+
+  function parseWebshopOrder() {
+    const text = webshopRawText;
+    const lines = text.split(/\n/).map((x) => x.trim()).filter(Boolean);
+
+    const orderNumberMatch = text.match(/(?:Bestilling|Ordre|Order)\s*#?\s*(\d{4,})/i) || text.match(/\b(\d{5,})\b/);
+    const orderNumber = orderNumberMatch?.[1] || String(Date.now());
+
+    const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    let phoneMatch = "";
+    if (emailMatch?.index !== undefined) {
+      const afterEmail = text.slice(emailMatch.index + emailMatch[0].length);
+      phoneMatch = afterEmail.match(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/)?.[0] || "";
+    }
+    if (!phoneMatch) phoneMatch = text.match(/Mottakers telefon:\s*((?:\+47\s*)?\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/i)?.[1] || "";
+
+    const deliveryMatch = text.match(/Tidspunkt:\s*(.+)/i);
+    const dateInfo = parseNorwegianDateGlobal(deliveryMatch?.[1] || text);
+
+    let customer = "";
+    let companyName = "";
+    const orderHeader = lines.find((l) => /\d{4,}\s*\//.test(l));
+    if (orderHeader) {
+      const parts = orderHeader.split("/").map((x) => x.trim());
+      customer = parts[1] || "";
+      companyName = parts[2] || "";
+    }
+    if (!customer) {
+      const idx = lines.findIndex((l) => /kundeinformasjon/i.test(l));
+      if (idx >= 0 && lines[idx + 1]) customer = lines[idx + 1];
+    }
+
+    const nextUnmatched: string[] = [];
+    const orderLines: OrderLine[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const productCodeMatch = lines[i].match(/^([A-ZÆØÅ]{1,4}\d{3,})$/i);
+      if (!productCodeMatch) continue;
+      const productCode = productCodeMatch[1];
+      const product = data.products.find((p) => p.productNumber?.toLowerCase() === productCode.toLowerCase());
+      if (!product) { nextUnmatched.push(lines[i]); continue; }
+      const nextLines = [lines[i + 1] || "", lines[i + 2] || "", lines[i + 3] || ""];
+      const combined = nextLines.join(" ");
+      const quantityMatch = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
+      const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+      orderLines.push({ productId: product.id, quantity });
+    }
+
+    const uniqueLines = Object.values(
+      orderLines.reduce((acc, line) => {
+        if (!acc[line.productId] || line.quantity > acc[line.productId].quantity) acc[line.productId] = line;
+        return acc;
+      }, {} as Record<string, OrderLine>)
+    );
+
+    const paymentInfo = text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Leveringsinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() || "";
+    const deliveryAddress = text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() || (text.match(/Butikk:\s*Brødrene Berbusmel/i) ? "Hentes i butikk" : "");
+
+    // Alt som ikke matchet havner i notater
+    const unmatchedNote = nextUnmatched.length ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}` : "";
+    const driverNote = text.match(/Melding til sjåfør:\s*([\s\S]*)/i)?.[1]?.trim() || "";
+    const note = [driverNote, unmatchedNote].filter(Boolean).join("\n\n");
+
+    const nextOrder: Order = {
+      id: `webshop-${orderNumber}-${Date.now()}`,
+      orderNumber,
+      type: "bakeri",
+      customerType: companyName ? "bedrift" : "privat",
+      customer: customer || "Webshopkunde",
+      companyName,
+      orgNumber: "", companyAddress: "",
+      phone: phoneMatch ? phoneMatch.replace(/[^\d+]/g, "") : "",
+      paymentInfo, deliveryAddress,
+      date: dateInfo.date, time: dateInfo.time, note,
+      guests: 1,
+      productId: uniqueLines[0]?.productId || data.products[0]?.id || "",
+      orderLines: uniqueLines, discountPercent: 0, isRecurring: false, recurringDays: [],
+      recurringNote: `Importert fra webshop. Ordrenr: ${orderNumber}`,
+      allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
+      dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
+    };
+
+    setWebshopPreview(nextOrder);
+    setWebshopUnmatched(nextUnmatched);
   }
 
-  function updateOrderLine(index: number, partial: Partial<OrderLine>) {
-    setForm({ ...form, orderLines: form.orderLines.map((l, i) => i === index ? { ...l, ...partial } : l) });
+  function createWebshopOrder() {
+    if (!webshopPreview) return;
+    if (!webshopPreview.orderLines.length) return alert("Fant ingen produktlinjer. Sjekk at produktnummer finnes i Misemetrics.");
+
+    // Sjekk om ordre med samme ordrenr finnes – oppdater i så fall
+    const existing = data.orders.find((o) => o.orderNumber && o.orderNumber === webshopPreview.orderNumber && !o.deletedAt);
+    if (existing) {
+      if (!confirm(`Ordrenr ${webshopPreview.orderNumber} finnes allerede. Vil du oppdatere den eksisterende ordren?`)) return;
+      updateData({ orders: data.orders.map((o) => o.id === existing.id ? { ...webshopPreview, id: existing.id } : o) });
+      alert("Eksisterende ordre oppdatert.");
+    } else {
+      updateData({ orders: [webshopPreview, ...data.orders] });
+      alert("Webshopordre opprettet.");
+    }
+
+    setShowWebshopImport(false);
+    setWebshopRawText("");
+    setWebshopPreview(null);
+    setWebshopUnmatched([]);
   }
+
+  // ── Ordre-funksjoner ──────────────────────────────────────────────────────
 
   function removeOrderLine(index: number) {
     setForm({ ...form, orderLines: form.orderLines.filter((_, i) => i !== index) });
@@ -3350,18 +3457,13 @@ paymentInfo: "",
     if (!form.customer.trim() && form.customerType === "privat") return alert("Legg inn kundenavn.");
     if (!form.companyName?.trim() && form.customerType === "bedrift") return alert("Legg inn bedriftsnavn.");
     if (!cleanLines.length) return alert("Legg inn minst ett produkt/meny i ordren.");
-
     const savedOrder = { ...form, id: editingOrderId || `order-${Date.now()}`, orderLines: cleanLines };
-
     updateData({
       orders: editingOrderId
-        ? data.orders.map((o) => (o.id === editingOrderId ? savedOrder : o))
+        ? data.orders.map((o) => o.id === editingOrderId ? savedOrder : o)
         : [savedOrder, ...data.orders],
     });
-
-    setForm(emptyOrder());
-    setEditingOrderId(null);
-    setShowNewOrder(false);
+    setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false);
   }
 
   function editOrder(order: Order) {
@@ -3369,12 +3471,30 @@ paymentInfo: "",
     setEditingOrderId(order.id);
     setShowNewOrder(true);
     setLineToAdd({ productId: "", quantity: order.guests || 1 });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Myk sletting – setter deletedAt, ikke fjerner fra listen
+  function softDeleteOrder(id: string) {
+    if (!confirm("Flytte ordren til papirkurv?")) return;
+    updateData({
+      orders: data.orders.map((o) => o.id === id ? { ...o, deletedAt: new Date().toISOString() } : o),
+    });
+  }
+
+  function restoreOrder(id: string) {
+    updateData({
+      orders: data.orders.map((o) => o.id === id ? { ...o, deletedAt: undefined } : o),
+    });
+  }
+
+  function permanentDeleteOrder(id: string) {
+    if (!confirm("Slette ordren permanent? Dette kan ikke angres.")) return;
+    updateData({ orders: data.orders.filter((o) => o.id !== id) });
   }
 
   function selectedAllergens(order: Order) {
-    return Object.entries(order.allergens || {})
-      .filter(([, count]) => Number(count) > 0)
-      .map(([name, count]) => `${name}: ${count}`);
+    return Object.entries(order.allergens || {}).filter(([, count]) => Number(count) > 0).map(([name, count]) => `${name}: ${count}`);
   }
 
   function orderSubtotalIncVat(order: Order) {
@@ -3384,76 +3504,16 @@ paymentInfo: "",
     }, 0);
   }
 
-  function orderDiscountAmount(order: Order) {
-    return orderSubtotalIncVat(order) * ((Number(order.discountPercent) || 0) / 100);
-  }
-
-  function orderTotalIncVat(order: Order) {
-    return orderSubtotalIncVat(order) - orderDiscountAmount(order);
-  }
-
-function printOrder(order: Order, includeProduction = true) {
-      const rows = order.orderLines.map((line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      const lineTotal = (product?.customerPrice || 0) * line.quantity;
-      return `<tr><td>${line.quantity}</td><td>${product?.name || "Ukjent"}</td><td>${currency(product?.customerPrice || 0)}</td><td>${currency(lineTotal)}</td></tr>`;
-    }).join("");
-
-    const prodRows = order.orderLines.map((line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      if (!product) return "";
-      const rowsForProduct = expandProductForProduction(product, Number(line.quantity) || 0)
-        .map((r) => `<tr><td>${r.name}</td><td>${num(r.amount)} ${r.unit}</td></tr>`)
-        .join("");
-      return `<tr><td colspan="2" style="background:#111827;color:white;font-weight:800;">${line.quantity} × ${product.name}</td></tr>${rowsForProduct}`;
-    }).join("");
-    const subtotalInc = orderSubtotalIncVat(order);
-    const discountAmount = orderDiscountAmount(order);
-    const totalInc = orderTotalIncVat(order);
-    const totalEx = exVatFromIncVat(totalInc, data.settings.foodVat);
-    const allergens = selectedAllergens(order).join(", ") || "Ingen registrert";
-    const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
-    const customerName = order.customerType === "bedrift" ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
-
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{display:flex;justify-content:space-between;border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.muted{color:#64748b}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}.warn{background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:12px;margin:12px 0}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div><div class="logo">KJØKKENORDRE</div><div class="muted">${today()}</div></div><div class="right"><h1>${formatDateNo(order.date)} ${order.time || ""}</h1><p>${order.type}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${customerName || "Ikke angitt"}</b></p><p>Kontakt: ${order.customer || "-"}</p><p>Telefon: ${order.phone || "-"}</p><p>Betaling: ${order.paymentInfo || "-"}</p><p>Levering: ${order.deliveryAddress || "-"}</p><p><b>Notat:</b><br />${order.note || "-"}</p></div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${diets}</p><p><b>Allergier:</b> ${allergens}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table><div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${includeProduction ? `<h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table>` : ""}</body></html>`);
-    w.document.close();
-    w.focus();
-  }
-
-  function productName(id: string) {
-    return data.products.find((p) => p.id === id)?.name || "Ukjent produkt";
-  }
-
-  function orderAllergenWarnings(order: Order) {
-    const orderAllergens = new Set(order.orderLines.flatMap((l) => {
-      const p = data.products.find((x) => x.id === l.productId);
-      return p ? productAllergens(p) : [];
-    }));
-
-    return Object.entries(order.allergens || {})
-      .filter(([allergen, count]) => Number(count) > 0 && orderAllergens.has(allergen))
-      .map(([allergen]) => allergen);
-  }
+  function orderDiscountAmount(order: Order) { return orderSubtotalIncVat(order) * ((Number(order.discountPercent) || 0) / 100); }
+  function orderTotalIncVat(order: Order) { return orderSubtotalIncVat(order) - orderDiscountAmount(order); }
 
   function expandProductForProduction(product: Product, multiplier: number, path: string[] = []): { name: string; amount: number; unit: string; source: string }[] {
     if (path.includes(product.id)) return [];
-
-    if (!product.lines.length) {
-      return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name }];
-    }
-
+    if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name }];
     return product.lines.flatMap((line) => {
       const amount = line.amount * multiplier;
-      if (line.itemType === "material") {
-        const m = data.materials.find((x) => x.id === line.itemId);
-        return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name }];
-      }
-      if (line.itemType === "recipe") {
-        const r = data.recipes.find((x) => x.id === line.itemId);
-        return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name }];
-      }
+      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name }]; }
+      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name }]; }
       const p = data.products.find((x) => x.id === line.itemId);
       return p ? expandProductForProduction(p, amount, [...path, product.id]) : [];
     });
@@ -3466,87 +3526,279 @@ function printOrder(order: Order, includeProduction = true) {
     });
   }
 
-  const sortedOrders = [...data.orders].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-  const now = new Date(today());
-  const threeDaysAgo = new Date(now);
-  threeDaysAgo.setDate(now.getDate() - 3);
+  function printOrder(order: Order, includeProduction = true) {
+    const rows = order.orderLines.map((line) => {
+      const product = data.products.find((p) => p.id === line.productId);
+      const lineTotal = (product?.customerPrice || 0) * line.quantity;
+      return `<tr><td>${line.quantity}</td><td>${product?.name || "Ukjent"}</td><td>${currency(product?.customerPrice || 0)}</td><td>${currency(lineTotal)}</td></tr>`;
+    }).join("");
 
-  const visibleOrders = sortedOrders.filter((o) => new Date(o.date) >= threeDaysAgo);
-  const totalPages = Math.max(1, Math.ceil(visibleOrders.length / pageSize));
-  const pagedOrders = visibleOrders.slice((orderPage - 1) * pageSize, orderPage * pageSize);
+    const subtotalInc = orderSubtotalIncVat(order);
+    const discountAmount = orderDiscountAmount(order);
+    const totalInc = orderTotalIncVat(order);
+    const totalEx = exVatFromIncVat(totalInc, data.settings.foodVat);
+    const allergens = selectedAllergens(order).join(", ") || "Ingen registrert";
+    const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
+    const customerName = order.customerType === "bedrift" ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
 
-  function printProductPopup(product: Product) {
-  const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+    let prodSection = "";
+    if (includeProduction) {
+      const isBakery = order.type === "bakeri" || order.type === "egenprodusert";
+      if (isBakery) {
+        const prodPages = order.orderLines.map((line) => {
+          const product = data.products.find((p) => p.id === line.productId);
+          if (!product) return "";
+          const qty = Number(line.quantity) || 1;
 
-  const rows = product.lines.map((line) => {
-    let name = "Ukjent";
+          const recipeMap: Record<string, { name: string; totalAmount: number; unit: string; ingredientRows: string }> = {};
+          product.lines.forEach((pl) => {
+            if (pl.itemType !== "recipe") return;
+            const recipe = data.recipes.find((r) => r.id === pl.itemId);
+            if (!recipe) return;
+            const totalAmount = Number(pl.amount || 0) * qty;
+            const recipeBaseAmount = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+            const scale = totalAmount / Math.max(recipeBaseAmount, 1);
+            const ingredientRows = recipe.lines.map((rl) => {
+              let name = "Ukjent"; let unit = recipe.yieldUnit;
+              if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
+              if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
+              return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(rl.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
+            }).join("");
+            recipeMap[recipe.id] = { name: recipe.name, totalAmount, unit: pl.unit, ingredientRows };
+          });
 
-    if (line.itemType === "material") {
-      name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
+          const directMaterialRows = product.lines.filter((pl) => pl.itemType === "material").map((pl) => {
+            const m = data.materials.find((x) => x.id === pl.itemId);
+            return `<tr><td>${escapeHtml(m?.name || "Ukjent")}</td><td class="right">${num(Number(pl.amount || 0) * qty, 3)} ${escapeHtml(pl.unit)}</td></tr>`;
+          }).join("");
+
+          const recipeBlocks = Object.values(recipeMap).map((entry) =>
+            `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(entry.name)} – ${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)} (for ${qty} stk)</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${entry.ingredientRows}</tbody></table></div>`
+          ).join("");
+
+          const directSection = directMaterialRows ? `<div class="recipe-block"><h3>Direkte råvarer – ${escapeHtml(product.name)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${directMaterialRows}</tbody></table></div>` : "";
+
+          return `<div class="prod-product"><h2>${qty} × ${escapeHtml(product.name)}</h2>${recipeBlocks}${directSection}</div>`;
+        }).join("");
+
+        prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPages}`;
+      } else {
+        const prodRows = order.orderLines.map((line) => {
+          const product = data.products.find((p) => p.id === line.productId);
+          if (!product) return "";
+          const rowsForProduct = expandProductForProduction(product, Number(line.quantity) || 0).map((r) => `<tr><td>${r.name}</td><td>${num(r.amount)} ${r.unit}</td></tr>`).join("");
+          return `<tr><td colspan="2" style="background:#111827;color:white;font-weight:800;">${line.quantity} × ${product.name}</td></tr>${rowsForProduct}`;
+        }).join("");
+        prodSection = `<h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table>`;
+      }
     }
 
-    if (line.itemType === "recipe") {
-      name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
-    }
-
-    if (line.itemType === "product") {
-      name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
-    }
-
-    return `<tr><td>${escapeHtml(line.itemType)}</td><td>${escapeHtml(name)}</td><td>${num(line.amount)} ${line.unit}</td></tr>`;
-  }).join("");
-
-  const w = window.open("", "_blank");
-  if (!w) return;
-
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>
-body{font-family:Arial,sans-serif;color:#111827;padding:32px}
-.card{max-width:620px;border:2px solid #111827;padding:20px}
-.logo{height:70px;width:auto;object-fit:contain;margin-bottom:10px}
-h1{margin:0 0 10px;font-size:26px}
-table{width:100%;border-collapse:collapse;margin-top:14px}
-td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}
-th{background:#f3f4f6}
-@media print{button{display:none}body{padding:0}}
+    const w = window.open("", "_blank"); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>
+body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}
+.top{display:flex;justify-content:space-between;border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}
+th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}
+.prod-product{border:2px solid #111827;border-radius:12px;padding:16px;margin:16px 0;break-inside:avoid}
+.prod-product h2{margin:0 0 12px;font-size:18px}
+.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}
+.recipe-block h3{margin:0 0 8px;font-size:14px}
+@media print{button{display:none}body{padding:18px}}
 </style></head><body>
 <button onclick="window.print()">Print</button>
-<div class="card">
-<img src="/logo.png" class="logo" />
-<h1>${escapeHtml(product.name)}</h1>
-<p><b>Kategori:</b> ${escapeHtml(product.category)}</p>
-<p><b>Allergener:</b> ${escapeHtml(allergens)}</p>
-<h3>Oppskrift / innhold</h3>
-<table>
-<thead><tr><th>Type</th><th>Navn</th><th>Mengde</th></tr></thead>
-<tbody>${rows}</tbody>
-</table>
+<div class="top">
+  <div><b>KJØKKENORDRE</b><br><small>${today()}</small></div>
+  <div style="text-align:right">
+    <h1 style="margin:0">${formatDateNo(order.date)} ${order.time || ""}</h1>
+    <p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
+  </div>
 </div>
+<div class="grid">
+  <div class="box">
+    <h2>Kunde</h2>
+    <p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p>
+    <p>Kontakt: ${escapeHtml(order.customer || "-")}</p>
+    <p>Telefon: ${escapeHtml(order.phone || "-")}</p>
+    <p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p>
+    <p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>
+    ${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}
+  </div>
+  <div class="box">
+    <h2>Hensyn</h2>
+    <p><b>Dietter:</b> ${escapeHtml(diets)}</p>
+    <p><b>Allergier:</b> ${escapeHtml(allergens)}</p>
+  </div>
+</div>
+<h2>Ordrelinjer</h2>
+<table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="box">
+  <p>Sum før rabatt: ${currency(subtotalInc)}</p>
+  <p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p>
+  <p class="total">Total inkl. mva: ${currency(totalInc)}</p>
+  <p>Total eks. mva: ${currency(totalEx)}</p>
+</div>
+${prodSection}
 </body></html>`);
+    w.document.close(); w.focus();
+  }
 
-  w.document.close();
-  w.focus();
-}
+  function productName(id: string) { return data.products.find((p) => p.id === id)?.name || "Ukjent produkt"; }
+
+  function orderAllergenWarnings(order: Order) {
+    const orderAllergens = new Set(order.orderLines.flatMap((l) => { const p = data.products.find((x) => x.id === l.productId); return p ? productAllergens(p) : []; }));
+    return Object.entries(order.allergens || {}).filter(([allergen, count]) => Number(count) > 0 && orderAllergens.has(allergen)).map(([allergen]) => allergen);
+  }
+
+  function printProductPopup(product: Product) {
+    const allergens = productAllergens(product).join(", ") || "Ingen registrert";
+    const rows = product.lines.map((line) => {
+      let name = "Ukjent";
+      if (line.itemType === "material") name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
+      if (line.itemType === "recipe") name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
+      if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
+      return `<tr><td>${escapeHtml(line.itemType)}</td><td>${escapeHtml(name)}</td><td>${num(line.amount)} ${line.unit}</td></tr>`;
+    }).join("");
+    const w = window.open("", "_blank"); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.card{max-width:620px;border:2px solid #111827;padding:20px}.logo{height:70px;width:auto;object-fit:contain;margin-bottom:10px}h1{margin:0 0 10px;font-size:26px}table{width:100%;border-collapse:collapse;margin-top:14px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print</button><div class="card"><img src="/logo.png" class="logo" /><h1>${escapeHtml(product.name)}</h1><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th></tr></thead><tbody>${rows}</tbody></table></div></body></html>`);
+    w.document.close(); w.focus();
+  }
+
+  // ── Filtrering og sortering ───────────────────────────────────────────────
+
+  const activeOrders = data.orders.filter((o) => !o.deletedAt);
+  const deletedOrders = data.orders.filter((o) => !!o.deletedAt);
+
+  function toggleSort(field: typeof sortField) {
+    if (sortField === field) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+    setOrderPage(1);
+  }
+
+  function sortIcon(field: typeof sortField) {
+    if (sortField !== field) return " ↕";
+    return sortDir === "asc" ? " ↑" : " ↓";
+  }
+
+  const filteredOrders = activeOrders
+    .filter((o) => {
+      if (!orderSearch.trim()) return true;
+      const q = orderSearch.toLowerCase();
+      return (
+        (o.orderNumber || "").toLowerCase().includes(q) ||
+        (o.customer || "").toLowerCase().includes(q) ||
+        (o.companyName || "").toLowerCase().includes(q) ||
+        (o.phone || "").includes(q)
+      );
+    })
+    .sort((a, b) => {
+      let valA = "", valB = "";
+      if (sortField === "date") { valA = `${a.date} ${a.time || ""}`; valB = `${b.date} ${b.time || ""}`; }
+      if (sortField === "customer") { valA = a.customerType === "bedrift" ? (a.companyName || a.customer) : a.customer; valB = b.customerType === "bedrift" ? (b.companyName || b.customer) : b.customer; }
+      if (sortField === "orderNumber") { valA = a.orderNumber || ""; valB = b.orderNumber || ""; }
+      return sortDir === "asc" ? valA.localeCompare(valB, "no-NO") : valB.localeCompare(valA, "no-NO");
+    });
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const pagedOrders = filteredOrders.slice((orderPage - 1) * pageSize, orderPage * pageSize);
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <section className="card">
+      {/* Header */}
       <div className="between">
         <h2>Ordre</h2>
-        <button className="btn active" onClick={() => setShowNewOrder(!showNewOrder)}>{showNewOrder ? "Skjul ny ordre" : "Ny ordre"}</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn" onClick={() => setShowTrash(!showTrash)}>
+            🗑 Papirkurv {deletedOrders.length > 0 && `(${deletedOrders.length})`}
+          </button>
+          <button className="btn" onClick={() => { setShowWebshopImport(!showWebshopImport); setShowNewOrder(false); }}>
+            {showWebshopImport ? "Lukk webshopimport" : "Importer fra webshop"}
+          </button>
+          <button className="btn active" onClick={() => { setShowNewOrder(!showNewOrder); setShowWebshopImport(false); }}>
+            {showNewOrder ? "Skjul skjema" : "Ny ordre"}
+          </button>
+        </div>
       </div>
 
+      {/* Webshopimport */}
+      {showWebshopImport && (
+        <div className="soft-box">
+          <h3>Importer webshopordre</h3>
+          <p style={{ color: "#64748b" }}>
+            Lim inn tekst fra ordrebekreftelsen. Systemet matcher på produktnummer (f.eks. PA000001).
+            Uleselig info havner i notatfeltet. Hvis ordrenr allerede finnes, tilbys oppdatering.
+          </p>
+          <textarea className="textarea" value={webshopRawText} onChange={(e) => setWebshopRawText(e.target.value)} placeholder="Lim inn e-posttekst her..." style={{ minHeight: 200 }} />
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button className="btn active" onClick={parseWebshopOrder}>Les ordre</button>
+            <button className="btn" onClick={() => { setWebshopRawText(""); setWebshopPreview(null); setWebshopUnmatched([]); }}>Tøm</button>
+          </div>
+
+          {webshopPreview && (
+            <div className="soft-box" style={{ marginTop: 14 }}>
+              <h4>Forhåndsvisning</h4>
+              {data.orders.find((o) => o.orderNumber === webshopPreview.orderNumber && !o.deletedAt) && (
+                <div className="warning">⚠️ Ordrenr {webshopPreview.orderNumber} finnes allerede – vil oppdatere eksisterende ordre.</div>
+              )}
+              <p><b>Ordrenr:</b> {webshopPreview.orderNumber || "-"}</p>
+              <p><b>Kunde:</b> {webshopPreview.customer}{webshopPreview.companyName ? ` / ${webshopPreview.companyName}` : ""}</p>
+              <p><b>Telefon:</b> {webshopPreview.phone || "-"}</p>
+              <p><b>Dato/tid:</b> {formatDateNo(webshopPreview.date)} {webshopPreview.time}</p>
+              <p><b>Levering:</b> {webshopPreview.deliveryAddress || "-"}</p>
+              <p><b>Betaling:</b> {webshopPreview.paymentInfo || "-"}</p>
+              {webshopPreview.note && <p style={{ whiteSpace: "pre-wrap" }}><b>Notat:</b><br />{webshopPreview.note}</p>}
+              <table>
+                <thead><tr><th>Produkt</th><th>Antall</th></tr></thead>
+                <tbody>{webshopPreview.orderLines.map((line, i) => { const product = data.products.find((p) => p.id === line.productId); return <tr key={i}><td>{product?.productNumber ? `${product.productNumber} · ` : ""}{product?.name || "Ukjent produkt"}</td><td>{line.quantity}</td></tr>; })}</tbody>
+              </table>
+              {webshopUnmatched.length > 0 && (
+                <div style={{ marginTop: 12, color: "#64748b" }}>
+                  <b>Havner i notat (ikke matchet som produkt):</b>
+                  <ul>{webshopUnmatched.map((line, i) => <li key={i}>{line}</li>)}</ul>
+                </div>
+              )}
+              <button className="btn active" onClick={createWebshopOrder}>
+                {data.orders.find((o) => o.orderNumber === webshopPreview.orderNumber && !o.deletedAt) ? "Oppdater eksisterende ordre" : "Opprett ordre"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Ny/rediger ordre */}
       {showNewOrder && (
         <div className="soft-box full-width">
           <h3>{editingOrderId ? "Rediger ordre" : "Ny ordre"}</h3>
 
           <div className="form-grid four">
-            <label>Ordretype<select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as Order["type"], customerType: e.target.value === "storkjokken" ? "storkjokken" : form.customerType })}><option value="catering">Catering</option><option value="bakeri">Bakeri</option><option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option><option value="storkjokken">Storkjøkken</option></select></label>
-            <label>Kundetype<select value={form.customerType} onChange={(e) => setForm({ ...form, customerType: e.target.value as Order["customerType"] })}><option value="privat">Privat</option><option value="bedrift">Bedrift</option><option value="storkjokken">Storkjøkken</option></select></label>
+            <label>Ordrenr (webshop/intern)
+              <input value={form.orderNumber || ""} onChange={(e) => setForm({ ...form, orderNumber: e.target.value })} placeholder="F.eks. 686488" />
+            </label>
+            <label>Ordretype
+              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as Order["type"], customerType: e.target.value === "storkjokken" ? "storkjokken" : form.customerType })}>
+                <option value="catering">Catering</option>
+                <option value="bakeri">Bakeri</option>
+                <option value="pasmuurt">Påsmurt</option>
+                <option value="egenprodusert">Egenprodusert</option>
+                <option value="storkjokken">Storkjøkken</option>
+              </select>
+            </label>
+            <label>Kundetype
+              <select value={form.customerType} onChange={(e) => setForm({ ...form, customerType: e.target.value as Order["customerType"] })}>
+                <option value="privat">Privat</option>
+                <option value="bedrift">Bedrift</option>
+                <option value="storkjokken">Storkjøkken</option>
+              </select>
+            </label>
             <label>Dato<input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
             <label>Tid<input value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} onBlur={(e) => setForm({ ...form, time: formatTimeInput(e.target.value) })} placeholder="f.eks. 1015" /></label>
           </div>
 
           {form.customerType === "bedrift" || form.customerType === "storkjokken" ? (
-
             <div className="form-grid four">
               <label>Bedriftsnavn<input value={form.companyName || ""} onChange={(e) => setForm({ ...form, companyName: e.target.value })} placeholder="Bedrift" /></label>
               <label>Orgnr<input value={form.orgNumber || ""} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} placeholder="Org.nr" /></label>
@@ -3554,7 +3806,6 @@ th{background:#f3f4f6}
               <label>Kontaktperson<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kontaktperson" /></label>
             </div>
           ) : (
-
             <div className="form-grid four">
               <label>Kundenavn<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kunde" /></label>
             </div>
@@ -3563,29 +3814,24 @@ th{background:#f3f4f6}
           <div className="form-grid four">
             <label>Telefon<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefonnummer" /></label>
             <label>Leveringsadresse<input value={form.deliveryAddress} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" /></label>
-            <label>
-  Betalingsinfo
-  <input
-    value={form.paymentInfo || ""}
-    onChange={(e) => setForm({ ...form, paymentInfo: e.target.value })}
-    placeholder="F.eks. Betalt på nett / Betales ved henting"
-  />
-</label>
-
-<label style={{ gridColumn: "1 / -1" }}>
-  Notat / fritekst
-  <textarea
-    className="textarea"
-    value={form.note || ""}
-    onChange={(e) => setForm({ ...form, note: e.target.value })}
-    placeholder="Fritekst, beskjed, info fra webshop osv."
-  />
-</label>
+            <label>Betalingsinfo<input value={form.paymentInfo || ""} onChange={(e) => setForm({ ...form, paymentInfo: e.target.value })} placeholder="F.eks. Betalt på nett" /></label>
+            <label style={{ gridColumn: "1 / -1" }}>Notat / fritekst
+              <textarea className="textarea" value={form.note || ""} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Fritekst, beskjed, info osv." />
+            </label>
             <label>Antall gjester / porsjoner<input type="number" value={form.guests} onChange={(e) => setForm({ ...form, guests: Number(e.target.value) || 0 })} /></label>
             <label>Rabatt %<input type="number" value={form.discountPercent || 0} onChange={(e) => setForm({ ...form, discountPercent: Number(e.target.value) || 0 })} /></label>
           </div>
 
-          {form.type === "storkjokken" && <div className="soft-box"><h3>Fast ordre / gjentagelse</h3><label className="check"><input type="checkbox" checked={!!form.isRecurring} onChange={(e) => setForm({ ...form, isRecurring: e.target.checked })} /> Dette er en fast/gjentagende ordre</label>{form.isRecurring && <><div className="chips">{["Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag", "Søndag"].map((day) => { const active = (form.recurringDays || []).includes(day); return <button key={day} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, recurringDays: active ? (form.recurringDays || []).filter((d) => d !== day) : [...(form.recurringDays || []), day] })}>{day}</button>; })}</div><input value={form.recurringNote || ""} onChange={(e) => setForm({ ...form, recurringNote: e.target.value })} placeholder="Notat, f.eks. gjelder skoleåret / pauser i ferier" /></>}</div>}
+          {form.type === "storkjokken" && (
+            <div className="soft-box">
+              <h3>Fast ordre / gjentagelse</h3>
+              <label className="check"><input type="checkbox" checked={!!form.isRecurring} onChange={(e) => setForm({ ...form, isRecurring: e.target.checked })} /> Dette er en fast/gjentagende ordre</label>
+              {form.isRecurring && <>
+                <div className="chips">{["Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag", "Søndag"].map((day) => { const active = (form.recurringDays || []).includes(day); return <button key={day} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, recurringDays: active ? (form.recurringDays || []).filter((d) => d !== day) : [...(form.recurringDays || []), day] })}>{day}</button>; })}</div>
+                <input value={form.recurringNote || ""} onChange={(e) => setForm({ ...form, recurringNote: e.target.value })} placeholder="Notat, f.eks. gjelder skoleåret" />
+              </>}
+            </div>
+          )}
 
           <h3>Legg til produkt / meny</h3>
           <div className="form-grid three">
@@ -3594,44 +3840,22 @@ th{background:#f3f4f6}
               {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <input type="number" value={lineToAdd.quantity} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
-            <button className="btn" onClick={() => {
-              if (!lineToAdd.productId) return;
-              setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] });
-              setLineToAdd({ productId: "", quantity: form.guests || 1 });
-            }}>Legg til</button>
+            <button className="btn" onClick={() => { if (!lineToAdd.productId) return; setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] }); setLineToAdd({ productId: "", quantity: form.guests || 1 }); }}>Legg til</button>
           </div>
 
           <h3>Produkter i ordre</h3>
           {form.orderLines.map((line, i) => {
-  const product = data.products.find((p) => p.id === line.productId);
-
-  return (
-    <div key={i} className="pill">
-      {line.quantity} × {product?.name}
-
-      <button
-        style={{ marginLeft: 8 }}
-        className="link danger"
-        onClick={() => removeOrderLine(i)}
-      >
-        ×
-      </button>
-
-      {product && (
-        <button
-          className="btn"
-          style={{ marginLeft: 8 }}
-          onClick={() => printProductPopup(product)}
-        >
-          Se oppskrift
-        </button>
-      )}
-    </div>
-  );
-})}
+            const product = data.products.find((p) => p.id === line.productId);
+            return (
+              <div key={i} className="pill">
+                {line.quantity} × {product?.name}
+                <button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>×</button>
+                {product && <button className="btn" style={{ marginLeft: 8 }} onClick={() => printProductPopup(product)}>Se oppskrift</button>}
+              </div>
+            );
+          })}
 
           <h3>Dietter / hensyn</h3>
-
           <div className="form-grid four">
             <label>Vegetar<input type="number" value={form.dietVegetarian || "0"} onChange={(e) => setForm({ ...form, dietVegetarian: e.target.value })} /></label>
             <label>Vegan<input type="number" value={form.dietVegan || "0"} onChange={(e) => setForm({ ...form, dietVegan: e.target.value })} /></label>
@@ -3645,12 +3869,8 @@ th{background:#f3f4f6}
               const active = (form.allergens[a] || 0) > 0;
               return (
                 <div key={a}>
-                  <button type="button" className={active ? "btn active" : "btn"} onClick={() => {
-                    setForm({ ...form, allergens: { ...form.allergens, [a]: active ? 0 : 1 } });
-                  }}>{a}</button>
-                  {active && (
-                    <input style={{ marginTop: 4, width: 60 }} type="number" value={form.allergens[a]} onChange={(e) => setForm({ ...form, allergens: { ...form.allergens, [a]: Number(e.target.value) } })} />
-                  )}
+                  <button type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: { ...form.allergens, [a]: active ? 0 : 1 } })}>{a}</button>
+                  {active && <input style={{ marginTop: 4, width: 60 }} type="number" value={form.allergens[a]} onChange={(e) => setForm({ ...form, allergens: { ...form.allergens, [a]: Number(e.target.value) } })} />}
                 </div>
               );
             })}
@@ -3665,88 +3885,167 @@ th{background:#f3f4f6}
             <Metric label="Sum eks. mva" value={currency(exVatFromIncVat(orderTotalIncVat(form), data.settings.foodVat))} />
           </div>
 
-                    <h3>Produksjonsgrunnlag for denne ordren</h3>
-          <table>
-            <thead><tr><th>Fra produkt</th><th>Element</th><th>Mengde</th></tr></thead>
-            <tbody>{productionRowsForOrder(form).map((r, i) => <tr key={i}><td>{r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody>
-          </table>
-
-          <button className="btn active" onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>{editingOrderId && <button className="btn" onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt redigering</button>}
+          <button className="btn active" onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>
+          {editingOrderId && <button className="btn" style={{ marginLeft: 8 }} onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt redigering</button>}
         </div>
       )}
 
-
-      <div className="card">
-        <h2>Ordrearkiv</h2>
-        <p style={{ color: "#64748b" }}>Viser ordre fra siste tre dager og fremover, sortert etter dato.</p>
-        {pagedOrders.map((o) => {
-          const warnings = orderAllergenWarnings(o);
-          return (
-            <div key={o.id} className="list order-card">
-              <div className="between">
-                <div>
-                  <b>{formatDateNo(o.date)} {o.time} · {o.customerType === "bedrift" ? o.companyName : o.customer}</b><br />
-                  <small>
-  {o.type} · {o.guests} pers · {o.phone || "telefon mangler"} · {o.paymentInfo || "betaling mangler"} · {o.deliveryAddress || "adresse mangler"}
-</small>
-                </div>
-<div>
-  <button className="link" onClick={() => editOrder(o)}>
-    Rediger
-  </button>
-
-  <button className="link" onClick={() => printOrder(o, true)}>
-    Print med grunnlag
-  </button>
-
-  <button className="link" onClick={() => printOrder(o, false)}>
-    Print uten grunnlag
-  </button>
-
-  <button
-    className="link danger"
-    onClick={() => {
-      if (confirm("Slette ordren?")) {
-        updateData({
-          orders: data.orders.filter((x) => x.id !== o.id),
-        });
-      }
-    }}
-  >
-    Slett
-  </button>
-</div>              </div>
-              <div style={{ marginTop: 8 }}>
-                {o.orderLines.map((l, i) => <span key={i} className="pill">{l.quantity} × {productName(l.productId)}</span>)}
-              </div>
-              {(o.dietVegetarian !== "0" || o.dietVegan !== "0" || o.dietPregnant !== "0" || o.dietOther) && <p><b>Dietter:</b> vegetar {o.dietVegetarian || 0}, vegan {o.dietVegan || 0}, gravid {o.dietPregnant || 0}{o.dietOther ? ` · ${o.dietOther}` : ""}</p>}
-              {selectedAllergens(o).length > 0 && <p><b>Allergier:</b> {selectedAllergens(o).join(", ")}</p>}
-              {selectedAllergens(o).length > 0 && (
-  <p><b>Allergier:</b> {selectedAllergens(o).join(", ")}</p>
-)}
-
-{o.note && (
-  <p style={{ whiteSpace: "pre-wrap" }}>
-    <b>Notat:</b><br />
-    {o.note}
-  </p>
-)}
-
-{warnings.length > 0 && (
-  <div className="warning">
-    <b>Allergivarsel:</b> {warnings.join(", ")}
-  </div>
-)}
-              {warnings.length > 0 && <div className="warning"><b>Allergivarsel:</b> {warnings.join(", ")}</div>}
-              <details>
-                <summary>Produksjonsgrunnlag</summary>
-                <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody></table>
-              </details>
-            </div>
-          );
-        })}
-        <div className="pager"><button className="btn" disabled={orderPage <= 1} onClick={() => setOrderPage(orderPage - 1)}>Forrige</button><span>Side {orderPage} av {totalPages}</span><button className="btn" disabled={orderPage >= totalPages} onClick={() => setOrderPage(orderPage + 1)}>Neste</button></div>
+      {/* Søk og sortering */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "16px 0 8px" }}>
+        <input
+          value={orderSearch}
+          onChange={(e) => { setOrderSearch(e.target.value); setOrderPage(1); }}
+          placeholder="Søk ordrenr, kunde, bedrift eller telefon..."
+          style={{ flex: 1, minWidth: 200 }}
+        />
       </div>
+      <div className="chips" style={{ marginBottom: 8 }}>
+        <button className="btn" onClick={() => toggleSort("date")}>Dato{sortIcon("date")}</button>
+        <button className="btn" onClick={() => toggleSort("customer")}>Kunde{sortIcon("customer")}</button>
+        <button className="btn" onClick={() => toggleSort("orderNumber")}>Ordrenr{sortIcon("orderNumber")}</button>
+      </div>
+      <p style={{ color: "#64748b", margin: "0 0 12px" }}>
+        {orderSearch ? `${filteredOrders.length} treff` : `${activeOrders.length} aktive ordre`}
+        {!orderSearch && " · Alle datoer vises, sortert etter valgt felt"}
+      </p>
+
+      {/* Ordreliste – kun overskrift, ekspanderes ved klikk */}
+      {pagedOrders.map((o) => {
+        const warnings = orderAllergenWarnings(o);
+        const isExpanded = expandedOrderId === o.id;
+        const displayName = o.customerType === "bedrift" || o.customerType === "storkjokken"
+          ? o.companyName || o.customer
+          : o.customer;
+        const total = orderTotalIncVat(o);
+
+        return (
+          <div key={o.id} className="order-row">
+            {/* Klikkbar overskrift */}
+            <button
+              className="order-row-header"
+              onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}
+            >
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <b>{formatDateNo(o.date)} {o.time || ""}</b>
+                <span>{displayName}</span>
+                {o.orderNumber && <span style={{ background: "#f1f5f9", borderRadius: 6, padding: "2px 8px", fontSize: 12 }}>#{o.orderNumber}</span>}
+                {warnings.length > 0 && <span style={{ color: "#dc2626", fontSize: 12 }}>⚠ Allergi</span>}
+                <span style={{ color: "#64748b", fontSize: 13 }}>{o.type}</span>
+                <span style={{ color: "#64748b", fontSize: 13 }}>{o.orderLines.map((l) => `${l.quantity}×${productName(l.productId)}`).join(", ")}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <b>{currency(total)}</b>
+                <span style={{ color: "#64748b" }}>{isExpanded ? "▲" : "▼"}</span>
+              </div>
+            </button>
+
+            {/* Ekspandert innhold */}
+            {isExpanded && (
+              <div className="order-row-body">
+                <div className="grid two" style={{ gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <p><b>Telefon:</b> {o.phone || "-"}</p>
+                    <p><b>Levering:</b> {o.deliveryAddress || "-"}</p>
+                    <p><b>Betaling:</b> {o.paymentInfo || "-"}</p>
+                    {o.note && <p style={{ whiteSpace: "pre-wrap" }}><b>Notat:</b><br />{o.note}</p>}
+                  </div>
+                  <div>
+                    {(o.dietVegetarian !== "0" || o.dietVegan !== "0" || o.dietPregnant !== "0" || o.dietOther) && (
+                      <p><b>Dietter:</b> vegetar {o.dietVegetarian || 0}, vegan {o.dietVegan || 0}, gravid {o.dietPregnant || 0}{o.dietOther ? ` · ${o.dietOther}` : ""}</p>
+                    )}
+                    {selectedAllergens(o).length > 0 && <p><b>Allergier:</b> {selectedAllergens(o).join(", ")}</p>}
+                    {warnings.length > 0 && <div className="warning"><b>Allergivarsel:</b> {warnings.join(", ")}</div>}
+                  </div>
+                </div>
+
+                <table>
+                  <thead><tr><th>Antall</th><th>Produkt</th><th>Pris</th><th>Sum</th></tr></thead>
+                  <tbody>{o.orderLines.map((l, i) => {
+                    const product = data.products.find((p) => p.id === l.productId);
+                    return <tr key={i}><td>{l.quantity}</td><td>{product?.name || "Ukjent"}</td><td>{currency(product?.customerPrice || 0)}</td><td>{currency((product?.customerPrice || 0) * l.quantity)}</td></tr>;
+                  })}</tbody>
+                </table>
+
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ cursor: "pointer", color: "#64748b" }}>Produksjonsgrunnlag</summary>
+                  <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody></table>
+                </details>
+
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
+                  <button className="btn" onClick={() => printOrder(o, true)}>Print med grunnlag</button>
+                  <button className="btn" onClick={() => printOrder(o, false)}>Print uten grunnlag</button>
+                  <button className="btn danger" onClick={() => softDeleteOrder(o.id)}>Flytt til papirkurv</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div className="pager">
+        <button className="btn" disabled={orderPage <= 1} onClick={() => setOrderPage(orderPage - 1)}>Forrige</button>
+        <span>Side {orderPage} av {totalPages}</span>
+        <button className="btn" disabled={orderPage >= totalPages} onClick={() => setOrderPage(orderPage + 1)}>Neste</button>
+      </div>
+
+      {/* Papirkurv */}
+      {showTrash && (
+        <div className="soft-box" style={{ marginTop: 24 }}>
+          <h3>🗑 Papirkurv – {deletedOrders.length} ordre</h3>
+          <p style={{ color: "#64748b" }}>Ordre i papirkurven kan gjenopprettes eller slettes permanent.</p>
+          {deletedOrders.length === 0 && <p>Papirkurven er tom.</p>}
+          {deletedOrders.map((o) => {
+            const displayName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
+            return (
+              <div key={o.id} className="editable-row">
+                <div>
+                  <b>{formatDateNo(o.date)} {o.time || ""} · {displayName}</b>
+                  {o.orderNumber && <span style={{ marginLeft: 8, fontSize: 12, color: "#64748b" }}>#{o.orderNumber}</span>}
+                  <br />
+                  <small>{o.orderLines.map((l) => `${l.quantity}×${productName(l.productId)}`).join(", ")}</small>
+                  <br />
+                  <small style={{ color: "#64748b" }}>Slettet: {o.deletedAt ? formatDateNo(o.deletedAt.slice(0, 10)) : "-"}</small>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn" onClick={() => restoreOrder(o.id)}>Gjenopprett</button>
+                  <button className="btn danger" onClick={() => permanentDeleteOrder(o.id)}>Slett permanent</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <style jsx global>{`
+        .order-row {
+          border: 1px solid #e2e8f0;
+          border-radius: 14px;
+          margin: 8px 0;
+          overflow: hidden;
+          background: white;
+        }
+        .order-row-header {
+          width: 100%;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 14px 16px;
+          background: white;
+          border: 0;
+          cursor: pointer;
+          text-align: left;
+          gap: 12px;
+        }
+        .order-row-header:hover {
+          background: #f8fafc;
+        }
+        .order-row-body {
+          padding: 0 16px 16px;
+          border-top: 1px solid #e2e8f0;
+          background: #fafafa;
+        }
+      `}</style>
     </section>
   );
 }

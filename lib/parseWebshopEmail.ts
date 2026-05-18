@@ -12,6 +12,7 @@ export type ParsedOrderLine = {
 
 export type ParsedOrder = {
   id: string;
+  orderNumber?: string;
   type: "bakeri";
   customerType: "privat";
   customer: string;
@@ -191,6 +192,7 @@ export function parseWebshopEmail(
 
   const order: ParsedOrder = {
     id: `webshop-${orderNumber}-${Date.now()}`,
+    orderNumber,
     type: "bakeri",
     customerType: "privat",
     customer: customer || "Webshopkunde",
