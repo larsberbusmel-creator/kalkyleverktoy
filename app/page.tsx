@@ -3339,7 +3339,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
     // Telefon – hent fra "Telefon: +47..." linjen
-    const phoneMatch = text.match(/Telefon:\s*((?:\+47\s*)?\d[\d\s]{7,})/i)?.[1]?.replace(/\s/g, "") || "";
+   const phoneMatch = text.match(/Telefon:\s*((?:\+47)?\s*\d[\d\s]{7,})/i)?.[1]?.replace(/\s+/g, "").replace(/^\+47/, "+47") || "";
 
     // Dato og tid
     const deliveryMatch = text.match(/Når:\s*(.+)/i);
@@ -3370,9 +3370,12 @@ function OrdersTab({ data, updateData, productAllergens }: {
 
     // Betalingsinfo
     const erBetaltPaaNett = /ikke ta imot betaling/i.test(text);
+const erFaktura = /faktura|etterskudd|ved henting|kontant/i.test(text);
 const paymentInfo = erBetaltPaaNett
   ? "Betalt på nett"
-  : text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() || "Betales ved henting";
+  : erFaktura
+    ? "Faktura / betaling ved henting"
+    : "Betalt på nett";
 
     // Parse produktlinjer – støtter to formater:
     // Format 1 (e-post): "PA000001\nProduktnamn\n10\n195,00\n1 950,00"
@@ -3398,24 +3401,21 @@ const paymentInfo = erBetaltPaaNett
       // Format e-post: produktnavn på linje i+1, antall på linje i+2
       // Format gammel: antall+pris kombinert på linje i+1
       let quantity = 1;
-
-      const nextFive = lines.slice(i + 1, i + 6);
-
-      // Prøv "antall\npris\nsum"-format (e-post)
-      for (let j = 0; j < nextFive.length; j++) {
-        const onlyNumber = nextFive[j].match(/^(\d+)\s*$/);
-        if (onlyNumber) {
-          quantity = Number(onlyNumber[1]);
-          break;
-        }
-        // Gammel format: "10 195,00"
-        const combined = nextFive.join(" ");
-        const oldFormat = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
-        if (oldFormat) {
-          quantity = Number(oldFormat[1]);
-          break;
-        }
-      }
+const nextFive = lines.slice(i + 1, i + 6);
+for (let j = 0; j < nextFive.length; j++) {
+  // Linje med kun tall (med eller uten mellomrom)
+  const onlyNumber = nextFive[j].match(/^\s*(\d+)\s*$/);
+  if (onlyNumber) {
+    quantity = Number(onlyNumber[1]);
+    break;
+  }
+}
+// Fallback: gammel format "10 195,00 kr"
+if (quantity === 1) {
+  const combined = lines.slice(i + 1, i + 6).join(" ");
+  const oldFormat = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
+  if (oldFormat) quantity = Number(oldFormat[1]);
+}
 
       orderLines.push({ productId: product.id, quantity });
     }
