@@ -3334,62 +3334,101 @@ function OrdersTab({ data, updateData, productAllergens }: {
     const text = webshopRawText;
     const lines = text.split(/\n/).map((x) => x.trim()).filter(Boolean);
 
-    const orderNumberMatch = text.match(/(?:Bestilling|Ordre|Order)\s*#?\s*(\d{4,})/i) || text.match(/\b(\d{5,})\b/);
+    // Ordrenummer
+    const orderNumberMatch = text.match(/Bestilling\s+(\d{4,})/i) || text.match(/\b(\d{6,})\b/);
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
-    const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    let phoneMatch = "";
-    if (emailMatch?.index !== undefined) {
-      const afterEmail = text.slice(emailMatch.index + emailMatch[0].length);
-      phoneMatch = afterEmail.match(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/)?.[0] || "";
-    }
-    if (!phoneMatch) phoneMatch = text.match(/Mottakers telefon:\s*((?:\+47\s*)?\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/i)?.[1] || "";
+    // Telefon – hent fra "Telefon: +47..." linjen
+    const phoneMatch = text.match(/Telefon:\s*((?:\+47\s*)?\d[\d\s]{7,})/i)?.[1]?.replace(/\s/g, "") || "";
 
-    const deliveryMatch = text.match(/Tidspunkt:\s*(.+)/i);
+    // Dato og tid
+    const deliveryMatch = text.match(/Når:\s*(.+)/i);
     const dateInfo = parseNorwegianDateGlobal(deliveryMatch?.[1] || text);
 
-    let customer = "";
-    let companyName = "";
-    const orderHeader = lines.find((l) => /\d{4,}\s*\//.test(l));
-    if (orderHeader) {
-      const parts = orderHeader.split("/").map((x) => x.trim());
-      customer = parts[1] || "";
-      companyName = parts[2] || "";
-    }
+    // Leveringsadresse
+    const deliveryAddress = text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() || "";
+
+    // Kundenavn
+    const nameMatch = text.match(/Navn:\s*(.+)/i);
+    let customer = nameMatch?.[1]?.trim() || "";
     if (!customer) {
       const idx = lines.findIndex((l) => /kundeinformasjon/i.test(l));
       if (idx >= 0 && lines[idx + 1]) customer = lines[idx + 1];
     }
 
+    // Bedriftsnavn (hvis finnes etter slash)
+    let companyName = "";
+    const orderHeader = lines.find((l) => /\d{4,}\s*\//.test(l));
+    if (orderHeader) {
+      const parts = orderHeader.split("/").map((x) => x.trim());
+      if (!customer) customer = parts[1] || "";
+      companyName = parts[2] || "";
+    }
+
+    // Beskjed til sjåfør / notat
+    const driverNote = text.match(/Beskjed til sjåfør:\s*([\s\S]*?)(?:\n\n|\nKundeinformasjon|\nHusk)/i)?.[1]?.trim() || "";
+
+    // Betalingsinfo
+    const paymentInfo = text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() || "Betalt på nett";
+
+    // Parse produktlinjer – støtter to formater:
+    // Format 1 (e-post): "PA000001\nProduktnamn\n10\n195,00\n1 950,00"
+    // Format 2 (gammel): "PA000001" på egen linje, antall+pris på neste linjer
     const nextUnmatched: string[] = [];
     const orderLines: OrderLine[] = [];
 
     for (let i = 0; i < lines.length; i++) {
       const productCodeMatch = lines[i].match(/^([A-ZÆØÅ]{1,4}\d{3,})$/i);
       if (!productCodeMatch) continue;
+
       const productCode = productCodeMatch[1];
-      const product = data.products.find((p) => p.productNumber?.toLowerCase() === productCode.toLowerCase());
-      if (!product) { nextUnmatched.push(lines[i]); continue; }
-      const nextLines = [lines[i + 1] || "", lines[i + 2] || "", lines[i + 3] || ""];
-      const combined = nextLines.join(" ");
-      const quantityMatch = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
-      const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+      const product = data.products.find(
+        (p) => p.productNumber?.toLowerCase() === productCode.toLowerCase()
+      );
+
+      if (!product) {
+        nextUnmatched.push(lines[i]);
+        continue;
+      }
+
+      // Søk etter antall i de neste 5 linjene
+      // Format e-post: produktnavn på linje i+1, antall på linje i+2
+      // Format gammel: antall+pris kombinert på linje i+1
+      let quantity = 1;
+
+      const nextFive = lines.slice(i + 1, i + 6);
+
+      // Prøv "antall\npris\nsum"-format (e-post)
+      for (let j = 0; j < nextFive.length; j++) {
+        const onlyNumber = nextFive[j].match(/^(\d+)\s*$/);
+        if (onlyNumber) {
+          quantity = Number(onlyNumber[1]);
+          break;
+        }
+        // Gammel format: "10 195,00"
+        const combined = nextFive.join(" ");
+        const oldFormat = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
+        if (oldFormat) {
+          quantity = Number(oldFormat[1]);
+          break;
+        }
+      }
+
       orderLines.push({ productId: product.id, quantity });
     }
 
+    // Dedupliser
     const uniqueLines = Object.values(
       orderLines.reduce((acc, line) => {
-        if (!acc[line.productId] || line.quantity > acc[line.productId].quantity) acc[line.productId] = line;
+        if (!acc[line.productId] || line.quantity > acc[line.productId].quantity)
+          acc[line.productId] = line;
         return acc;
       }, {} as Record<string, OrderLine>)
     );
 
-    const paymentInfo = text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Leveringsinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() || "";
-    const deliveryAddress = text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() || (text.match(/Butikk:\s*Brødrene Berbusmel/i) ? "Hentes i butikk" : "");
-
-    // Alt som ikke matchet havner i notater
-    const unmatchedNote = nextUnmatched.length ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}` : "";
-    const driverNote = text.match(/Melding til sjåfør:\s*([\s\S]*)/i)?.[1]?.trim() || "";
+    const unmatchedNote = nextUnmatched.length
+      ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
+      : "";
     const note = [driverNote, unmatchedNote].filter(Boolean).join("\n\n");
 
     const nextOrder: Order = {
@@ -3399,16 +3438,26 @@ function OrdersTab({ data, updateData, productAllergens }: {
       customerType: companyName ? "bedrift" : "privat",
       customer: customer || "Webshopkunde",
       companyName,
-      orgNumber: "", companyAddress: "",
-      phone: phoneMatch ? phoneMatch.replace(/[^\d+]/g, "") : "",
-      paymentInfo, deliveryAddress,
-      date: dateInfo.date, time: dateInfo.time, note,
+      orgNumber: "",
+      companyAddress: "",
+      phone: phoneMatch,
+      paymentInfo,
+      deliveryAddress,
+      date: dateInfo.date,
+      time: dateInfo.time,
+      note,
       guests: 1,
       productId: uniqueLines[0]?.productId || data.products[0]?.id || "",
-      orderLines: uniqueLines, discountPercent: 0, isRecurring: false, recurringDays: [],
+      orderLines: uniqueLines,
+      discountPercent: 0,
+      isRecurring: false,
+      recurringDays: [],
       recurringNote: `Importert fra webshop. Ordrenr: ${orderNumber}`,
       allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
-      dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
+      dietVegan: "0",
+      dietVegetarian: "0",
+      dietPregnant: "0",
+      dietOther: "",
     };
 
     setWebshopPreview(nextOrder);
