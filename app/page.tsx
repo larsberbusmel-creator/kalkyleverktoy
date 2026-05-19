@@ -4454,40 +4454,6 @@ ${orderPages}`;
 
   printWindow(`Catering ${formatDateNo(order.date)} – ${customerName}`, body);
 }
-// ── Print alle cateringordre for dagen ───────────────────────────────────
-  function printCateringDay() {
-    if (!cateringOrders.length) return alert("Ingen cateringordre denne dagen.");
-
-    const forsideRows = cateringOrders.map((o) => {
-      const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
-      return `<tr><td>${o.time || "-"}</td><td><b>${escapeHtml(customerName || "")}</b><br><small>${escapeHtml(o.phone || "")}</small></td><td>${o.orderLines.map((ol) => { const p = data.products.find((x) => x.id === ol.productId); return `${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}`; }).join("<br>")}</td><td>${escapeHtml(o.deliveryAddress || "-")}</td><td>${escapeHtml(o.paymentInfo || "-")}</td></tr>`;
-    }).join("");
-
-    const orderPages = cateringOrders.map((o) => {
-      const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
-      return o.orderLines.map((ol) => {
-        const product = data.products.find((p) => p.id === ol.productId);
-        if (!product) return "";
-        return `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div></div>${scaledRecipeHtml(product, ol.quantity)}</div>`;
-      }).join("");
-    }).join("");
-
-    const body = `
-<div class="print-header"><img src="/logo.png" class="print-logo" /></div>
-<div class="page">
-  <div class="top">
-    <div><img src="/logo.png" class="logo" /><h1>Catering – oversikt for dagen</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
-    <div class="right"><b>${cateringOrders.length} ordre</b></div>
-  </div>
-  <table>
-    <thead><tr><th>Tid</th><th>Kunde</th><th>Produkter</th><th>Levering</th><th>Betaling</th></tr></thead>
-    <tbody>${forsideRows}</tbody>
-  </table>
-</div>
-${orderPages}`;
-
-    printWindow(`Catering ${formatDateNo(activeDate)}`, body);
-  }
 function printProductionDay() {
     const summaryRows = activeRows.map((row) => {
       const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
@@ -4505,6 +4471,7 @@ function printProductionDay() {
         recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit });
       });
     });
+
     const baseRecipePages = Object.values(recipeMap).map((entry) => {
       const recipe = entry.recipe;
       const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
@@ -4529,13 +4496,13 @@ function printProductionDay() {
         if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
         return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(line.itemType)}</td><td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk · ${num(Number(product.unitWeightKg || product.yieldAmount || 0), 3)} kg/stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th>Innhold</th><th>Type</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th>Innhold</th><th>Type</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
     }).join("");
 
     const packingPages = storkjokkenCustomers.map((customer) => {
       const rows = data.products.map((product) => { const qty = Number(activeDay.quantities?.[product.id]?.[customer.id] || 0); if (!qty) return ""; return `<tr><td class="right"><b>${qty}</b></td><td>${escapeHtml(product.name)}</td></tr>`; }).join("");
       if (!rows) return "";
-      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customer.name)}</p></div><div class="right"><b>${formatDateNo(activeDate)}</b><br>${escapeHtml(customer.deliveryAddress || "")}</div></div><table><thead><tr><th class="right">Antall</th><th>Produkt</th></tr></thead><tbody>${rows}</tbody></table><p style="margin-top:30px;">Signatur mottatt: __________________________</p></div>`;
+      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customer.name)}</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th class="right">Antall</th><th>Produkt</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     }).join("");
 
     const body = `
@@ -4543,7 +4510,7 @@ function printProductionDay() {
 <div class="page">
   <div class="top">
     <div><img src="/logo.png" class="logo" /><h1>Produksjon for dagen</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
-    <div class="right"><b>${totalUnits} stk totalt</b><br>Produksjonsliste</div>
+    <div class="right"><b>${totalUnits} stk totalt</b></div>
   </div>
   <table>
     <thead><tr><th>Produkt</th><th class="right">Antall stk</th><th class="right">Størrelse</th></tr></thead>
@@ -4553,6 +4520,100 @@ function printProductionDay() {
 ${baseRecipePages}${productPages}${packingPages}`;
 
     printWindow(`Produksjon ${activeDate}`, body);
+  }
+// ── Print alle cateringordre for dagen ───────────────────────────────────
+  function printCateringDay() {
+    if (!cateringOrders.length) return alert("Ingen cateringordre denne dagen.");
+
+    const forsideRows = cateringOrders.map((o) => {
+      const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
+      return `<tr><td>${o.time || "-"}</td><td><b>${escapeHtml(customerName || "")}</b><br><small>${escapeHtml(o.phone || "")}</small></td><td>${o.orderLines.map((ol) => { const p = data.products.find((x) => x.id === ol.productId); return `${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}`; }).join("<br>")}</td><td>${escapeHtml(o.deliveryAddress || "-")}</td><td>${escapeHtml(o.paymentInfo || "-")}</td></tr>`;
+    }).join("");
+
+    const orderPages = cateringOrders.map((o) => {
+      const customerName = o.customerType === "bedrift" ? `${o.companyName || ""}${o.orgNumber ? ` (${o.orgNumber})` : ""}` : o.customer;
+
+      // Beregn totaler for pakkseddel
+      const subtotal = o.orderLines.reduce((sum, ol) => {
+        const p = data.products.find((x) => x.id === ol.productId);
+        return sum + (p?.customerPrice || 0) * ol.quantity;
+      }, 0);
+      const discount = subtotal * ((Number(o.discountPercent) || 0) / 100);
+      const total = subtotal - discount;
+      const totalEx = exVatFromIncVat(total, data.settings.foodVat);
+
+      const packingRows = o.orderLines.map((ol) => {
+        const p = data.products.find((x) => x.id === ol.productId);
+        const lineTotal = (p?.customerPrice || 0) * ol.quantity;
+        return `<tr><td>${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${ol.quantity} stk</td><td class="right">${currency(p?.customerPrice || 0)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
+      }).join("");
+
+      const pakkseddel = `
+<div class="page">
+  <div class="top">
+    <div>
+      <img src="/logo.png" class="logo" />
+      <h1>Pakkseddel</h1>
+      <p class="muted">${formatDateNo(o.date)} ${o.time || ""}${o.orderNumber ? ` · Ordrenr: ${escapeHtml(o.orderNumber)}` : ""}</p>
+    </div>
+    <div class="right">
+      <p><b>${escapeHtml(customerName || "")}</b></p>
+      <p>${escapeHtml(o.deliveryAddress || "-")}</p>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+    <div class="box">
+      <h2>Kunde</h2>
+      <p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p>
+      <p>Kontakt: ${escapeHtml(o.customer || "-")}</p>
+      <p>Telefon: ${escapeHtml(o.phone || "-")}</p>
+      <p>Leveringsadresse: ${escapeHtml(o.deliveryAddress || "-")}</p>
+    </div>
+    <div class="box">
+      <h2>Betaling</h2>
+      <p>${escapeHtml(o.paymentInfo || "Ikke registrert")}</p>
+      ${o.note ? `<p><b>Notat:</b><br>${escapeHtml(o.note).replace(/\n/g, "<br>")}</p>` : ""}
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Pris inkl. mva</th><th class="right">Sum inkl. mva</th></tr></thead>
+    <tbody>${packingRows}</tbody>
+    <tfoot>
+      ${o.discountPercent ? `<tr><td colspan="3">Rabatt ${o.discountPercent}%</td><td class="right">-${currency(discount)}</td></tr>` : ""}
+      <tr style="font-weight:900;background:#f8fafc"><td colspan="3">Total inkl. mva</td><td class="right">${currency(total)}</td></tr>
+      <tr><td colspan="3" style="color:#64748b">Herav mva</td><td class="right" style="color:#64748b">${currency(total - totalEx)}</td></tr>
+    </tfoot>
+  </table>
+  <div style="margin-top:30px;text-align:center;font-size:12px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px">
+    Brødrene Berbusmel · brodrene@berbusmel.no · Tlf 413 73 000
+  </div>
+</div>`;
+
+      // Oppskriftsider per produkt
+      const recipesPages = o.orderLines.map((ol) => {
+        const product = data.products.find((p) => p.id === ol.productId);
+        if (!product) return "";
+        return `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div></div>${scaledRecipeHtml(product, ol.quantity)}</div>`;
+      }).join("");
+
+      return pakkseddel + recipesPages;
+    }).join("");
+
+    const body = `
+<div class="print-header"><img src="/logo.png" class="print-logo" /></div>
+<div class="page">
+  <div class="top">
+    <div><img src="/logo.png" class="logo" /><h1>Catering – oversikt for dagen</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
+    <div class="right"><b>${cateringOrders.length} ordre</b></div>
+  </div>
+  <table>
+    <thead><tr><th>Tid</th><th>Kunde</th><th>Produkter</th><th>Levering</th><th>Betaling</th></tr></thead>
+    <tbody>${forsideRows}</tbody>
+  </table>
+</div>
+${orderPages}`;
+
+    printWindow(`Catering ${formatDateNo(activeDate)}`, body);
   }
 
   function printInvoice() {
