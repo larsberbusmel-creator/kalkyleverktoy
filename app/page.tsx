@@ -3369,7 +3369,10 @@ function OrdersTab({ data, updateData, productAllergens }: {
     const driverNote = text.match(/Beskjed til sjåfør:\s*([\s\S]*?)(?:\n\n|\nKundeinformasjon|\nHusk)/i)?.[1]?.trim() || "";
 
     // Betalingsinfo
-    const paymentInfo = text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() || "Betalt på nett";
+    const erBetaltPaaNett = /ikke ta imot betaling/i.test(text);
+const paymentInfo = erBetaltPaaNett
+  ? "Betalt på nett"
+  : text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() || "Betales ved henting";
 
     // Parse produktlinjer – støtter to formater:
     // Format 1 (e-post): "PA000001\nProduktnamn\n10\n195,00\n1 950,00"
