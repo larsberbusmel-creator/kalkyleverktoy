@@ -3586,7 +3586,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
     const w = window.open("", "_blank"); if (!w) return;
     w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>
 body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}
-.top{display:flex;justify-content:space-between;border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}
+.top{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:12px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}
 table{width:100%;border-collapse:collapse;margin-top:8px}
@@ -3600,9 +3600,12 @@ th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:
 </style></head><body>
 <button onclick="window.print()">Print</button>
 <div class="top">
-  <div><b>KJØKKENORDRE</b><br><small>${today()}</small></div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <img src="/logo.png" style="height:50px;width:auto;object-fit:contain" />
+    <div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div>
+  </div>
   <div style="text-align:right">
-    <h1 style="margin:0">${formatDateNo(order.date)} ${order.time || ""}</h1>
+    <b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br>
     <p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
   </div>
 </div>
@@ -4275,114 +4278,209 @@ button{padding:10px 14px;border-radius:10px;border:1px solid #111827;background:
     return html || "<p>Ingen oppskriftslinjer registrert på produktet.</p>";
   }
 
+  function printPackingSlip(order: Order) {
+  const customerName = order.customerType === "bedrift"
+    ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}`
+    : order.customer;
+
+  const subtotal = order.orderLines.reduce((sum, ol) => {
+    const p = data.products.find((x) => x.id === ol.productId);
+    return sum + (p?.customerPrice || 0) * ol.quantity;
+  }, 0);
+  const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
+  const total = subtotal - discount;
+  const totalEx = exVatFromIncVat(total, data.settings.foodVat);
+
+  const rows = order.orderLines.map((ol) => {
+    const p = data.products.find((x) => x.id === ol.productId);
+    const lineTotal = (p?.customerPrice || 0) * ol.quantity;
+    return `
+<tr>
+  <td>${escapeHtml(p?.name || "Ukjent")}</td>
+  <td class="right">${ol.quantity} stk</td>
+  <td class="right">${currency(p?.customerPrice || 0)}</td>
+  <td class="right"><b>${currency(lineTotal)}</b></td>
+</tr>`;
+  }).join("");
+
+  const w = window.open("", "_blank"); if (!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Pakkseddel</title><style>
+@page{size:A4;margin:14mm}
+body{font-family:Arial,sans-serif;color:#111827;padding:24px;line-height:1.4}
+.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:14px;margin-bottom:18px}
+.logo{height:90px;width:auto;object-fit:contain}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+.box{border:1px solid #e5e7eb;border-radius:12px;padding:14px}
+h1{font-size:22px;margin:4px 0}
+h2{font-size:15px;margin:0 0 8px;color:#374151}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}
+th{background:#f3f4f6}
+.right{text-align:right}
+.total-row{font-size:18px;font-weight:900;background:#f8fafc}
+.footer{margin-top:30px;text-align:center;font-size:12px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
+@media print{button{display:none}body{padding:0}}
+</style></head><body>
+<button onclick="window.print()">Print pakkseddel</button>
+
+<div class="top">
+  <div>
+    <img src="/logo.png" class="logo" />
+    <h1>Pakkseddel</h1>
+    <p style="margin:4px 0;color:#64748b">${formatDateNo(order.date)} ${order.time || ""}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
+  </div>
+  <div style="text-align:right">
+    <p><b>${escapeHtml(customerName || "")}</b></p>
+    <p>${escapeHtml(order.deliveryAddress || "-")}</p>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="box">
+    <h2>Kunde</h2>
+    <p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p>
+    <p>Kontakt: ${escapeHtml(order.customer || "-")}</p>
+    <p>Telefon: ${escapeHtml(order.phone || "-")}</p>
+    <p>Leveringsadresse: ${escapeHtml(order.deliveryAddress || "-")}</p>
+  </div>
+  <div class="box">
+    <h2>Betaling</h2>
+    <p>${escapeHtml(order.paymentInfo || "Ikke registrert")}</p>
+    ${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Produkt</th>
+      <th class="right">Antall</th>
+      <th class="right">Pris inkl. mva</th>
+      <th class="right">Sum inkl. mva</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+  <tfoot>
+    ${order.discountPercent ? `<tr><td colspan="3">Rabatt ${order.discountPercent}%</td><td class="right">-${currency(discount)}</td></tr>` : ""}
+    <tr class="total-row">
+      <td colspan="3">Total inkl. mva</td>
+      <td class="right">${currency(total)}</td>
+    </tr>
+    <tr>
+      <td colspan="3" style="color:#64748b">Herav mva</td>
+      <td class="right" style="color:#64748b">${currency(total - totalEx)}</td>
+    </tr>
+  </tfoot>
+</table>
+
+<div class="footer">
+  Brødrene Berbusmel · brodrene@berbusmel.no · Tlf 413 73 000
+</div>
+</body></html>`);
+  w.document.close(); w.focus();
+}
+
   // ── Print én cateringordre med skalert oppskrift ──────────────────────────
   function printCateringOrder(order: Order) {
-    const customerName = order.customerType === "bedrift" ? order.companyName || order.customer : order.customer;
-    const orderPages = order.orderLines.map((ol) => {
-      const product = data.products.find((p) => p.id === ol.productId);
-      if (!product) return "";
-      return `
+  const customerName = order.customerType === "bedrift"
+    ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}`
+    : order.customer;
+
+  const subtotal = order.orderLines.reduce((sum, ol) => {
+    const p = data.products.find((x) => x.id === ol.productId);
+    return sum + (p?.customerPrice || 0) * ol.quantity;
+  }, 0);
+  const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
+  const total = subtotal - discount;
+
+  const orderSummaryRows = order.orderLines.map((ol) => {
+    const p = data.products.find((x) => x.id === ol.productId);
+    const lineTotal = (p?.customerPrice || 0) * ol.quantity;
+    return `<tr><td>${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${currency(p?.customerPrice || 0)}</td><td class="right">${currency(lineTotal)}</td></tr>`;
+  }).join("");
+
+  const orderPages = order.orderLines.map((ol) => {
+    const product = data.products.find((p) => p.id === ol.productId);
+    if (!product) return "";
+    return `
 <div class="page">
   <div class="top">
-    <div>
-      <h1>${escapeHtml(product.name)}</h1>
-      <p class="muted">${escapeHtml(customerName || "")} · ${formatDateNo(order.date)} ${order.time || ""}</p>
-    </div>
-    <div class="right"><b>${ol.quantity} porsjoner / stk</b></div>
+    <div><h1>${escapeHtml(product.name)}</h1>
+    <p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div>
+    <div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div>
   </div>
   ${scaledRecipeHtml(product, ol.quantity)}
 </div>`;
-    }).join("");
+  }).join("");
 
-    const body = `
+  const body = `
 <div class="print-header"><img src="/logo.png" class="print-logo" /></div>
 <div class="page">
   <div class="top">
     <div>
       <img src="/logo.png" class="logo" />
       <h1>Cateringordre</h1>
-      <p class="muted">${escapeHtml(customerName || "")}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
     </div>
     <div class="right">
-      <b>${formatDateNo(order.date)} ${order.time || ""}</b><br>
-      ${escapeHtml(order.deliveryAddress || "")}
+      <b>${formatDateNo(order.date)} ${order.time || ""}</b>
+      ${order.orderNumber ? `<br>Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}
     </div>
   </div>
-  <table>
-    <thead><tr><th>Produkt</th><th class="right">Antall</th></tr></thead>
-    <tbody>
-      ${order.orderLines.map((ol) => {
-        const product = data.products.find((p) => p.id === ol.productId);
-        return `<tr><td>${escapeHtml(product?.name || "Ukjent")}</td><td class="right">${ol.quantity}</td></tr>`;
-      }).join("")}
-    </tbody>
-  </table>
-  ${order.note ? `<p><b>Notat:</b> ${escapeHtml(order.note)}</p>` : ""}
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+    <div class="box">
+      <h2>Kunde</h2>
+      <p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p>
+      <p>Kontakt: ${escapeHtml(order.customer || "-")}</p>
+      <p>Telefon: ${escapeHtml(order.phone || "-")}</p>
+      <p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>
+      <p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p>
+      ${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}
+    </div>
+    <div class="box">
+      <h2>Bestilling</h2>
+      <table>
+        <thead><tr><th>Produkt</th><th class="right">Pris</th><th class="right">Sum</th></tr></thead>
+        <tbody>${orderSummaryRows}</tbody>
+        <tfoot>
+          ${order.discountPercent ? `<tr><td>Rabatt ${order.discountPercent}%</td><td></td><td class="right">-${currency(discount)}</td></tr>` : ""}
+          <tr style="font-weight:900"><td>Total inkl. mva</td><td></td><td class="right">${currency(total)}</td></tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
 </div>
 ${orderPages}`;
 
-    printWindow(`Catering ${formatDateNo(order.date)} – ${customerName}`, body);
-  }
-
-  // ── Print alle cateringordre for dagen ───────────────────────────────────
+  printWindow(`Catering ${formatDateNo(order.date)} – ${customerName}`, body);
+}
+// ── Print alle cateringordre for dagen ───────────────────────────────────
   function printCateringDay() {
     if (!cateringOrders.length) return alert("Ingen cateringordre denne dagen.");
 
-    // Forside – oversikt
     const forsideRows = cateringOrders.map((o) => {
       const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
-      return `
-<tr>
-  <td>${o.time || "-"}</td>
-  <td><b>${escapeHtml(customerName || "")}</b><br><small>${escapeHtml(o.phone || "")}</small></td>
-  <td>${o.orderLines.map((ol) => { const p = data.products.find((x) => x.id === ol.productId); return `${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}`; }).join("<br>")}</td>
-  <td>${escapeHtml(o.deliveryAddress || "-")}</td>
-  <td>${escapeHtml(o.paymentInfo || "-")}</td>
-</tr>`;
+      return `<tr><td>${o.time || "-"}</td><td><b>${escapeHtml(customerName || "")}</b><br><small>${escapeHtml(o.phone || "")}</small></td><td>${o.orderLines.map((ol) => { const p = data.products.find((x) => x.id === ol.productId); return `${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}`; }).join("<br>")}</td><td>${escapeHtml(o.deliveryAddress || "-")}</td><td>${escapeHtml(o.paymentInfo || "-")}</td></tr>`;
     }).join("");
 
-    // Én side per ordre med oppskrift
     const orderPages = cateringOrders.map((o) => {
       const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
-      const productPages = o.orderLines.map((ol) => {
+      return o.orderLines.map((ol) => {
         const product = data.products.find((p) => p.id === ol.productId);
         if (!product) return "";
-        return `
-<div class="page">
-  <div class="top">
-    <div>
-      <h1>${escapeHtml(product.name)}</h1>
-      <p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p>
-    </div>
-    <div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div>
-  </div>
-  ${scaledRecipeHtml(product, ol.quantity)}
-</div>`;
+        return `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div></div>${scaledRecipeHtml(product, ol.quantity)}</div>`;
       }).join("");
-      return productPages;
     }).join("");
 
     const body = `
 <div class="print-header"><img src="/logo.png" class="print-logo" /></div>
 <div class="page">
   <div class="top">
-    <div>
-      <img src="/logo.png" class="logo" />
-      <h1>Catering – oversikt for dagen</h1>
-      <p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p>
-    </div>
+    <div><img src="/logo.png" class="logo" /><h1>Catering – oversikt for dagen</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
     <div class="right"><b>${cateringOrders.length} ordre</b></div>
   </div>
   <table>
-    <thead>
-      <tr>
-        <th>Tid</th>
-        <th>Kunde</th>
-        <th>Produkter</th>
-        <th>Levering</th>
-        <th>Betaling</th>
-      </tr>
-    </thead>
+    <thead><tr><th>Tid</th><th>Kunde</th><th>Produkter</th><th>Levering</th><th>Betaling</th></tr></thead>
     <tbody>${forsideRows}</tbody>
   </table>
 </div>
@@ -4390,8 +4488,7 @@ ${orderPages}`;
 
     printWindow(`Catering ${formatDateNo(activeDate)}`, body);
   }
-
-  function printProductionDay() {
+function printProductionDay() {
     const summaryRows = activeRows.map((row) => {
       const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
       return `<tr><td><b>${escapeHtml(row.product.name)}</b><br><small>${escapeHtml(row.product.productNumber || "")}</small></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${num(unitSize, 3)} kg/stk` : "-"}</td></tr>`;
@@ -4408,7 +4505,6 @@ ${orderPages}`;
         recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit });
       });
     });
-
     const baseRecipePages = Object.values(recipeMap).map((entry) => {
       const recipe = entry.recipe;
       const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
