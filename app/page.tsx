@@ -3126,10 +3126,21 @@ if (quantity === 1) {
       }, {} as Record<string, OrderLine>)
     );
 
-    const unmatchedNote = nextUnmatched.length
-      ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
-      : "";
-    const note = [driverNote, unmatchedNote].filter(Boolean).join("\n\n");
+    // Allergier fra fritekst
+const allergyNote = cleanText.match(/Allergi[^:]*:\s*(.+)/i)?.[1]?.trim() ||
+  cleanText.match(/Gluten|Nøtter|Melk|Egg|Soya|Sesam|Skalldyr|Fisk|Lupin|Sulfitt/gi)
+    ?.filter((v, i, arr) => arr.indexOf(v) === i)
+    .join(", ") || "";
+
+const unmatchedNote = nextUnmatched.length
+  ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
+  : "";
+
+const note = [
+  driverNote,
+  allergyNote ? `Allergier (fra bestilling): ${allergyNote}` : "",
+  unmatchedNote,
+].filter(Boolean).join("\n\n");
 
     const nextOrder: Order = {
       id: `webshop-${orderNumber}-${Date.now()}`,
