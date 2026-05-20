@@ -3127,10 +3127,10 @@ if (quantity === 1) {
     );
 
     // Allergier fra fritekst
-const allergyNote = cleanText.match(/Allergi[^:]*:\s*(.+)/i)?.[1]?.trim() ||
-  cleanText.match(/Gluten|Nøtter|Melk|Egg|Soya|Sesam|Skalldyr|Fisk|Lupin|Sulfitt/gi)
-    ?.filter((v, i, arr) => arr.indexOf(v) === i)
-    .join(", ") || "";
+const allergyNote =
+  cleanText.match(/Tilpasse til allergier[^\n]*\n([^\n]+)/i)?.[1]?.trim() ||
+  cleanText.match(/Allergi[^:]*:\s*(.+)/i)?.[1]?.trim() ||
+  "";
 
 const unmatchedNote = nextUnmatched.length
   ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
@@ -3287,7 +3287,8 @@ const note = [
     const discountAmount = orderDiscountAmount(order);
     const totalInc = orderTotalIncVat(order);
     const totalEx = exVatFromIncVat(totalInc, data.settings.foodVat);
-    const allergens = selectedAllergens(order).join(", ") || "Ingen registrert";
+    const noteAllergens = order.note?.match(/Allergier \(fra bestilling\):\s*(.+)/i)?.[1]?.trim() || "";
+const allergens = selectedAllergens(order).join(", ") || noteAllergens || "Ingen registrert";
     const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
     const customerName = order.customerType === "bedrift" ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
 
