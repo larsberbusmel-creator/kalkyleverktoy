@@ -39,7 +39,6 @@ export type ParsedOrder = {
   dietOther: string;
 };
 
-// Minimalt produktobjekt – kun det vi trenger for matching
 export type MatchableProduct = {
   id: string;
   name: string;
@@ -63,6 +62,7 @@ function parseNorwegianDate(text: string): { date: string; time: string } {
     september: "09", oktober: "10", november: "11", desember: "12",
   };
 
+  // Støtter "Når: Onsdag 20 mai 11:00-11:15" og "Tidspunkt: Fredag 8 mai 10:00"
   const match = text.match(
     /(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå]+)\s+(\d{1,2}:\d{2})/i
   );
@@ -77,14 +77,6 @@ function parseNorwegianDate(text: string): { date: string; time: string } {
   return { date: `${year}-${month}-${day}`, time };
 }
 
-function normalizePhone(value: string): string {
-  return value.replace(/[^\d+]/g, "");
-}
-
-/**
- * Hovedfunksjonen. Tar inn e-posttekst og produktliste, returnerer en ParsedOrder.
- * Returnerer null hvis ingen produktlinjer ble funnet.
- */
 export function parseWebshopEmail(
   text: string,
   products: MatchableProduct[]
@@ -94,42 +86,55 @@ export function parseWebshopEmail(
     .map((x) => x.trim())
     .filter(Boolean);
 
-  // Ordrenummer
+  // ── Ordrenummer ──────────────────────────────────────────────────────────
   const orderNumberMatch =
-    text.match(/(?:Bestilling|Ordre|Order)\s*#?\s*(\d{4,})/i) ||
-    text.match(/\b(\d{5,})\b/);
+    text.match(/Bestilling\s+(\d{4,})/i) ||
+    text.match(/(?:Ordre|Order)\s*#?\s*(\d{4,})/i) ||
+    text.match(/\b(\d{6,})\b/);
   const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
-  // E-post og telefon
-  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  // ── Telefon – hent fra "Telefon: +47..." linjen ──────────────────────────
+  const phoneRaw = text.match(/Telefon:\s*(\+?[\d\s]{8,})/i)?.[1]?.trim() || "";
+  const phone = phoneRaw.replace(/\s+/g, "");
 
-  let phoneMatch = "";
-  if (emailMatch?.index !== undefined) {
-    const afterEmail = text.slice(emailMatch.index + emailMatch[0].length);
-    phoneMatch =
-      afterEmail.match(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/)?.[0] || "";
-  }
-  if (!phoneMatch) {
-    phoneMatch =
-      text.match(/Mottakers telefon:\s*((?:\+47\s*)?\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/i)?.[1] || "";
-  }
+  // ── Leveringstidspunkt ───────────────────────────────────────────────────
+  const naarMatch = text.match(/Når:\s*(.+)/i);
+  const tidspunktMatch = text.match(/Tidspunkt:\s*(.+)/i);
+  const dateInfo = parseNorwegianDate(naarMatch?.[1] || tidspunktMatch?.[1] || text);
 
-  // Leveringstidspunkt
-  const deliveryMatch = text.match(/Tidspunkt:\s*(.+)/i);
-  const dateInfo = parseNorwegianDate(deliveryMatch?.[1] || text);
+  // ── Leveringsadresse ─────────────────────────────────────────────────────
+  const deliveryAddress =
+    text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
+    (text.match(/Butikk:\s*Brødrene Berbusmel/i) ? "Hentes i butikk" : "");
 
-  // Kundenavn
-  let customer = "";
-  const customerInfoIndex = lines.findIndex((l) => /kundeinformasjon/i.test(l));
-  if (customerInfoIndex >= 0 && lines[customerInfoIndex + 1]) {
-    customer = lines[customerInfoIndex + 1];
+  // ── Kundenavn ────────────────────────────────────────────────────────────
+  let customer = text.match(/Navn:\s*(.+)/i)?.[1]?.trim() || "";
+  if (!customer) {
+    const customerInfoIndex = lines.findIndex((l) => /kundeinformasjon/i.test(l));
+    if (customerInfoIndex >= 0 && lines[customerInfoIndex + 1]) {
+      customer = lines[customerInfoIndex + 1];
+    }
   }
   if (!customer) {
     const orderHeader = lines.find((l) => /\d+\s*\/\s*/.test(l));
     customer = orderHeader?.split("/")[1]?.trim() || "";
   }
 
-  // Produktlinjer – matcher på produktnummer (f.eks. BA000001)
+  // ── Betalingsinfo ────────────────────────────────────────────────────────
+  const erBetaltPaaNett = /ikke ta imot betaling/i.test(text);
+  const erFaktura = /faktura|etterskudd|ved henting|kontant/i.test(text);
+  const paymentInfo = erBetaltPaaNett
+    ? "Betalt på nett"
+    : erFaktura
+      ? "Faktura / betaling ved henting"
+      : text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() || "Betalt på nett";
+
+  // ── Notat / beskjed til sjåfør ───────────────────────────────────────────
+  const driverNote =
+    text.match(/Beskjed til sjåfør:\s*([\s\S]*?)(?:\n\n|\nKundeinformasjon|\nHusk)/i)?.[1]?.trim() ||
+    text.match(/Melding til sjåfør:\s*([\s\S]*?)(?:\n\n|$)/i)?.[1]?.trim() || "";
+
+  // ── Produktlinjer ────────────────────────────────────────────────────────
   const nextUnmatched: string[] = [];
   const orderLines: ParsedOrderLine[] = [];
 
@@ -147,14 +152,26 @@ export function parseWebshopEmail(
       continue;
     }
 
-    const nextLines = [
-      lines[i + 1] || "",
-      lines[i + 2] || "",
-      lines[i + 3] || "",
-    ];
-    const combined = nextLines.join(" ");
-    const quantityMatch = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
-    const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+    // Søk antall i de neste 5 linjene (trim for å fjerne trailing spaces)
+    let quantity = 1;
+    const nextFive = lines.slice(i + 1, i + 6).map((l) => l.trim());
+
+    for (let j = 0; j < nextFive.length; j++) {
+      // Stopp ved neste produktkode
+      if (/^[A-ZÆØÅ]{1,4}\d{3,}$/i.test(nextFive[j])) break;
+      // Linje med kun tall
+      if (/^\d+$/.test(nextFive[j])) {
+        quantity = Number(nextFive[j]);
+        break;
+      }
+    }
+
+    // Fallback: gammel format "10 195,00 kr"
+    if (quantity === 1) {
+      const combined = nextFive.join(" ");
+      const oldFormat = combined.match(/\b(\d+)\s+\d+[,.]?\d*/i);
+      if (oldFormat && Number(oldFormat[1]) > 1) quantity = Number(oldFormat[1]);
+    }
 
     orderLines.push({ productId: product.id, quantity });
   }
@@ -171,24 +188,10 @@ export function parseWebshopEmail(
 
   if (uniqueLines.length === 0) return null;
 
-  // Betalingsinformasjon og leveringsadresse
-  const paymentInfo =
-    text.match(
-      /Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Leveringsinformasjon|Tidspunkt:|Produkt|$)/i
-    )?.[1]?.trim() || "";
-
-  const deliveryAddress =
-    text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
-    (text.match(/Butikk:\s*Brødrene Berbusmel/i) ? "Hentes i butikk" : "");
-
-  const note = [
-    text.match(/Melding til sjåfør:\s*([\s\S]*)/i)?.[1]?.trim() || "",
-    nextUnmatched.length
-      ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const unmatchedNote = nextUnmatched.length
+    ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
+    : "";
+  const note = [driverNote, unmatchedNote].filter(Boolean).join("\n\n");
 
   const order: ParsedOrder = {
     id: `webshop-${orderNumber}-${Date.now()}`,
@@ -199,7 +202,7 @@ export function parseWebshopEmail(
     companyName: "",
     orgNumber: "",
     companyAddress: "",
-    phone: phoneMatch ? normalizePhone(phoneMatch) : "",
+    phone,
     paymentInfo,
     deliveryAddress,
     date: dateInfo.date,
