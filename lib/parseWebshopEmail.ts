@@ -202,10 +202,21 @@ if (customerInfoIndex >= 0) {
 
   if (uniqueLines.length === 0) return null;
 
-  const unmatchedNote = nextUnmatched.length
-    ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
-    : "";
-  const note = [driverNote, unmatchedNote].filter(Boolean).join("\n\n");
+  // Allergier fra fritekst
+const allergyNote =
+  cleanText.match(/Tilpasse til allergier[^\n]*\n([^\n]+)/i)?.[1]?.trim() ||
+  cleanText.match(/Allergi[^:]*:\s*(.+)/i)?.[1]?.trim() ||
+  "";
+
+const unmatchedNote = nextUnmatched.length
+  ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
+  : "";
+
+const note = [
+  driverNote,
+  allergyNote ? `Allergier (fra bestilling): ${allergyNote}` : "",
+  unmatchedNote,
+].filter(Boolean).join("\n\n");
 
   const order: ParsedOrder = {
     id: `webshop-${orderNumber}-${Date.now()}`,
