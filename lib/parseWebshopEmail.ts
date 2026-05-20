@@ -14,7 +14,7 @@ export type ParsedOrder = {
   id: string;
   orderNumber?: string;
   type: "bakeri";
-  customerType: "privat";
+  customerType: "privat" | "bedrift";
   customer: string;
   companyName: string;
   orgNumber: string;
@@ -98,28 +98,37 @@ export function parseWebshopEmail(
     cleanText.match(/\b(\d{6,})\b/);
   const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
-  // ── Telefon ──────────────────────────────────────────────────────────────
-  const phoneRaw = cleanText.match(/Telefon:\s*(\+?[\d\s]{8,})/i)?.[1]?.trim() || "";
-  const phone = phoneRaw.replace(/\s+/g, "");
+  // Prøv Telefon:-feltet først, deretter telefonnummer fra Kundeinformasjon-blokken
+const phoneRaw =
+  cleanText.match(/Telefon:\s*(\+?[\d\s]{8,})/i)?.[1]?.trim() ||
+  cleanText.match(/Kundeinformasjon[\s\S]*?(\+47\d{8,}|\+47\s*\d[\d\s]{7,})/i)?.[1]?.trim() || "";
+const phone = phoneRaw.replace(/\s+/g, "");
 
   // ── Leveringstidspunkt ───────────────────────────────────────────────────
   const naarMatch = cleanText.match(/Når:\s*(.+)/i);
   const tidspunktMatch = cleanText.match(/Tidspunkt:\s*(.+)/i);
   const dateInfo = parseNorwegianDate(naarMatch?.[1] || tidspunktMatch?.[1] || cleanText);
 
-  // ── Leveringsadresse ─────────────────────────────────────────────────────
-  const deliveryAddress =
-    cleanText.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
-    (cleanText.match(/Butikk:\s*Brødrene Berbusmel/i) ? "Hentes i butikk" : "");
+ const deliveryAddress =
+  cleanText.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
+  cleanText.match(/Hentested:\s*(.+)/i)?.[1]?.trim() ||
+  (cleanText.match(/Butikk:\s*Brødrene Berbusmel/i) ? "Hentes i butikk" : "Hentes i butikk");
 
   // ── Kundenavn ────────────────────────────────────────────────────────────
-  let customer = cleanText.match(/Navn:\s*(.+)/i)?.[1]?.trim() || "";
-  if (!customer) {
-    const customerInfoIndex = lines.findIndex((l) => /kundeinformasjon/i.test(l));
-    if (customerInfoIndex >= 0 && lines[customerInfoIndex + 1]) {
-      customer = lines[customerInfoIndex + 1];
-    }
+ let customer = cleanText.match(/Navn:\s*(.+)/i)?.[1]?.trim() || "";
+let companyName = "";
+const customerInfoIndex = lines.findIndex((l) => /kundeinformasjon/i.test(l));
+if (customerInfoIndex >= 0) {
+  // Første linje etter Kundeinformasjon kan være bedriftsnavn (store bokstaver)
+  const line1 = lines[customerInfoIndex + 1] || "";
+  const line2 = lines[customerInfoIndex + 2] || "";
+  if (line1 && line1 === line1.toUpperCase() && line1.length > 3) {
+    companyName = line1;
+    if (!customer) customer = line2;
+  } else {
+    if (!customer) customer = line1;
   }
+}
   if (!customer) {
     const orderHeader = lines.find((l) => /\d+\s*\/\s*/.test(l));
     customer = orderHeader?.split("/")[1]?.trim() || "";
@@ -202,9 +211,9 @@ export function parseWebshopEmail(
     id: `webshop-${orderNumber}-${Date.now()}`,
     orderNumber,
     type: "bakeri",
-    customerType: "privat",
+    customerType: companyName ? "bedrift" : "privat",
     customer: customer || "Webshopkunde",
-    companyName: "",
+    companyName,
     orgNumber: "",
     companyAddress: "",
     phone,

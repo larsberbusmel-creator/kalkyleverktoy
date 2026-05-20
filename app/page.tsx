@@ -2963,315 +2963,6 @@ th{background:#f3f4f6}
 );
 }
 
-
-function WebshopImportTab({
-  data,
-  updateData,
-  setTab,
-}: {
-  data: AppData;
-  updateData: (p: Partial<AppData>) => void;
-  setTab: (tab: Tab) => void;
-}) {
-  const [rawText, setRawText] = useState("");
-  const [preview, setPreview] = useState<Order | null>(null);
-  const [unmatched, setUnmatched] = useState<string[]>([]);
-
-  function parseNorwegianDate(text: string) {
-    const months: Record<string, string> = {
-      januar: "01",
-      februar: "02",
-      mars: "03",
-      april: "04",
-      mai: "05",
-      juni: "06",
-      juli: "07",
-      august: "08",
-      september: "09",
-      oktober: "10",
-      november: "11",
-      desember: "12",
-    };
-
-    const match = text.match(/(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå]+)\s+(\d{1,2}:\d{2})/i);
-
-    if (!match) {
-      return { date: today(), time: "" };
-    }
-
-    const day = match[1].padStart(2, "0");
-    const month = months[match[2].toLowerCase()] || "01";
-    const year = new Date().getFullYear();
-    const time = match[3];
-
-    return {
-      date: `${year}-${month}-${day}`,
-      time,
-    };
-  }
-
-  function normalizePhone(value: string) {
-    return value.replace(/[^\d+]/g, "");
-  }
-
-  function findProduct(line: string) {
-    const cleaned = line.trim().toLowerCase();
-
-    const byNumber = data.products.find((p) =>
-      p.productNumber && cleaned.includes(String(p.productNumber).toLowerCase())
-    );
-
-    if (byNumber) return byNumber;
-
-    return data.products.find((p) =>
-      cleaned.includes(p.name.toLowerCase())
-    );
-  }
-
-  function parseWebshopOrder() {
-    const text = rawText;
-    const lines = text
-      .split(/\n/)
-      .map((x) => x.trim())
-      .filter(Boolean);
-
-    const orderNumberMatch = text.match(/(?:Bestilling|Ordre|Order)\s*#?\s*(\d{4,})/i) || text.match(/\b(\d{5,})\b/);
-    const orderNumber = orderNumberMatch?.[1] || String(Date.now());
-
-    const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-
-let phoneMatch = "";
-
-if (emailMatch?.index !== undefined) {
-  const afterEmail = text.slice(emailMatch.index + emailMatch[0].length);
-
-  phoneMatch =
-    afterEmail.match(/(?:\+47\s*)?\b\d{2}\s*\d{2}\s*\d{2}\s*\d{2}\b/)?.[0] || "";
-}
-
-if (!phoneMatch) {
-  phoneMatch =
-    text.match(/Mottakers telefon:\s*((?:\+47\s*)?\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/i)?.[1] || "";
-}
-
-    const deliveryMatch = text.match(/Tidspunkt:\s*(.+)/i);
-const dateInfo = parseNorwegianDate(
-  deliveryMatch?.[1] || text
-);
-
-    let customer = "";
-
-    const customerInfoIndex = lines.findIndex((l) => /kundeinformasjon/i.test(l));
-    if (customerInfoIndex >= 0 && lines[customerInfoIndex + 1]) {
-      customer = lines[customerInfoIndex + 1];
-    }
-
-    if (!customer) {
-      const orderHeader = lines.find((l) => /\d+\s*\/\s*/.test(l));
-      customer = orderHeader?.split("/")[1]?.trim() || "";
-    }
-
-    const nextUnmatched: string[] = [];
-
-    const orderLines: OrderLine[] = [];
-
-for (let i = 0; i < lines.length; i++) {
-  const productCodeMatch = lines[i].match(/^([A-ZÆØÅ]{1,4}\d{3,})$/i);
-  if (!productCodeMatch) continue;
-
-  const productCode = productCodeMatch[1];
-
-  const product = data.products.find(
-    (p) => p.productNumber?.toLowerCase() === productCode.toLowerCase()
-  );
-
-  if (!product) {
-    nextUnmatched.push(lines[i]);
-    continue;
-  }
-
-  const nextLines = [
-    lines[i + 1] || "",
-    lines[i + 2] || "",
-    lines[i + 3] || "",
-  ];
-
-  const combined = nextLines.join(" ");
-
-  const quantityMatch = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
-
-  const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
-
-  orderLines.push({
-    productId: product.id,
-    quantity,
-  });
-}
-
-    const uniqueLines = Object.values(
-  orderLines.reduce((acc, line) => {
-    if (!acc[line.productId] || line.quantity > acc[line.productId].quantity) {
-      acc[line.productId] = line;
-    }
-    return acc;
-  }, {} as Record<string, OrderLine>)
-);
-
-    lines.forEach((line) => {
-      const looksLikeProductLine =
-        /\d+/.test(line) &&
-        !/telefon|mva|total|sum|pris|bestilling|ordre|dato|butikk|kunde|hent/i.test(line);
-
-      if (looksLikeProductLine && !findProduct(line)) {
-        nextUnmatched.push(line);
-      }
-    });
-
-   const paymentInfo =
-  text.match(/Betalingsinformasjon\s*([\s\S]*?)(?:Leveringinformasjon|Leveringsinformasjon|Tidspunkt:|Produkt|$)/i)?.[1]?.trim() ||
-  "";
-
-const deliveryAddress =
-  text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
-  (text.match(/Butikk:\s*Brødrene Berbusmel/i)
-    ? "Hentes i butikk"
-    : "");
-
-    const note = [
-  text.match(/Melding til sjåfør:\s*([\s\S]*)/i)?.[1]?.trim() || "",
-  nextUnmatched.length
-    ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
-    : "",
-].filter(Boolean).join("\n\n");
-
-    const nextOrder: Order = {
-      id: `webshop-${orderNumber}-${Date.now()}`,
-      type: "bakeri",
-      customerType: "privat",
-      customer: customer || "Webshopkunde",
-      companyName: "",
-      orgNumber: "",
-      companyAddress: "",
-      phone: phoneMatch ? normalizePhone(phoneMatch) : "",
-      paymentInfo,
-      deliveryAddress,
-      date: dateInfo.date,
-      time: dateInfo.time,
-      note,
-      guests: 1,
-      productId: uniqueLines[0]?.productId || data.products[0]?.id || "",
-      orderLines: uniqueLines,
-      discountPercent: 0,
-      isRecurring: false,
-      recurringDays: [],
-      recurringNote: [
-  `Importert fra webshop. Ordrenr: ${orderNumber}`,
-  nextUnmatched.length
-    ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
-    : "",
-].filter(Boolean).join("\n\n"),
-      allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
-      dietVegan: "0",
-      dietVegetarian: "0",
-      dietPregnant: "0",
-      dietOther: "",
-    };
-
-    setPreview(nextOrder);
-    setUnmatched(nextUnmatched);
-  }
-
-  function createOrder() {
-    if (!preview) return;
-    if (!preview.orderLines.length) {
-      return alert("Fant ingen produktlinjer. Sjekk at produktnavn eller varenummer finnes i Misemetrics.");
-    }
-
-    updateData({
-      orders: [preview, ...data.orders],
-    });
-
-    alert("Webshopordre opprettet.");
-    setTab("orders");
-  }
-
-  return (
-    <section className="card">
-      <h2>Importer webshopordre</h2>
-      <p style={{ color: "#64748b" }}>
-        Lim inn tekst fra ordrebekreftelsen. Systemet forsøker å matche mot produktnummer først, deretter produktnavn.
-      </p>
-
-      <textarea
-        className="textarea"
-        value={rawText}
-        onChange={(e) => setRawText(e.target.value)}
-        placeholder="Lim inn e-posttekst her..."
-        style={{ minHeight: 240 }}
-      />
-
-      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-        <button className="btn active" onClick={parseWebshopOrder}>
-          Les ordre
-        </button>
-        <button className="btn" onClick={() => setRawText("")}>
-          Tøm
-        </button>
-      </div>
-
-      {preview && (
-        <div className="soft-box" style={{ marginTop: 18 }}>
-          <h3>Forhåndsvisning</h3>
-
-          <p><b>Kunde:</b> {preview.customer}</p>
-          <p><b>Telefon:</b> {preview.phone || "-"}</p>
-          <p><b>Dato/tid:</b> {preview.date} {preview.time}</p>
-
-{preview.note && (
-  <p style={{ whiteSpace: "pre-wrap" }}>
-    <b>Notat:</b><br />
-    {preview.note}
-  </p>
-)}
-
-          <h4>Produkter</h4>
-          <table>
-            <thead>
-              <tr>
-                <th>Produkt</th>
-                <th>Antall</th>
-              </tr>
-            </thead>
-            <tbody>
-              {preview.orderLines.map((line, i) => {
-                const product = data.products.find((p) => p.id === line.productId);
-                return (
-                  <tr key={i}>
-                    <td>{product?.productNumber ? `${product.productNumber} · ` : ""}{product?.name || "Ukjent produkt"}</td>
-                    <td>{line.quantity}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {unmatched.length > 0 && (
-            <div style={{ marginTop: 12, color: "#991b1b" }}>
-              <b>Linjer som ikke ble matchet:</b>
-              <ul>
-                {unmatched.map((line, i) => <li key={i}>{line}</li>)}
-              </ul>
-            </div>
-          )}
-
-          <button className="btn active" onClick={createOrder}>
-            Opprett ordre
-          </button>
-        </div>
-      )}
-    </section>
-  );
-}
 function formatTimeInput(value: string) {
   const digits = value.replace(/[^0-9]/g, "");
   if (!digits) return "";
@@ -3343,31 +3034,33 @@ const lines = cleanText.split(/\n/).map((x) => x.trim()).filter(Boolean);
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
     // Telefon – hent fra "Telefon: +47..." linjen
-   const phoneMatch = text.match(/Telefon:\s*((?:\+47)?\s*\d[\d\s]{7,})/i)?.[1]?.replace(/\s+/g, "").replace(/^\+47/, "+47") || "";
+   const phoneRaw =
+  cleanText.match(/Telefon:\s*(\+?[\d\s]{8,})/i)?.[1]?.trim() ||
+  cleanText.match(/Kundeinformasjon[\s\S]*?(\+47\d{8,}|\+47\s*\d[\d\s]{7,})/i)?.[1]?.trim() || "";
+const phoneMatch = phoneRaw.replace(/\s+/g, "");
 
     // Dato og tid
     const deliveryMatch = text.match(/Når:\s*(.+)/i);
     const dateInfo = parseNorwegianDateGlobal(deliveryMatch?.[1] || text);
 
-    // Leveringsadresse
-    const deliveryAddress = text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() || "";
+    const deliveryAddress =
+  cleanText.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
+  cleanText.match(/Hentested:\s*(.+)/i)?.[1]?.trim() ||
+  "Hentes i butikk";
 
-    // Kundenavn
-    const nameMatch = text.match(/Navn:\s*(.+)/i);
-    let customer = nameMatch?.[1]?.trim() || "";
-    if (!customer) {
-      const idx = lines.findIndex((l) => /kundeinformasjon/i.test(l));
-      if (idx >= 0 && lines[idx + 1]) customer = lines[idx + 1];
-    }
-
-    // Bedriftsnavn (hvis finnes etter slash)
-    let companyName = "";
-    const orderHeader = lines.find((l) => /\d{4,}\s*\//.test(l));
-    if (orderHeader) {
-      const parts = orderHeader.split("/").map((x) => x.trim());
-      if (!customer) customer = parts[1] || "";
-      companyName = parts[2] || "";
-    }
+   let customer = cleanText.match(/Navn:\s*(.+)/i)?.[1]?.trim() || "";
+let companyName = "";
+const idx = lines.findIndex((l) => /kundeinformasjon/i.test(l));
+if (idx >= 0) {
+  const line1 = lines[idx + 1] || "";
+  const line2 = lines[idx + 2] || "";
+  if (line1 && line1 === line1.toUpperCase() && line1.length > 3) {
+    companyName = line1;
+    if (!customer) customer = line2;
+  } else {
+    if (!customer) customer = line1;
+  }
+}
 
     // Beskjed til sjåfør / notat
     const driverNote = text.match(/Beskjed til sjåfør:\s*([\s\S]*?)(?:\n\n|\nKundeinformasjon|\nHusk)/i)?.[1]?.trim() || "";
