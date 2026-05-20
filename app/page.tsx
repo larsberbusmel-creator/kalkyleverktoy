@@ -3473,9 +3473,11 @@ ${prodSection}
             {showWebshopImport ? "Lukk webshopimport" : "Importer fra webshop"}
           </button>
           <button className="btn" onClick={() => {
-  window.open("webcal://" + window.location.host + "/api/calendar", "_blank");
+  const url = `https://${window.location.host}/api/calendar`;
+  navigator.clipboard.writeText(url);
+  alert(`Kalender-URL kopiert!\n\n${url}\n\nLim inn i kalenderappen din under "Abonner fra nett".`);
 }}>
-  📅 Abonner på kalender
+  📅 Kopier kalender-URL
 </button>
           <button className="btn active" onClick={() => { setShowNewOrder(!showNewOrder); setShowWebshopImport(false); }}>
             {showNewOrder ? "Skjul skjema" : "Ny ordre"}
