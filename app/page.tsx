@@ -3401,20 +3401,20 @@ const paymentInfo = erBetaltPaaNett
       // Format e-post: produktnavn på linje i+1, antall på linje i+2
       // Format gammel: antall+pris kombinert på linje i+1
       let quantity = 1;
-const nextFive = lines.slice(i + 1, i + 6);
+const nextFive = lines.slice(i + 1, i + 6).map((l) => l.trim());
 for (let j = 0; j < nextFive.length; j++) {
-  // Linje med kun tall (med eller uten mellomrom)
-  const onlyNumber = nextFive[j].match(/^\s*(\d+)\s*$/);
-  if (onlyNumber) {
-    quantity = Number(onlyNumber[1]);
+  // Kun tall på linjen (med eller uten mellomrom)
+  if (/^\d+$/.test(nextFive[j])) {
+    quantity = Number(nextFive[j]);
     break;
   }
+  // Stopp hvis vi treffer neste produktkode
+  if (/^[A-ZÆØÅ]{1,4}\d{3,}$/i.test(nextFive[j])) break;
 }
-// Fallback: gammel format "10 195,00 kr"
 if (quantity === 1) {
-  const combined = lines.slice(i + 1, i + 6).join(" ");
-  const oldFormat = combined.match(/\b(\d+)\s+\d+[,.]?\d*\s*kr/i);
-  if (oldFormat) quantity = Number(oldFormat[1]);
+  const combined = nextFive.join(" ");
+  const oldFormat = combined.match(/\b(\d+)\s+\d+[,.]?\d*/i);
+  if (oldFormat && Number(oldFormat[1]) > 0) quantity = Number(oldFormat[1]);
 }
 
       orderLines.push({ productId: product.id, quantity });
