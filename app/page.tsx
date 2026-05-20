@@ -3472,6 +3472,11 @@ ${prodSection}
           <button className="btn" onClick={() => { setShowWebshopImport(!showWebshopImport); setShowNewOrder(false); }}>
             {showWebshopImport ? "Lukk webshopimport" : "Importer fra webshop"}
           </button>
+          <button className="btn" onClick={() => {
+  window.open("webcal://" + window.location.host + "/api/calendar", "_blank");
+}}>
+  📅 Abonner på kalender
+</button>
           <button className="btn active" onClick={() => { setShowNewOrder(!showNewOrder); setShowWebshopImport(false); }}>
             {showNewOrder ? "Skjul skjema" : "Ny ordre"}
           </button>
