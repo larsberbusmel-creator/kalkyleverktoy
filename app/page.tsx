@@ -3332,7 +3332,11 @@ function OrdersTab({ data, updateData, productAllergens }: {
 
   function parseWebshopOrder() {
     const text = webshopRawText;
-    const lines = text.split(/\n/).map((x) => x.trim()).filter(Boolean);
+const cleanText = text
+  .replace(/https?:\/\/[^\s\]]+/g, "")
+  .replace(/\[[\s]*\]/g, "");
+
+const lines = cleanText.split(/\n/).map((x) => x.trim()).filter(Boolean);
 
     // Ordrenummer
     const orderNumberMatch = text.match(/Bestilling\s+(\d{4,})/i) || text.match(/\b(\d{6,})\b/);
