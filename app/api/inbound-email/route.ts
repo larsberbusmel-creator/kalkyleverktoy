@@ -49,12 +49,15 @@ export async function POST(req: NextRequest) {
     const result = parseWebshopEmail(textBody, appData.products);
 
     if (!result) {
-      console.warn(`Ingen produkter matchet. Fra: ${from}, Emne: ${subject}`);
-      return NextResponse.json({
-        ok: false,
-        message: "Ingen produkter matchet – ordre ikke opprettet",
-      });
-    }
+  console.warn(`Ingen produkter matchet. Fra: ${from}, Emne: ${subject}`);
+  console.warn(`Produkter i databasen: ${appData.products.map((p) => p.productNumber).join(", ")}`);
+  console.warn(`TextBody (første 500 tegn): ${textBody.slice(0, 500)}`);
+  return NextResponse.json({
+    ok: false,
+    message: "Ingen produkter matchet – ordre ikke opprettet",
+    produkterIDatabase: appData.products.map((p) => p.productNumber),
+  });
+}
 
     const { order, unmatched } = result;
 
