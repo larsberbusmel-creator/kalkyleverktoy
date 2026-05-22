@@ -65,22 +65,24 @@ export async function GET() {
       ? `DTEND:${addMinutes(o.date, o.time, 30)}`
       : `DTEND;VALUE=DATE:${toIcalDate(o.date, "")}`;
 
-    const description = [
-      o.phone ? `Telefon: ${o.phone}` : "",
-      o.deliveryAddress ? `Levering: ${o.deliveryAddress}` : "",
-      o.paymentInfo ? `Betaling: ${o.paymentInfo}` : "",
-      o.note ? `Notat: ${o.note}` : "",
-      o.orderNumber ? `Ordrenr: ${o.orderNumber}` : "",
-    ].filter(Boolean).join("\\n");
+    const companyPart = o.companyName && o.companyName !== customerName
+  ? ` (${o.companyName})`
+  : "";
+const summary = `${customerName}${companyPart}`;
 
-    return [
-      "BEGIN:VEVENT",
-      `UID:misemetrics-${o.id}@berbusmel.no`,
-      `DTSTAMP:${now}`,
-      dtstart,
-      dtend,
-      `SUMMARY:${escapeIcal(`${customerName} – ${productNames}`)}`,
-      `DESCRIPTION:${escapeIcal(description)}`,
+const description = [
+  o.orderNumber ? `Ordrenr: ${o.orderNumber}` : "",
+  productNames,
+  o.phone ? `Tlf: ${o.phone}` : "",
+  o.deliveryAddress ? `Levering: ${o.deliveryAddress}` : "",
+  o.paymentInfo ? `Betaling: ${o.paymentInfo}` : "",
+  o.note ? `Notat: ${o.note}` : "",
+].filter(Boolean).join("\\n");
+
+return [
+  ...
+  `SUMMARY:${escapeIcal(summary)}`,
+  `DESCRIPTION:${escapeIcal(description)}`,
       o.deliveryAddress ? `LOCATION:${escapeIcal(o.deliveryAddress)}` : "",
       "END:VEVENT",
     ].filter(Boolean).join("\r\n");
