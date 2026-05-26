@@ -57,13 +57,16 @@ function today(): string {
 
 function parseNorwegianDate(text: string): { date: string; time: string } {
   const months: Record<string, string> = {
-    januar: "01", februar: "02", mars: "03", april: "04",
-    mai: "05", juni: "06", juli: "07", august: "08",
-    september: "09", oktober: "10", november: "11", desember: "12",
-  };
+  januar: "01", februar: "02", mars: "03", april: "04", mai: "05", juni: "06",
+  juli: "07", august: "08", september: "09", oktober: "10", november: "11", desember: "12",
+  jan: "01", feb: "02", mar: "03", apr: "04", jun: "06",
+  jul: "07", aug: "08", sep: "09", okt: "10", nov: "11", des: "12",
+  "jan.": "01", "feb.": "02", "mar.": "03", "apr.": "04", "jun.": "06",
+  "jul.": "07", "aug.": "08", "sep.": "09", "okt.": "10", "nov.": "11", "des.": "12",
+};
 
   const match = text.match(
-    /(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå]+)\s+(\d{1,2}:\d{2})/i
+    /(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå.]+)\s+(\d{1,2}:\d{2})/i
   );
 
   if (!match) return { date: today(), time: "" };
