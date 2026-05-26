@@ -2980,7 +2980,7 @@ const months: Record<string, string> = {
   "jan.": "01", "feb.": "02", "mar.": "03", "apr.": "04", "jun.": "06",
   "jul.": "07", "aug.": "08", "sep.": "09", "okt.": "10", "nov.": "11", "des.": "12",
 };
-  };
+
   const match = text.match(/(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå.]+)\s+(\d{1,2}:\d{2})/i);
   if (!match) return { date: today(), time: "" };
   const day = match[1].padStart(2, "0");
