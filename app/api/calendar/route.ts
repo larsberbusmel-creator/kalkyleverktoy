@@ -2,11 +2,6 @@ export const dynamic = "force-dynamic";
 
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 function escapeIcal(str: string) {
   return (str || "")
     .replace(/\\/g, "\\\\")
@@ -36,6 +31,11 @@ function addMinutes(date: string, time: string, minutes: number) {
 }
 
 export async function GET() {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   const { data: row } = await supabase
     .from("app_data")
     .select("data")
@@ -66,23 +66,27 @@ export async function GET() {
       : `DTEND;VALUE=DATE:${toIcalDate(o.date, "")}`;
 
     const companyPart = o.companyName && o.companyName !== customerName
-  ? ` (${o.companyName})`
-  : "";
-const summary = `${customerName}${companyPart}`;
+      ? ` (${o.companyName})`
+      : "";
+    const summary = `${customerName}${companyPart}`;
 
-const description = [
-  o.orderNumber ? `Ordrenr: ${o.orderNumber}` : "",
-  productNames,
-  o.phone ? `Tlf: ${o.phone}` : "",
-  o.deliveryAddress ? `Levering: ${o.deliveryAddress}` : "",
-  o.paymentInfo ? `Betaling: ${o.paymentInfo}` : "",
-  o.note ? `Notat: ${o.note}` : "",
-].filter(Boolean).join("\\n");
+    const description = [
+      o.orderNumber ? `Ordrenr: ${o.orderNumber}` : "",
+      productNames,
+      o.phone ? `Tlf: ${o.phone}` : "",
+      o.deliveryAddress ? `Levering: ${o.deliveryAddress}` : "",
+      o.paymentInfo ? `Betaling: ${o.paymentInfo}` : "",
+      o.note ? `Notat: ${o.note}` : "",
+    ].filter(Boolean).join("\\n");
 
-return [
-  ...
-  `SUMMARY:${escapeIcal(summary)}`,
-  `DESCRIPTION:${escapeIcal(description)}`,
+    return [
+      "BEGIN:VEVENT",
+      `UID:misemetrics-${o.id}@berbusmel.no`,
+      `DTSTAMP:${now}`,
+      dtstart,
+      dtend,
+      `SUMMARY:${escapeIcal(summary)}`,
+      `DESCRIPTION:${escapeIcal(description)}`,
       o.deliveryAddress ? `LOCATION:${escapeIcal(o.deliveryAddress)}` : "",
       "END:VEVENT",
     ].filter(Boolean).join("\r\n");

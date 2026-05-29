@@ -4783,7 +4783,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
   const waste = currentInventory.waste || {};
   const isLocked = !!currentInventory.locked;
 
-  const accountingBuckets = ["Mat", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
+  const accountingBuckets = ["Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
   const internalBuckets = ["Alle", "Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
   const statsBuckets = ["Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
   const drinkBuckets = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
@@ -4854,20 +4854,32 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleMaterials = filtered.slice((inventoryPage - 1) * pageSize, inventoryPage * pageSize);
 
-  function exportInventoryCsv() {
-    const rows: string[][] = [];
-    rows.push([`Varetelling ${inventoryMonth}`]);
-    rows.push([]);
-    rows.push(["Kategori", "Vare", "Råvarekost pr pk", "Pakning", "Pakker", "Løs", "Verdi"]);
+  function exportInventoryXlsx() {
+  import("xlsx").then((XLSX) => {
+    const wb = XLSX.utils.book_new();
+    const wsData: any[][] = [];
 
-    accountingBuckets.forEach((bucket) => {
-      const materials = data.materials.filter((m) => belongsToBucket(m, bucket)).sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
-      rows.push([]);
-      rows.push([bucket.toUpperCase(), "", "", "", "", "", ""]);
+    // Tittelrad
+    wsData.push([`Varetelling ${inventoryMonth}`]);
+    wsData.push([]);
+    wsData.push(["Kategori", "Vare", "Råvarekost pr pk", "Pakning", "Pakker", "Løs", "Verdi", "Tell her →", ""]);
+
+    const buckets = ["Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
+
+    buckets.forEach((bucket) => {
+      const materials = data.materials
+        .filter((m) => belongsToBucket(m, bucket))
+        .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
+
+      if (materials.length === 0) return;
+
+      wsData.push([]); // tom rad
+      wsData.push([bucket.toUpperCase()]); // kategoriheader
+
       materials.forEach((m) => {
         const c = counts[m.id] || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
         const value = materialInventoryValue(m);
-        rows.push([
+        wsData.push([
           bucket,
           m.name,
           String(m.packagePrice).replace(".", ","),
@@ -4875,33 +4887,28 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
           String(c.packages || "").replace(".", ","),
           String(c.loose || "").replace(".", ","),
           value.toFixed(2).replace(".", ","),
+          "", // Tell her-kolonne (tom)
         ]);
       });
-      rows.push([`SUM ${bucket}`, "", "", "", "", "", bucketValue(bucket).toFixed(2).replace(".", ",")]);
-      rows.push([`SVINN ${bucket}`, "", "", "", "", "", String(waste[bucket] || 0).replace(".", ",")]);
+
+      wsData.push([`SUM ${bucket}`, "", "", "", "", "", bucketValue(bucket).toFixed(2).replace(".", ",")]);
     });
 
-    rows.push([]);
-    rows.push(["TOTAL", "", "", "", "", "", total.toFixed(2).replace(".", ",")]);
+    wsData.push([]);
+    wsData.push(["TOTAL", "", "", "", "", "", total.toFixed(2).replace(".", ",")]);
 
-    const csv = rows
-      .map((row) =>
-        row
-          .map((cell) => JSON.stringify(String(cell ?? "")))
-          .join(";")
-      )
-      .join(String.fromCharCode(10));
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-    const blob = new Blob([String.fromCharCode(0xfeff) + csv], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `varetelling-${inventoryMonth}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+    // Kolonnebredder
+    ws["!cols"] = [
+      { wch: 14 }, { wch: 32 }, { wch: 18 }, { wch: 14 },
+      { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 16 },
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Varetelling");
+    XLSX.writeFile(wb, `varetelling-${inventoryMonth}.xlsx`);
+  });
+}
 
   function valueForBucketInMonth(monthKey: string, bucket: string) {
     const monthData = countsByMonth[monthKey];
@@ -4958,7 +4965,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
       {showInventoryStats && <div className="soft-box"><h3>Grafisk statistikk måned for måned</h3><p style={{ color: "#64748b" }}>Oversikt over total varebeholdning og fordeling per kategori.</p><div className="inventory-chart">{inventoryHistory.map((h) => <div key={h.monthKey} className="inventory-month"><div className="between"><b>{h.monthKey}</b><b>{currency(h.total)}</b></div><div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.max(4, (h.total / maxInventoryValue) * 100)}%` }} /></div><div className="inventory-breakdown">{statsBuckets.map((bucket) => { const value = valueForBucketInMonth(h.monthKey, bucket); return <div key={bucket} className="breakdown-row"><span>{bucket}</span><span>{currency(value)}</span></div>; })}</div></div>)}</div></div>}
 
       <button className="btn" onClick={() => updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: !isLocked, items: counts } } })}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>
-      <button className="btn active" onClick={exportInventoryCsv}>Eksporter CSV</button>
+      <button className="btn active" onClick={exportInventoryXlsx}>Eksporter XLSX</button>
 
       <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); }} placeholder="Søk råvare" />
 
