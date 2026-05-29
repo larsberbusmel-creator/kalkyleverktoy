@@ -4854,60 +4854,129 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleMaterials = filtered.slice((inventoryPage - 1) * pageSize, inventoryPage * pageSize);
 
-  function exportInventoryXlsx() {
-  import("xlsx").then((XLSX) => {
-    const wb = XLSX.utils.book_new();
-    const wsData: any[][] = [];
+ async function exportInventoryXlsx() {
+  const ExcelJS = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
 
-    // Tittelrad
-    wsData.push([`Varetelling ${inventoryMonth}`]);
-    wsData.push([]);
-    wsData.push(["Kategori", "Vare", "Råvarekost pr pk", "Pakning", "Pakker", "Løs", "Verdi", "Tell her →", ""]);
+  const buckets = ["Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
 
-    const buckets = ["Mat", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
+  const bucketColors: Record<string, string> = {
+    "Mat": "4CAF50",
+    "Deli": "2196F3",
+    "Mineralvann": "00BCD4",
+    "Kaffe/te": "795548",
+    "Vin": "9C27B0",
+    "Øl": "FF9800",
+    "Cider": "CDDC39",
+    "Brennevin": "F44336",
+  };
 
-    buckets.forEach((bucket) => {
-      const materials = data.materials
-        .filter((m) => belongsToBucket(m, bucket))
-        .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
+  buckets.forEach((bucket) => {
+    const materials = data.materials
+      .filter((m) => belongsToBucket(m, bucket))
+      .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
 
-      if (materials.length === 0) return;
+    if (materials.length === 0) return;
 
-      wsData.push([]); // tom rad
-      wsData.push([bucket.toUpperCase()]); // kategoriheader
-
-      materials.forEach((m) => {
-        const c = counts[m.id] || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
-        const value = materialInventoryValue(m);
-        wsData.push([
-          bucket,
-          m.name,
-          String(m.packagePrice).replace(".", ","),
-          `${m.packageSize} ${m.unit}`,
-          String(c.packages || "").replace(".", ","),
-          String(c.loose || "").replace(".", ","),
-          value.toFixed(2).replace(".", ","),
-          "", // Tell her-kolonne (tom)
-        ]);
-      });
-
-      wsData.push([`SUM ${bucket}`, "", "", "", "", "", bucketValue(bucket).toFixed(2).replace(".", ",")]);
-    });
-
-    wsData.push([]);
-    wsData.push(["TOTAL", "", "", "", "", "", total.toFixed(2).replace(".", ",")]);
-
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const ws = wb.addWorksheet(bucket);
+    const color = bucketColors[bucket] || "607D8B";
 
     // Kolonnebredder
-    ws["!cols"] = [
-      { wch: 14 }, { wch: 32 }, { wch: 18 }, { wch: 14 },
-      { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 16 },
+    ws.columns = [
+      { width: 32 }, // Vare
+      { width: 18 }, // Råvarekost
+      { width: 14 }, // Pakning
+      { width: 10 }, // Pakker
+      { width: 10 }, // Løs
+      { width: 14 }, // Verdi
+      { width: 16 }, // Tell her
     ];
 
-    XLSX.utils.book_append_sheet(wb, ws, "Varetelling");
-    XLSX.writeFile(wb, `varetelling-${inventoryMonth}.xlsx`);
+    // Tittelrad
+    const titleRow = ws.addRow([`Varetelling ${inventoryMonth} – ${bucket}`]);
+    ws.mergeCells(`A1:G1`);
+    titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
+    titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+    titleRow.height = 28;
+
+    ws.addRow([]); // tom rad
+
+    // Kolonneoverskrifter
+    const headerRow = ws.addRow(["Vare", "Råvarekost pr pk", "Pakning", "Pakker", "Løs", "Verdi", "Tell her →"]);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
+      cell.border = {
+        top: { style: "thin" }, bottom: { style: "thin" },
+        left: { style: "thin" }, right: { style: "thin" },
+      };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    // Varelinjer
+    materials.forEach((m) => {
+      const c = counts[m.id] || { packages: 0, loose: 0 };
+      const value = materialInventoryValue(m);
+      const row = ws.addRow([
+        m.name,
+        m.packagePrice,
+        `${m.packageSize} ${m.unit}`,
+        c.packages || "",
+        c.loose || "",
+        value,
+        "",
+      ]);
+      row.eachCell((cell, colNumber) => {
+        cell.border = {
+          top: { style: "hair" }, bottom: { style: "hair" },
+          left: { style: "thin" }, right: { style: "thin" },
+        };
+        if (colNumber === 2 || colNumber === 6) {
+          cell.numFmt = "#,##0.00";
+        }
+      });
+    });
+
+    // SUM-rad
+    const lastDataRow = ws.rowCount;
+    const sumRow = ws.addRow([
+      `SUM ${bucket}`,
+      "",
+      "",
+      "",
+      "",
+      bucketValue(bucket),
+      "",
+    ]);
+    sumRow.eachCell((cell, colNumber) => {
+      cell.font = { bold: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `22${color}` } };
+      cell.border = {
+        top: { style: "medium" }, bottom: { style: "medium" },
+        left: { style: "medium" }, right: { style: "medium" },
+      };
+      if (colNumber === 6) cell.numFmt = "#,##0.00";
+    });
+
+    // Tykk border rundt hele blokken
+    const firstDataRow = 3;
+    for (let r = firstDataRow; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      row.getCell(1).border = { ...row.getCell(1).border, left: { style: "medium" } };
+      row.getCell(7).border = { ...row.getCell(7).border, right: { style: "medium" } };
+    }
   });
+
+  // Last ned
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `varetelling-${inventoryMonth}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
   function valueForBucketInMonth(monthKey: string, bucket: string) {
