@@ -4871,6 +4871,16 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
     "Brennevin": "F44336",
   };
 
+const sheetNames: Record<string, string> = {
+  "Mat": "Mat",
+  "Deli": "Deli",
+  "Mineralvann": "Mineralvann",
+  "Kaffe/te": "Kaffe-te",
+  "Vin": "Vin",
+  "Øl": "Øl",
+  "Cider": "Cider",
+  "Brennevin": "Brennevin",
+};
   buckets.forEach((bucket) => {
     const materials = data.materials
       .filter((m) => belongsToBucket(m, bucket))
@@ -4878,7 +4888,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
     if (materials.length === 0) return;
 
-    const ws = wb.addWorksheet(bucket);
+    const ws = wb.addWorksheet(sheetNames[bucket] || bucket);
     const color = bucketColors[bucket] || "607D8B";
 
     // Kolonnebredder
