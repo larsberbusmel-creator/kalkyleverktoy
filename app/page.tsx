@@ -5334,7 +5334,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     wsWaste.columns = [{ width: 35 }, { width: 20 }, { width: 20 }];
 
     const wasteTitleRow = wsWaste.addRow([`Svinn – ${inventoryMonth}`]);
-    ws.mergeCells(1, 1, 1, 3);
+    wsWaste.mergeCells(1, 1, 1, 3);
     wasteTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
     wasteTitleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } };
     wasteTitleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
