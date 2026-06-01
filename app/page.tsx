@@ -483,44 +483,6 @@ export default function Page() {
   useEffect(() => {
   async function loadData() {
     const { data: authData } = await supabase.auth.getSession();
-
-if (!authData.session) {
-  window.location.href = "/login";
-  return;
-}
-    const { data: row, error } = await supabase
-      .from("app_data")
-      .select("data")
-      .eq("id", "main")
-      .single();
-
-    if (error) {
-      console.error("Supabase load error:", error);
-
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try {
-          setData(migrateData(JSON.parse(saved)));
-        } catch {
-          setData(initialData);
-        }
-      }
-
-      setIsLoaded(true);
-      return;
-    }
-
-    if (row?.data) {
-      setData(migrateData(row.data));
-    }
-
-    setIsLoaded(true);
-  }
-
-  loadData();
-  useEffect(() => {
-  async function loadData() {
-    const { data: authData } = await supabase.auth.getSession();
     if (!authData.session) {
       window.location.href = "/login";
       return;
@@ -548,7 +510,6 @@ if (!authData.session) {
 
   loadData();
 
-  // Realtime-abonnement
   const channel = supabase
     .channel("app_data_changes")
     .on(
@@ -565,7 +526,6 @@ if (!authData.session) {
   return () => {
     supabase.removeChannel(channel);
   };
-}, []);
 }, []);
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
