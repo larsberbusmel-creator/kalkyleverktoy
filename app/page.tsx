@@ -91,8 +91,9 @@ type Product = {
   targetMargin: number;
   lines: ProductLine[];
   packaging: ProductPackagingLine[];
-   recipeYieldAmount?: number;
-  unitWeightKg?: number;     
+  recipeYieldAmount?: number;
+  unitWeightKg?: number;
+  unitsPerCase?: number;
 };
 
 
@@ -734,7 +735,7 @@ function productCost(product: Product, visited: string[] = []) {
     updateData={updateData}
   />
 )}
-        {tab === "inventory" && <InventoryTab data={data} updateData={updateData} />}
+        {tab === "inventory" && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} />}
         {tab === "rental" && <RentalTab data={data} updateData={updateData} />}
         {tab === "settings" && (
   <SettingsTab
@@ -1647,6 +1648,7 @@ unitWeightKg: "1",
   customerPrice: "0",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
+  unitsPerCase: "",
 });  const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
   const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
 const [line, setLine] = useState<{
@@ -1714,6 +1716,7 @@ productNumber: form.productNumber || getNextProductNumber(form.category),    nam
     packaging: draftPackaging,
     recipeYieldAmount: calculatedRecipeYieldAmount(draftLines) || 1,
 unitWeightKg: Number(form.unitWeightKg) || 0,
+  unitsPerCase: Number(form.unitsPerCase) || undefined,
   };
 
   const activeProduct = mode === "view" ? selected : draftProduct;
@@ -1740,6 +1743,7 @@ unitWeightKg: "1",
   customerPrice: "0",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
+  unitsPerCase: "",
 });    setDraftLines([]);
     setDraftPackaging([]);
     setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg", wastePercent: "" });
@@ -1806,6 +1810,7 @@ unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
       customerPrice: String(p.customerPrice || 0),
       storkjokkenPriceExVat: String(p.storkjokkenPriceExVat || ""),
       targetMargin: String(p.targetMargin || 70),
+      unitsPerCase: String(p.unitsPerCase || ""),
     });
     setDraftLines(p.lines.map((l) => ({ ...l })));
     setDraftPackaging(p.packaging.map((x) => ({ ...x })));
@@ -1867,6 +1872,7 @@ unitWeightKg: "1",
     customerPrice: String(copy.customerPrice || 0),
     storkjokkenPriceExVat: String(copy.storkjokkenPriceExVat || ""),
     targetMargin: String(copy.targetMargin || 70),
+    unitsPerCase: String(copy.unitsPerCase || ""),
   });
 
   setDraftLines(copy.lines.map((l) => ({ ...l })));
@@ -2522,6 +2528,17 @@ th{background:#f3f4f6}
       <option value="liter">liter</option>
     </select>
   </label>
+
+{["Kjøkken, egenprodusert", "Bakeri, egenprodusert"].includes(form.category) && (
+    <label>Antall per eske
+      <input
+        type="number"
+        value={form.unitsPerCase}
+        onChange={(e) => setForm({ ...form, unitsPerCase: e.target.value })}
+        placeholder="F.eks. 12"
+      />
+    </label>
+  )}
 
   {form.type === "pasmuurt" && (
     <label>Deles på antall porsjoner
@@ -4781,7 +4798,7 @@ ${orderPages}`;
   );
 }
 
-function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
+function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number }) {
   const currentYm = new Date().toISOString().slice(0, 7);
   const [inventoryMonth, setInventoryMonth] = useState(currentYm);
   const [inventorySearch, setInventorySearch] = useState("");
@@ -4810,6 +4827,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
     "Brennevin":              ["Lager"],
   };
 
+  const egenprodusertCategories = ["Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
   const drinkBuckets = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
   const matSubBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder"];
   const accountingBuckets = [...matSubBuckets, "Deli", ...drinkBuckets];
@@ -4824,11 +4842,12 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
   const [year, month] = inventoryMonth.split("-");
 
+  // ── Råvare-funksjoner ─────────────────────────────────────────────────────
+
   function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
     const item = counts[materialId] as any;
     if (!item) return { packages: 0, loose: 0 };
     if (item.locations?.[location]) return item.locations[location];
-    // Bakoverkompatibilitet: hvis ingen locations, bruk gamle packages/loose på første sted
     return { packages: 0, loose: 0 };
   }
 
@@ -4837,11 +4856,8 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
     const existing = (counts[materialId] as any) || {};
     const existingLocations = existing.locations || {};
     const newLocations = { ...existingLocations, [location]: { packages, loose } };
-
-    // Summer alle steder for total packages/loose (bakoverkompatibilitet)
     const totalPackages = Object.values(newLocations).reduce((s: number, l: any) => s + (l.packages || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-
     updateData({
       inventoryCounts: {
         ...countsByMonth,
@@ -4868,6 +4884,59 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
     return c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit);
   }
 
+  // ── Egenprodusert-funksjoner ──────────────────────────────────────────────
+
+  function getProductCount(productId: string, location: string): { cases: number; loose: number } {
+    const key = `product_${productId}`;
+    const item = counts[key] as any;
+    if (!item) return { cases: 0, loose: 0 };
+    if (item.locations?.[location]) return item.locations[location];
+    return { cases: 0, loose: 0 };
+  }
+
+  function updateProductCount(product: Product, location: string, cases: number, loose: number) {
+    const key = `product_${product.id}`;
+    const existing = (counts[key] as any) || {};
+    const existingLocations = existing.locations || {};
+    const newLocations = { ...existingLocations, [location]: { cases, loose } };
+    const totalCases = Object.values(newLocations).reduce((s: number, l: any) => s + (l.cases || 0), 0);
+    const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
+    updateData({
+      inventoryCounts: {
+        ...countsByMonth,
+        [inventoryMonth]: {
+          ...currentInventory,
+          waste,
+          items: {
+            ...counts,
+            [key]: {
+              packages: totalCases,
+              loose: totalLoose,
+              packagePrice: 0,
+              pricePerUnit: 0,
+              locations: newLocations,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function productInventoryValue(product: Product, unitCost: number): number {
+    const key = `product_${product.id}`;
+    const c = counts[key] as any || { packages: 0, loose: 0 };
+    const unitsPerCase = Number(product.unitsPerCase || 1);
+    return (c.packages * unitsPerCase + c.loose) * unitCost;
+  }
+
+  function egenprodusertBucketValue(bucket: string): number {
+    return data.products
+      .filter((p) => p.category === bucket)
+      .reduce((sum, p) => sum + productInventoryValue(p, productUnitCost(p)), 0);
+  }
+
+  // ── Felles ───────────────────────────────────────────────────────────────
+
   function belongsToBucket(m: Material, bucket: string) {
     if (bucket === "Alle") return true;
     if (bucket === "Mat") return !drinkBuckets.includes(m.category) && m.category !== "Deli";
@@ -4876,6 +4945,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
   }
 
   function bucketValue(bucket: string) {
+    if (egenprodusertCategories.includes(bucket)) return egenprodusertBucketValue(bucket);
     return data.materials.reduce((sum, m) => belongsToBucket(m, bucket) ? sum + materialInventoryValue(m) : sum, 0);
   }
 
@@ -4892,11 +4962,14 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
     });
   }
 
-  const total = data.materials.reduce((sum, m) => sum + materialInventoryValue(m), 0);
+  const totalMaterials = data.materials.reduce((sum, m) => sum + materialInventoryValue(m), 0);
+  const totalEgenprodusert = egenprodusertCategories.reduce((sum, b) => sum + egenprodusertBucketValue(b), 0);
+  const total = totalMaterials + totalEgenprodusert;
 
   const filtered = data.materials
     .filter((m) => `${m.name} ${m.category}`.toLowerCase().includes(inventorySearch.toLowerCase()))
     .filter((m) => inventoryCategoryFilter === "Alle" ? true : belongsToBucket(m, inventoryCategoryFilter))
+    .filter((m) => !egenprodusertCategories.includes(m.category)) // råvarer i egenprodusert-kategorier vises ikke her
     .sort((a, b) => {
       const idxA = accountingBuckets.indexOf(a.category);
       const idxB = accountingBuckets.indexOf(b.category);
@@ -4906,18 +4979,30 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleMaterials = filtered.slice((inventoryPage - 1) * pageSize, inventoryPage * pageSize);
 
-  // Grupper synlige materialer per kategori for visning
-  const groupedMaterials = accountingBuckets.reduce((acc, bucket) => {
-    const items = visibleMaterials.filter((m) => belongsToBucket(m, bucket) && bucket !== "Mat" && bucket !== "Alle");
-    if (items.length > 0) acc[bucket] = items;
-    return acc;
-  }, {} as Record<string, Material[]>);
+  const groupedMaterials = accountingBuckets
+    .filter((b) => !egenprodusertCategories.includes(b))
+    .reduce((acc, bucket) => {
+      const items = visibleMaterials.filter((m) => belongsToBucket(m, bucket) && bucket !== "Mat" && bucket !== "Alle");
+      if (items.length > 0) acc[bucket] = items;
+      return acc;
+    }, {} as Record<string, Material[]>);
 
-  // Legg til "Mat" (ukategoriserte) hvis noen
   const uncategorized = visibleMaterials.filter((m) => !accountingBuckets.includes(m.category) && m.category !== "Deli" && !drinkBuckets.includes(m.category));
   if (uncategorized.length > 0) groupedMaterials["Mat (annet)"] = uncategorized;
 
   function valueForBucketInMonth(monthKey: string, bucket: string) {
+    if (egenprodusertCategories.includes(bucket)) {
+      const monthData = countsByMonth[monthKey];
+      const items = monthData?.items || {};
+      return data.products
+        .filter((p) => p.category === bucket)
+        .reduce((sum, p) => {
+          const key = `product_${p.id}`;
+          const c = items[key] as any || { packages: 0, loose: 0 };
+          const unitsPerCase = Number(p.unitsPerCase || 1);
+          return sum + (c.packages * unitsPerCase + c.loose) * productUnitCost(p);
+        }, 0);
+    }
     const monthData = countsByMonth[monthKey];
     const items = monthData?.items || {};
     return data.materials.reduce((sum, m) => {
@@ -4935,28 +5020,27 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
 
+  const bucketColors: Record<string, string> = {
+    "Mel og frø": "#f0fdf4", "Meieri": "#fefce8", "Kjøtt": "#fff1f2",
+    "Fisk": "#f0fdfa", "Grønt": "#f0fdf4", "Tørrvarer": "#fff7ed",
+    "Kjøkken, egenprodusert": "#fdf4ff", "Bakeri, egenprodusert": "#fff7ed",
+    "Frukt og grønt": "#f0fdf4", "Krydder": "#fdf2f8", "Deli": "#eff6ff",
+    "Mineralvann": "#f0fdfa", "Kaffe/te": "#fdf8f4", "Vin": "#faf5ff",
+    "Øl": "#fff7ed", "Cider": "#f7fee7", "Brennevin": "#fff1f2",
+    "Mat (annet)": "#f8fafc",
+  };
+
   async function exportInventoryXlsx() {
     const ExcelJS = await import("exceljs");
     const wb = new ExcelJS.Workbook();
 
-    const bucketColors: Record<string, string> = {
-      "Mel og frø":             "8BC34A",
-      "Meieri":                 "FFF176",
-      "Kjøtt":                  "EF9A9A",
-      "Fisk":                   "80DEEA",
-      "Grønt":                  "A5D6A7",
-      "Tørrvarer":              "FFCC80",
-      "Kjøkken, egenprodusert": "CE93D8",
-      "Bakeri, egenprodusert":  "FFAB91",
-      "Frukt og grønt":         "C8E6C9",
-      "Krydder":                "F8BBD0",
-      "Deli":                   "2196F3",
-      "Mineralvann":            "00BCD4",
-      "Kaffe/te":               "795548",
-      "Vin":                    "9C27B0",
-      "Øl":                     "FF9800",
-      "Cider":                  "CDDC39",
-      "Brennevin":              "F44336",
+    const xlsxColors: Record<string, string> = {
+      "Mel og frø": "8BC34A", "Meieri": "FFF176", "Kjøtt": "EF9A9A",
+      "Fisk": "80DEEA", "Grønt": "A5D6A7", "Tørrvarer": "FFCC80",
+      "Kjøkken, egenprodusert": "CE93D8", "Bakeri, egenprodusert": "FFAB91",
+      "Frukt og grønt": "C8E6C9", "Krydder": "F8BBD0", "Deli": "2196F3",
+      "Mineralvann": "00BCD4", "Kaffe/te": "795548", "Vin": "9C27B0",
+      "Øl": "FF9800", "Cider": "CDDC39", "Brennevin": "F44336",
     };
 
     const sheetNames: Record<string, string> = {
@@ -4965,45 +5049,30 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
       "Bakeri, egenprodusert": "Bakeri-egenprod",
     };
 
-    accountingBuckets.forEach((bucket) => {
+    // Vanlige råvare-ark
+    accountingBuckets.filter((b) => !egenprodusertCategories.includes(b)).forEach((bucket) => {
       const materials = data.materials
         .filter((m) => belongsToBucket(m, bucket) && bucket !== "Mat")
         .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
-
       if (materials.length === 0) return;
 
       const locations = categoryLocations[bucket] || ["Lager"];
       const sheetName = sheetNames[bucket] || bucket.slice(0, 31);
       const ws = wb.addWorksheet(sheetName);
-      const color = bucketColors[bucket] || "607D8B";
-
-      // Kolonnebredder: Vare, Råvarekost, Pakning, deretter 2 kolonner per sted, så Verdi
-      const cols: any[] = [
-        { width: 30 }, // Vare
-        { width: 14 }, // Råvarekost
-        { width: 12 }, // Pakning
-      ];
-      locations.forEach(() => {
-        cols.push({ width: 10 }); // Pakker
-        cols.push({ width: 10 }); // Løs
-      });
-      cols.push({ width: 14 }); // Verdi
-      ws.columns = cols;
-
-      // Tittelrad
+      const color = xlsxColors[bucket] || "607D8B";
       const totalCols = 3 + locations.length * 2 + 1;
+
+      ws.columns = [{ width: 30 }, { width: 14 }, { width: 12 }, ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]), { width: 14 }];
+
       const titleRow = ws.addRow([`Varetelling ${inventoryMonth} – ${bucket}`]);
       ws.mergeCells(1, 1, 1, totalCols);
       titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
       titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
       titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
       titleRow.height = 28;
+      ws.addRow([]);
 
-      ws.addRow([]); // tom rad
-
-      // Stedsoverskrifter (rad 3)
       const locationHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), ""]);
-      locationHeaderRow.getCell(1).value = "";
       locations.forEach((loc, i) => {
         const col = 4 + i * 2;
         ws.mergeCells(3, col, 3, col + 1);
@@ -5015,42 +5084,28 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
         cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } };
       });
 
-      // Kolonneoverskrifter (rad 4)
-      const headerValues = ["Vare", "Råvarekost pr pk", "Pakning", ...locations.flatMap(() => ["Pakker", "Løs"]), "Verdi"];
-      const headerRow = ws.addRow(headerValues);
-      headerRow.eachCell((cell, colNumber) => {
+      const headerRow = ws.addRow(["Vare", "Råvarekost pr pk", "Pakning", ...locations.flatMap(() => ["Pakker", "Løs"]), "Verdi"]);
+      headerRow.eachCell((cell) => {
         cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
         cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
         cell.alignment = { horizontal: "center" };
       });
 
-      // Varelinjer
       materials.forEach((m) => {
         const value = materialInventoryValue(m);
-        const rowValues: any[] = [
-          m.name,
-          m.packagePrice,
-          `${m.packageSize} ${m.unit}`,
-        ];
+        const rowValues: any[] = [m.name, m.packagePrice, `${m.packageSize} ${m.unit}`];
         locations.forEach((loc) => {
           const lc = getLocationCount(m.id, loc);
           rowValues.push(lc.packages || "");
           rowValues.push(lc.loose || "");
         });
         rowValues.push(value);
-
         const row = ws.addRow(rowValues);
         row.eachCell((cell, colNumber) => {
-          cell.border = {
-            top: { style: "hair" }, bottom: { style: "hair" },
-            left: { style: "thin" }, right: { style: "thin" },
-          };
-          if (colNumber === 2 || colNumber === totalCols) {
-            cell.numFmt = "#,##0.00";
-          }
+          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
+          if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00";
         });
-        // Tykke grenser mellom steder
         locations.forEach((_, i) => {
           const col = 4 + i * 2;
           row.getCell(col).border = { ...row.getCell(col).border, left: { style: "medium" } };
@@ -5058,9 +5113,80 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
         });
       });
 
-      // SUM-rad
-      const sumValues: any[] = [`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), bucketValue(bucket)];
-      const sumRow = ws.addRow(sumValues);
+      const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), bucketValue(bucket)]);
+      sumRow.eachCell((cell, colNumber) => {
+        cell.font = { bold: true };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
+        cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
+        if (colNumber === totalCols) cell.numFmt = "#,##0.00";
+      });
+    });
+
+    // Egenprodusert-ark
+    egenprodusertCategories.forEach((bucket) => {
+      const products = data.products.filter((p) => p.category === bucket);
+      if (products.length === 0) return;
+
+      const locations = categoryLocations[bucket] || ["Lager"];
+      const sheetName = sheetNames[bucket] || bucket.slice(0, 31);
+      const ws = wb.addWorksheet(sheetName);
+      const color = xlsxColors[bucket] || "607D8B";
+      const totalCols = 3 + locations.length * 2 + 1;
+
+      ws.columns = [{ width: 30 }, { width: 14 }, { width: 12 }, ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]), { width: 14 }];
+
+      const titleRow = ws.addRow([`Varetelling ${inventoryMonth} – ${bucket} (egenprodusert)`]);
+      ws.mergeCells(1, 1, 1, totalCols);
+      titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+      titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
+      titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+      titleRow.height = 28;
+      ws.addRow([]);
+
+      const locationHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), ""]);
+      locations.forEach((loc, i) => {
+        const col = 4 + i * 2;
+        ws.mergeCells(3, col, 3, col + 1);
+        const cell = locationHeaderRow.getCell(col);
+        cell.value = loc;
+        cell.font = { bold: true, color: { argb: "FF000000" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
+        cell.alignment = { horizontal: "center" };
+        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } };
+      });
+
+      const headerRow = ws.addRow(["Produkt", "Kostpris/stk", "Per eske", ...locations.flatMap(() => ["Esker", "Løs stk"]), "Verdi"]);
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
+        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+        cell.alignment = { horizontal: "center" };
+      });
+
+      products.forEach((p) => {
+        const unitCost = productUnitCost(p);
+        const unitsPerCase = Number(p.unitsPerCase || 1);
+        const value = productInventoryValue(p, unitCost);
+        const rowValues: any[] = [p.name, unitCost, unitsPerCase];
+        locations.forEach((loc) => {
+          const lc = getProductCount(p.id, loc);
+          rowValues.push(lc.cases || "");
+          rowValues.push(lc.loose || "");
+        });
+        rowValues.push(value);
+        const row = ws.addRow(rowValues);
+        row.eachCell((cell, colNumber) => {
+          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
+          if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00";
+        });
+        locations.forEach((_, i) => {
+          const col = 4 + i * 2;
+          row.getCell(col).border = { ...row.getCell(col).border, left: { style: "medium" } };
+          row.getCell(col + 1).border = { ...row.getCell(col + 1).border, right: { style: "medium" } };
+        });
+      });
+
+      const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), egenprodusertBucketValue(bucket)]);
       sumRow.eachCell((cell, colNumber) => {
         cell.font = { bold: true };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
@@ -5112,16 +5238,21 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
       </div>
 
       {/* Svinn */}
-      <div className="soft-box">
-        <h3>Svinn denne måneden</h3>
-        <div className="form-grid four">
-          {accountingBuckets.map((b) => (
-            <label key={b}>{b}
-              <input type="number" value={waste[b] || ""} onChange={(e) => updateWaste(b, Number(e.target.value) || 0)} />
-            </label>
-          ))}
+      <details className="soft-box" style={{ padding: 0 }}>
+        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Svinn denne måneden</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+        </summary>
+        <div style={{ padding: "0 16px 16px" }}>
+          <div className="form-grid four">
+            {accountingBuckets.map((b) => (
+              <label key={b}>{b}
+                <input type="number" value={waste[b] || ""} onChange={(e) => updateWaste(b, Number(e.target.value) || 0)} />
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
+      </details>
 
       {/* Historikk */}
       <div className="soft-box">
@@ -5171,7 +5302,7 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
       </div>
 
       {/* Søk og filter */}
-      <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); }} placeholder="Søk råvare" />
+      <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); }} placeholder="Søk råvare eller produkt" />
       <div className="chips">
         {internalBuckets.map((cat) => (
           <button key={cat} className={inventoryCategoryFilter === cat ? "btn active" : "btn"}
@@ -5183,29 +5314,109 @@ function InventoryTab({ data, updateData }: { data: AppData; updateData: (p: Par
 
       <p style={{ color: "#64748b" }}>Viser {filtered.length} råvarer.</p>
 
-      {/* Telletabell gruppert per kategori */}
+      {/* Egenproduserte produkter */}
+      {egenprodusertCategories.map((bucket) => {
+        if (inventoryCategoryFilter !== "Alle" && inventoryCategoryFilter !== "Mat" && inventoryCategoryFilter !== bucket) return null;
+        const locations = categoryLocations[bucket] || ["Lager"];
+        const bucketProducts = data.products
+          .filter((p) => p.category === bucket)
+          .filter((p) => inventorySearch === "" || p.name.toLowerCase().includes(inventorySearch.toLowerCase()));
+        if (bucketProducts.length === 0) return null;
+        const color = bucketColors[bucket] || "#f8fafc";
+        const totalValue = egenprodusertBucketValue(bucket);
+
+        return (
+          <div key={`egenprod-${bucket}`} style={{ marginBottom: 24 }}>
+            <div style={{
+              background: color, border: "1px solid #e2e8f0",
+              borderRadius: "14px 14px 0 0", padding: "10px 16px",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <b>{bucket} <span style={{ fontWeight: 400, fontSize: 12, color: "#64748b" }}>egenprodusert</span></b>
+              <span style={{ color: "#64748b", fontSize: 13 }}>{currency(totalValue)}</span>
+            </div>
+            <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
+              <table style={{ marginTop: 0 }}>
+                <thead>
+                  <tr>
+                    <th style={{ minWidth: 200 }}>Produkt</th>
+                    <th>Kostpris/stk</th>
+                    <th>Per eske</th>
+                    {locations.map((loc) => (
+                      <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>
+                        {loc}
+                      </th>
+                    ))}
+                    <th>Verdi</th>
+                  </tr>
+                  <tr style={{ background: "#f8fafc" }}>
+                    <th></th><th></th><th></th>
+                    {locations.map((loc) => (
+                      <>
+                        <th key={`${loc}-esker`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Esker</th>
+                        <th key={`${loc}-løs`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs stk</th>
+                      </>
+                    ))}
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bucketProducts.map((p) => {
+                    const unitCost = productUnitCost(p);
+                    const unitsPerCase = Number(p.unitsPerCase || 1);
+                    const value = productInventoryValue(p, unitCost);
+                    return (
+                      <tr key={p.id}>
+                        <td><b>{p.name}</b><br /><small style={{ color: "#64748b" }}>{p.productNumber || "-"}</small></td>
+                        <td>{currency(unitCost)}</td>
+                        <td>{unitsPerCase} stk</td>
+                        {locations.map((loc) => {
+                          const lc = getProductCount(p.id, loc);
+                          return (
+                            <>
+                              <td key={`${p.id}-${loc}-esker`} style={{ borderLeft: "2px solid #cbd5e1" }}>
+                                <input
+                                  type="number"
+                                  disabled={isLocked}
+                                  value={lc.cases || ""}
+                                  onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)}
+                                  style={{ minWidth: 70, textAlign: "center" }}
+                                />
+                              </td>
+                              <td key={`${p.id}-${loc}-løs`}>
+                                <input
+                                  type="number"
+                                  disabled={isLocked}
+                                  value={lc.loose || ""}
+                                  onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)}
+                                  style={{ minWidth: 70, textAlign: "center" }}
+                                />
+                              </td>
+                            </>
+                          );
+                        })}
+                        <td><b>{currency(value)}</b></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Telletabell gruppert per kategori – vanlige råvarer */}
       {Object.entries(groupedMaterials).map(([bucket, materials]) => {
         const locations = categoryLocations[bucket] || ["Lager"];
-        const color = {
-          "Mel og frø": "#f0fdf4", "Meieri": "#fefce8", "Kjøtt": "#fff1f2",
-          "Fisk": "#f0fdfa", "Grønt": "#f0fdf4", "Tørrvarer": "#fff7ed",
-          "Kjøkken, egenprodusert": "#fdf4ff", "Bakeri, egenprodusert": "#fff7ed",
-          "Frukt og grønt": "#f0fdf4", "Krydder": "#fdf2f8", "Deli": "#eff6ff",
-          "Mineralvann": "#f0fdfa", "Kaffe/te": "#fdf8f4", "Vin": "#faf5ff",
-          "Øl": "#fff7ed", "Cider": "#f7fee7", "Brennevin": "#fff1f2",
-          "Mat (annet)": "#f8fafc",
-        }[bucket] || "#f8fafc";
+        const color = bucketColors[bucket] || "#f8fafc";
 
         return (
           <div key={bucket} style={{ marginBottom: 24 }}>
             <div style={{
-              background: color,
-              border: "1px solid #e2e8f0",
-              borderRadius: "14px 14px 0 0",
-              padding: "10px 16px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
+              background: color, border: "1px solid #e2e8f0",
+              borderRadius: "14px 14px 0 0", padding: "10px 16px",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
             }}>
               <b>{bucket}</b>
               <span style={{ color: "#64748b", fontSize: 13 }}>{currency(bucketValue(bucket))}</span>
