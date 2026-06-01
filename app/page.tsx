@@ -155,7 +155,8 @@ type Settings = {
   retailMargins?: Record<string, number>;
 };
 
-type InventoryCount = { packages: number; loose: number; packagePrice: number; pricePerUnit: number };
+type LocationCount = { packages: number; loose: number };
+type InventoryCount = { packages: number; loose: number; packagePrice: number; pricePerUnit: number; locations?: Record<string, LocationCount> };
 type InventoryMonthData = {
   locked?: boolean;
   waste?: Record<string, number>;
