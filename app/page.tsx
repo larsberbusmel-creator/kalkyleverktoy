@@ -4949,10 +4949,15 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
   // ── Råvare-funksjoner ─────────────────────────────────────────────────────
 
-  function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
+ function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
     const item = counts[materialId] as any;
     if (!item) return { packages: 0, loose: 0 };
     if (item.locations?.[location]) return item.locations[location];
+    // Bakoverkompatibilitet: vis gamle packages/loose på første sted
+    const locations = categoryLocations[data.materials.find((m) => m.id === materialId)?.category || ""] || [];
+    if (locations[0] === location) {
+      return { packages: item.packages || 0, loose: item.loose || 0 };
+    }
     return { packages: 0, loose: 0 };
   }
 
