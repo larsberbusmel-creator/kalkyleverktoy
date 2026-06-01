@@ -5303,14 +5303,15 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
       {/* Søk og filter */}
       <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); }} placeholder="Søk råvare eller produkt" />
-      <div className="chips">
+      <select
+        value={inventoryCategoryFilter}
+        onChange={(e) => { setInventoryCategoryFilter(e.target.value); setInventoryPage(1); }}
+        style={{ marginBottom: 12 }}
+      >
         {internalBuckets.map((cat) => (
-          <button key={cat} className={inventoryCategoryFilter === cat ? "btn active" : "btn"}
-            onClick={() => { setInventoryCategoryFilter(cat); setInventoryPage(1); }}>
-            {cat}
-          </button>
+          <option key={cat} value={cat}>{cat}</option>
         ))}
-      </div>
+      </select>
 
       <p style={{ color: "#64748b" }}>Viser {filtered.length} råvarer.</p>
 
