@@ -4842,6 +4842,111 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
   const [year, month] = inventoryMonth.split("-");
 
+  const xlsxColors: Record<string, string> = {
+    "Mel og frø": "8BC34A", "Meieri": "FFF176", "Kjøtt": "EF9A9A",
+    "Fisk": "80DEEA", "Grønt": "A5D6A7", "Tørrvarer": "FFCC80",
+    "Kjøkken, egenprodusert": "CE93D8", "Bakeri, egenprodusert": "FFAB91",
+    "Frukt og grønt": "C8E6C9", "Krydder": "F8BBD0", "Deli": "2196F3",
+    "Mineralvann": "00BCD4", "Kaffe/te": "795548", "Vin": "9C27B0",
+    "Øl": "FF9800", "Cider": "CDDC39", "Brennevin": "F44336",
+  };
+
+  const bucketColors: Record<string, string> = {
+    "Mel og frø": "#f0fdf4", "Meieri": "#fefce8", "Kjøtt": "#fff1f2",
+    "Fisk": "#f0fdfa", "Grønt": "#f0fdf4", "Tørrvarer": "#fff7ed",
+    "Kjøkken, egenprodusert": "#fdf4ff", "Bakeri, egenprodusert": "#fff7ed",
+    "Frukt og grønt": "#f0fdf4", "Krydder": "#fdf2f8", "Deli": "#eff6ff",
+    "Mineralvann": "#f0fdfa", "Kaffe/te": "#fdf8f4", "Vin": "#faf5ff",
+    "Øl": "#fff7ed", "Cider": "#f7fee7", "Brennevin": "#fff1f2",
+    "Mat (annet)": "#f8fafc",
+  };
+
+  // ── Svinn per rad ─────────────────────────────────────────────────────────
+
+  function getMaterialWaste(materialId: string): number {
+    const item = counts[materialId] as any;
+    return item?.waste || 0;
+  }
+
+  function updateMaterialWaste(materialId: string, wasteAmount: number) {
+    const material = data.materials.find((m) => m.id === materialId);
+    const existing = (counts[materialId] as any) || {};
+    updateData({
+      inventoryCounts: {
+        ...countsByMonth,
+        [inventoryMonth]: {
+          ...currentInventory,
+          waste,
+          items: {
+            ...counts,
+            [materialId]: {
+              ...existing,
+              packagePrice: material?.packagePrice || existing.packagePrice || 0,
+              pricePerUnit: material?.pricePerUnit || existing.pricePerUnit || 0,
+              waste: wasteAmount,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function getProductWaste(productId: string): number {
+    const key = `product_${productId}`;
+    const item = counts[key] as any;
+    return item?.waste || 0;
+  }
+
+  function updateProductWaste(product: Product, wasteAmount: number) {
+    const key = `product_${product.id}`;
+    const existing = (counts[key] as any) || {};
+    updateData({
+      inventoryCounts: {
+        ...countsByMonth,
+        [inventoryMonth]: {
+          ...currentInventory,
+          waste,
+          items: {
+            ...counts,
+            [key]: {
+              ...existing,
+              waste: wasteAmount,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function materialWasteValue(m: Material): number {
+    const w = getMaterialWaste(m.id);
+    return w * m.pricePerUnit;
+  }
+
+  function productWasteValue(p: Product): number {
+    const w = getProductWaste(p.id);
+    return w * productUnitCost(p);
+  }
+
+  function totalWasteValue(): number {
+    const matWaste = data.materials.reduce((sum, m) => sum + materialWasteValue(m), 0);
+    const prodWaste = data.products
+      .filter((p) => egenprodusertCategories.includes(p.category))
+      .reduce((sum, p) => sum + productWasteValue(p), 0);
+    return matWaste + prodWaste;
+  }
+
+  function bucketWasteValue(bucket: string): number {
+    if (egenprodusertCategories.includes(bucket)) {
+      return data.products
+        .filter((p) => p.category === bucket)
+        .reduce((sum, p) => sum + productWasteValue(p), 0);
+    }
+    return data.materials
+      .filter((m) => m.category === bucket)
+      .reduce((sum, m) => sum + materialWasteValue(m), 0);
+  }
+
   // ── Råvare-funksjoner ─────────────────────────────────────────────────────
 
   function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
@@ -4867,6 +4972,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
           items: {
             ...counts,
             [materialId]: {
+              ...existing,
               packages: totalPackages,
               loose: totalLoose,
               packagePrice: material?.packagePrice || 0,
@@ -4910,6 +5016,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
           items: {
             ...counts,
             [key]: {
+              ...existing,
               packages: totalCases,
               loose: totalLoose,
               packagePrice: 0,
@@ -4962,14 +5069,16 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     });
   }
 
-  const totalMaterials = data.materials.reduce((sum, m) => sum + materialInventoryValue(m), 0);
+  const totalMaterials = data.materials
+    .filter((m) => !egenprodusertCategories.includes(m.category))
+    .reduce((sum, m) => sum + materialInventoryValue(m), 0);
   const totalEgenprodusert = egenprodusertCategories.reduce((sum, b) => sum + egenprodusertBucketValue(b), 0);
   const total = totalMaterials + totalEgenprodusert;
 
   const filtered = data.materials
     .filter((m) => `${m.name} ${m.category}`.toLowerCase().includes(inventorySearch.toLowerCase()))
     .filter((m) => inventoryCategoryFilter === "Alle" ? true : belongsToBucket(m, inventoryCategoryFilter))
-    .filter((m) => !egenprodusertCategories.includes(m.category)) // råvarer i egenprodusert-kategorier vises ikke her
+    .filter((m) => !egenprodusertCategories.includes(m.category))
     .sort((a, b) => {
       const idxA = accountingBuckets.indexOf(a.category);
       const idxB = accountingBuckets.indexOf(b.category);
@@ -4979,16 +5088,15 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleMaterials = filtered.slice((inventoryPage - 1) * pageSize, inventoryPage * pageSize);
 
-  const groupedMaterials = accountingBuckets
-    .filter((b) => !egenprodusertCategories.includes(b))
-    .reduce((acc, bucket) => {
-      const items = visibleMaterials.filter((m) => belongsToBucket(m, bucket) && bucket !== "Mat" && bucket !== "Alle");
-      if (items.length > 0) acc[bucket] = items;
-      return acc;
-    }, {} as Record<string, Material[]>);
+  // Dynamisk gruppering – henter alle kategorier fra data
+  const allMaterialCategories = Array.from(new Set(data.materials.map((m) => m.category)))
+    .filter((c) => !egenprodusertCategories.includes(c));
 
-  const uncategorized = visibleMaterials.filter((m) => !accountingBuckets.includes(m.category) && m.category !== "Deli" && !drinkBuckets.includes(m.category));
-  if (uncategorized.length > 0) groupedMaterials["Mat (annet)"] = uncategorized;
+  const groupedMaterials = allMaterialCategories.reduce((acc, bucket) => {
+    const items = visibleMaterials.filter((m) => m.category === bucket);
+    if (items.length > 0) acc[bucket] = items;
+    return acc;
+  }, {} as Record<string, Material[]>);
 
   function valueForBucketInMonth(monthKey: string, bucket: string) {
     if (egenprodusertCategories.includes(bucket)) {
@@ -5020,28 +5128,11 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
 
-  const bucketColors: Record<string, string> = {
-    "Mel og frø": "#f0fdf4", "Meieri": "#fefce8", "Kjøtt": "#fff1f2",
-    "Fisk": "#f0fdfa", "Grønt": "#f0fdf4", "Tørrvarer": "#fff7ed",
-    "Kjøkken, egenprodusert": "#fdf4ff", "Bakeri, egenprodusert": "#fff7ed",
-    "Frukt og grønt": "#f0fdf4", "Krydder": "#fdf2f8", "Deli": "#eff6ff",
-    "Mineralvann": "#f0fdfa", "Kaffe/te": "#fdf8f4", "Vin": "#faf5ff",
-    "Øl": "#fff7ed", "Cider": "#f7fee7", "Brennevin": "#fff1f2",
-    "Mat (annet)": "#f8fafc",
-  };
+  // ── Excel-eksport ─────────────────────────────────────────────────────────
 
   async function exportInventoryXlsx() {
     const ExcelJS = await import("exceljs");
     const wb = new ExcelJS.Workbook();
-
-    const xlsxColors: Record<string, string> = {
-      "Mel og frø": "8BC34A", "Meieri": "FFF176", "Kjøtt": "EF9A9A",
-      "Fisk": "80DEEA", "Grønt": "A5D6A7", "Tørrvarer": "FFCC80",
-      "Kjøkken, egenprodusert": "CE93D8", "Bakeri, egenprodusert": "FFAB91",
-      "Frukt og grønt": "C8E6C9", "Krydder": "F8BBD0", "Deli": "2196F3",
-      "Mineralvann": "00BCD4", "Kaffe/te": "795548", "Vin": "9C27B0",
-      "Øl": "FF9800", "Cider": "CDDC39", "Brennevin": "F44336",
-    };
 
     const sheetNames: Record<string, string> = {
       "Kaffe/te": "Kaffe-te",
@@ -5049,20 +5140,46 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
       "Bakeri, egenprodusert": "Bakeri-egenprod",
     };
 
-    // Vanlige råvare-ark
-    accountingBuckets.filter((b) => !egenprodusertCategories.includes(b)).forEach((bucket) => {
+    function getColor(bucket: string) {
+      return xlsxColors[bucket] || "607D8B";
+    }
+
+    function safeSheetName(name: string) {
+      return (sheetNames[name] || name).replace(/[\/\\?*[\]]/g, "-").slice(0, 31);
+    }
+
+    function addStyledHeaderRow(ws: any, values: string[], color: string) {
+      const row = ws.addRow(values);
+      row.eachCell((cell: any) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
+        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+        cell.alignment = { horizontal: "center" };
+      });
+      return row;
+    }
+
+    // Dynamisk – alle råvarekategorier fra data
+    const allCategories = Array.from(new Set(data.materials.map((m) => m.category)))
+      .filter((c) => !egenprodusertCategories.includes(c));
+
+    allCategories.forEach((bucket) => {
       const materials = data.materials
-        .filter((m) => belongsToBucket(m, bucket) && bucket !== "Mat")
+        .filter((m) => m.category === bucket)
         .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
       if (materials.length === 0) return;
 
       const locations = categoryLocations[bucket] || ["Lager"];
-      const sheetName = sheetNames[bucket] || bucket.slice(0, 31);
-      const ws = wb.addWorksheet(sheetName);
-      const color = xlsxColors[bucket] || "607D8B";
-      const totalCols = 3 + locations.length * 2 + 1;
+      const ws = wb.addWorksheet(safeSheetName(bucket));
+      const color = getColor(bucket);
+      const totalCols = 3 + locations.length * 2 + 1 + 1; // +1 for Svinn
 
-      ws.columns = [{ width: 30 }, { width: 14 }, { width: 12 }, ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]), { width: 14 }];
+      ws.columns = [
+        { width: 30 }, { width: 14 }, { width: 12 },
+        ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]),
+        { width: 10 }, // Svinn
+        { width: 14 }, // Verdi
+      ];
 
       const titleRow = ws.addRow([`Varetelling ${inventoryMonth} – ${bucket}`]);
       ws.mergeCells(1, 1, 1, totalCols);
@@ -5072,11 +5189,11 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
       titleRow.height = 28;
       ws.addRow([]);
 
-      const locationHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), ""]);
+      const locHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), "Svinn", ""]);
       locations.forEach((loc, i) => {
         const col = 4 + i * 2;
         ws.mergeCells(3, col, 3, col + 1);
-        const cell = locationHeaderRow.getCell(col);
+        const cell = locHeaderRow.getCell(col);
         cell.value = loc;
         cell.font = { bold: true, color: { argb: "FF000000" } };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
@@ -5084,25 +5201,25 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } };
       });
 
-      const headerRow = ws.addRow(["Vare", "Råvarekost pr pk", "Pakning", ...locations.flatMap(() => ["Pakker", "Løs"]), "Verdi"]);
-      headerRow.eachCell((cell) => {
-        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
-        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-        cell.alignment = { horizontal: "center" };
-      });
+      addStyledHeaderRow(ws, [
+        "Vare", "Råvarekost pr pk", "Pakning",
+        ...locations.flatMap(() => ["Pakker", "Løs"]),
+        "Svinn", "Verdi"
+      ], color);
 
       materials.forEach((m) => {
         const value = materialInventoryValue(m);
+        const wasteAmt = getMaterialWaste(m.id);
         const rowValues: any[] = [m.name, m.packagePrice, `${m.packageSize} ${m.unit}`];
         locations.forEach((loc) => {
           const lc = getLocationCount(m.id, loc);
           rowValues.push(lc.packages || "");
           rowValues.push(lc.loose || "");
         });
+        rowValues.push(wasteAmt || "");
         rowValues.push(value);
         const row = ws.addRow(rowValues);
-        row.eachCell((cell, colNumber) => {
+        row.eachCell((cell: any, colNumber: number) => {
           cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
           if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00";
         });
@@ -5113,27 +5230,39 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         });
       });
 
-      const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), bucketValue(bucket)]);
-      sumRow.eachCell((cell, colNumber) => {
+      const sumRow = ws.addRow([
+        `SUM ${bucket}`, "", "",
+        ...locations.flatMap(() => ["", ""]),
+        bucketWasteValue(bucket),
+        bucketValue(bucket),
+      ]);
+      sumRow.eachCell((cell: any, colNumber: number) => {
         cell.font = { bold: true };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
         cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
-        if (colNumber === totalCols) cell.numFmt = "#,##0.00";
+        if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00";
       });
     });
 
-    // Egenprodusert-ark
-    egenprodusertCategories.forEach((bucket) => {
+    // Egenproduserte ark – dynamisk fra produktkategorier
+    const allEgenprodCategories = Array.from(new Set(data.products.map((p) => p.category)))
+      .filter((c) => egenprodusertCategories.includes(c));
+
+    allEgenprodCategories.forEach((bucket) => {
       const products = data.products.filter((p) => p.category === bucket);
       if (products.length === 0) return;
 
       const locations = categoryLocations[bucket] || ["Lager"];
-      const sheetName = sheetNames[bucket] || bucket.slice(0, 31);
-      const ws = wb.addWorksheet(sheetName);
-      const color = xlsxColors[bucket] || "607D8B";
-      const totalCols = 3 + locations.length * 2 + 1;
+      const ws = wb.addWorksheet(safeSheetName(bucket));
+      const color = getColor(bucket);
+      const totalCols = 3 + locations.length * 2 + 1 + 1; // +1 for Svinn
 
-      ws.columns = [{ width: 30 }, { width: 14 }, { width: 12 }, ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]), { width: 14 }];
+      ws.columns = [
+        { width: 30 }, { width: 14 }, { width: 12 },
+        ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]),
+        { width: 10 }, // Svinn
+        { width: 14 }, // Verdi
+      ];
 
       const titleRow = ws.addRow([`Varetelling ${inventoryMonth} – ${bucket} (egenprodusert)`]);
       ws.mergeCells(1, 1, 1, totalCols);
@@ -5143,11 +5272,11 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
       titleRow.height = 28;
       ws.addRow([]);
 
-      const locationHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), ""]);
+      const locHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), "Svinn", ""]);
       locations.forEach((loc, i) => {
         const col = 4 + i * 2;
         ws.mergeCells(3, col, 3, col + 1);
-        const cell = locationHeaderRow.getCell(col);
+        const cell = locHeaderRow.getCell(col);
         cell.value = loc;
         cell.font = { bold: true, color: { argb: "FF000000" } };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
@@ -5155,27 +5284,27 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } };
       });
 
-      const headerRow = ws.addRow(["Produkt", "Kostpris/stk", "Per eske", ...locations.flatMap(() => ["Esker", "Løs stk"]), "Verdi"]);
-      headerRow.eachCell((cell) => {
-        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
-        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-        cell.alignment = { horizontal: "center" };
-      });
+      addStyledHeaderRow(ws, [
+        "Produkt", "Kostpris/stk", "Per eske",
+        ...locations.flatMap(() => ["Esker", "Løs stk"]),
+        "Svinn stk", "Verdi"
+      ], color);
 
       products.forEach((p) => {
         const unitCost = productUnitCost(p);
         const unitsPerCase = Number(p.unitsPerCase || 1);
         const value = productInventoryValue(p, unitCost);
+        const wasteAmt = getProductWaste(p.id);
         const rowValues: any[] = [p.name, unitCost, unitsPerCase];
         locations.forEach((loc) => {
           const lc = getProductCount(p.id, loc);
           rowValues.push(lc.cases || "");
           rowValues.push(lc.loose || "");
         });
+        rowValues.push(wasteAmt || "");
         rowValues.push(value);
         const row = ws.addRow(rowValues);
-        row.eachCell((cell, colNumber) => {
+        row.eachCell((cell: any, colNumber: number) => {
           cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
           if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00";
         });
@@ -5186,13 +5315,98 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         });
       });
 
-      const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), egenprodusertBucketValue(bucket)]);
-      sumRow.eachCell((cell, colNumber) => {
+      const sumRow = ws.addRow([
+        `SUM ${bucket}`, "", "",
+        ...locations.flatMap(() => ["", ""]),
+        bucketWasteValue(bucket),
+        egenprodusertBucketValue(bucket),
+      ]);
+      sumRow.eachCell((cell: any, colNumber: number) => {
         cell.font = { bold: true };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
         cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
-        if (colNumber === totalCols) cell.numFmt = "#,##0.00";
+        if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00";
       });
+    });
+
+    // Svinn-fane
+    const wsWaste = wb.addWorksheet("Svinn");
+    wsWaste.columns = [{ width: 35 }, { width: 20 }, { width: 20 }];
+
+    const wasteTitleRow = wsWaste.addRow([`Svinn – ${inventoryMonth}`]);
+    ws.mergeCells(1, 1, 1, 3);
+    wasteTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
+    wasteTitleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } };
+    wasteTitleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+    wasteTitleRow.height = 28;
+    wsWaste.addRow([]);
+
+    const wasteHeaderRow = wsWaste.addRow(["Kategori / Produkt", "Svinn (mengde)", "Svinn (varekost)"]);
+    wasteHeaderRow.eachCell((cell: any) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } };
+      cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+    });
+
+    // Råvarer med svinn
+    allCategories.forEach((bucket) => {
+      const materialsWithWaste = data.materials
+        .filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0)
+        .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
+      if (materialsWithWaste.length === 0) return;
+
+      const color = getColor(bucket);
+      const catRow = wsWaste.addRow([bucket, "", currency(bucketWasteValue(bucket))]);
+      catRow.eachCell((cell: any) => {
+        cell.font = { bold: true };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
+        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+      });
+
+      materialsWithWaste.forEach((m) => {
+        const wasteAmt = getMaterialWaste(m.id);
+        const wasteVal = materialWasteValue(m);
+        const row = wsWaste.addRow([`  ${m.name}`, `${wasteAmt} ${m.unit}`, wasteVal]);
+        row.getCell(3).numFmt = "#,##0.00";
+        row.eachCell((cell: any) => {
+          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
+        });
+      });
+    });
+
+    // Egenproduserte med svinn
+    allEgenprodCategories.forEach((bucket) => {
+      const productsWithWaste = data.products
+        .filter((p) => p.category === bucket && getProductWaste(p.id) > 0);
+      if (productsWithWaste.length === 0) return;
+
+      const color = getColor(bucket);
+      const catRow = wsWaste.addRow([`${bucket} (egenprodusert)`, "", currency(bucketWasteValue(bucket))]);
+      catRow.eachCell((cell: any) => {
+        cell.font = { bold: true };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
+        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+      });
+
+      productsWithWaste.forEach((p) => {
+        const wasteAmt = getProductWaste(p.id);
+        const wasteVal = productWasteValue(p);
+        const row = wsWaste.addRow([`  ${p.name}`, `${wasteAmt} stk`, wasteVal]);
+        row.getCell(3).numFmt = "#,##0.00";
+        row.eachCell((cell: any) => {
+          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
+        });
+      });
+    });
+
+    wsWaste.addRow([]);
+    const totalWasteRow = wsWaste.addRow(["TOTAL SVINN", "", totalWasteValue()]);
+    totalWasteRow.eachCell((cell: any, colNumber: number) => {
+      cell.font = { bold: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } };
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
+      if (colNumber === 3) cell.numFmt = "#,##0.00";
     });
 
     const buffer = await wb.xlsx.writeBuffer();
@@ -5237,20 +5451,69 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         {["Deli", ...drinkBuckets].map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
       </div>
 
-      {/* Svinn */}
+      {/* Svinn – kollapsbar oversikt */}
       <details className="soft-box" style={{ padding: 0 }}>
         <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Svinn denne måneden</span>
+          <span>Svinn denne måneden <span style={{ fontWeight: 400, color: "#64748b" }}>{currency(totalWasteValue())}</span></span>
           <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
         </summary>
         <div style={{ padding: "0 16px 16px" }}>
-          <div className="form-grid four">
-            {accountingBuckets.map((b) => (
-              <label key={b}>{b}
-                <input type="number" value={waste[b] || ""} onChange={(e) => updateWaste(b, Number(e.target.value) || 0)} />
-              </label>
-            ))}
-          </div>
+          <table style={{ marginTop: 8 }}>
+            <thead>
+              <tr>
+                <th>Kategori / Produkt</th>
+                <th>Svinn (mengde)</th>
+                <th>Svinn (varekost)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allMaterialCategories.map((bucket) => {
+                const materialsWithWaste = data.materials.filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0);
+                if (materialsWithWaste.length === 0) return null;
+                return (
+                  <>
+                    <tr key={`waste-cat-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}>
+                      <td><b>{bucket}</b></td>
+                      <td></td>
+                      <td><b>{currency(bucketWasteValue(bucket))}</b></td>
+                    </tr>
+                    {materialsWithWaste.map((m) => (
+                      <tr key={`waste-${m.id}`}>
+                        <td style={{ paddingLeft: 24 }}>{m.name}</td>
+                        <td>{getMaterialWaste(m.id)} {m.unit}</td>
+                        <td>{currency(materialWasteValue(m))}</td>
+                      </tr>
+                    ))}
+                  </>
+                );
+              })}
+              {egenprodusertCategories.map((bucket) => {
+                const productsWithWaste = data.products.filter((p) => p.category === bucket && getProductWaste(p.id) > 0);
+                if (productsWithWaste.length === 0) return null;
+                return (
+                  <>
+                    <tr key={`waste-cat-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}>
+                      <td><b>{bucket} (egenprodusert)</b></td>
+                      <td></td>
+                      <td><b>{currency(bucketWasteValue(bucket))}</b></td>
+                    </tr>
+                    {productsWithWaste.map((p) => (
+                      <tr key={`waste-prod-${p.id}`}>
+                        <td style={{ paddingLeft: 24 }}>{p.name}</td>
+                        <td>{getProductWaste(p.id)} stk</td>
+                        <td>{currency(productWasteValue(p))}</td>
+                      </tr>
+                    ))}
+                  </>
+                );
+              })}
+              <tr style={{ background: "#0f172a", color: "white" }}>
+                <td><b>Total svinn</b></td>
+                <td></td>
+                <td><b>{currency(totalWasteValue())}</b></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </details>
 
@@ -5303,14 +5566,8 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
       {/* Søk og filter */}
       <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); }} placeholder="Søk råvare eller produkt" />
-      <select
-        value={inventoryCategoryFilter}
-        onChange={(e) => { setInventoryCategoryFilter(e.target.value); setInventoryPage(1); }}
-        style={{ marginBottom: 12 }}
-      >
-        {internalBuckets.map((cat) => (
-          <option key={cat} value={cat}>{cat}</option>
-        ))}
+      <select value={inventoryCategoryFilter} onChange={(e) => { setInventoryCategoryFilter(e.target.value); setInventoryPage(1); }} style={{ marginBottom: 12 }}>
+        {internalBuckets.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
       </select>
 
       <p style={{ color: "#64748b" }}>Viser {filtered.length} råvarer.</p>
@@ -5324,17 +5581,12 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
           .filter((p) => inventorySearch === "" || p.name.toLowerCase().includes(inventorySearch.toLowerCase()));
         if (bucketProducts.length === 0) return null;
         const color = bucketColors[bucket] || "#f8fafc";
-        const totalValue = egenprodusertBucketValue(bucket);
 
         return (
           <div key={`egenprod-${bucket}`} style={{ marginBottom: 24 }}>
-            <div style={{
-              background: color, border: "1px solid #e2e8f0",
-              borderRadius: "14px 14px 0 0", padding: "10px 16px",
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-            }}>
+            <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: "14px 14px 0 0", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <b>{bucket} <span style={{ fontWeight: 400, fontSize: 12, color: "#64748b" }}>egenprodusert</span></b>
-              <span style={{ color: "#64748b", fontSize: 13 }}>{currency(totalValue)}</span>
+              <span style={{ color: "#64748b", fontSize: 13 }}>{currency(egenprodusertBucketValue(bucket))}</span>
             </div>
             <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
               <table style={{ marginTop: 0 }}>
@@ -5344,10 +5596,9 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                     <th>Kostpris/stk</th>
                     <th>Per eske</th>
                     {locations.map((loc) => (
-                      <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>
-                        {loc}
-                      </th>
+                      <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>
                     ))}
+                    <th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn stk</th>
                     <th>Verdi</th>
                   </tr>
                   <tr style={{ background: "#f8fafc" }}>
@@ -5358,6 +5609,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                         <th key={`${loc}-løs`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs stk</th>
                       </>
                     ))}
+                    <th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>stk</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -5366,6 +5618,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                     const unitCost = productUnitCost(p);
                     const unitsPerCase = Number(p.unitsPerCase || 1);
                     const value = productInventoryValue(p, unitCost);
+                    const wasteAmt = getProductWaste(p.id);
                     return (
                       <tr key={p.id}>
                         <td><b>{p.name}</b><br /><small style={{ color: "#64748b" }}>{p.productNumber || "-"}</small></td>
@@ -5376,26 +5629,17 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                           return (
                             <>
                               <td key={`${p.id}-${loc}-esker`} style={{ borderLeft: "2px solid #cbd5e1" }}>
-                                <input
-                                  type="number"
-                                  disabled={isLocked}
-                                  value={lc.cases || ""}
-                                  onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)}
-                                  style={{ minWidth: 70, textAlign: "center" }}
-                                />
+                                <input type="number" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} />
                               </td>
                               <td key={`${p.id}-${loc}-løs`}>
-                                <input
-                                  type="number"
-                                  disabled={isLocked}
-                                  value={lc.loose || ""}
-                                  onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)}
-                                  style={{ minWidth: 70, textAlign: "center" }}
-                                />
+                                <input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
                               </td>
                             </>
                           );
                         })}
+                        <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>
+                          <input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                        </td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
                     );
@@ -5407,18 +5651,14 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         );
       })}
 
-      {/* Telletabell gruppert per kategori – vanlige råvarer */}
+      {/* Telletabell – vanlige råvarer */}
       {Object.entries(groupedMaterials).map(([bucket, materials]) => {
         const locations = categoryLocations[bucket] || ["Lager"];
         const color = bucketColors[bucket] || "#f8fafc";
 
         return (
           <div key={bucket} style={{ marginBottom: 24 }}>
-            <div style={{
-              background: color, border: "1px solid #e2e8f0",
-              borderRadius: "14px 14px 0 0", padding: "10px 16px",
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-            }}>
+            <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: "14px 14px 0 0", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <b>{bucket}</b>
               <span style={{ color: "#64748b", fontSize: 13 }}>{currency(bucketValue(bucket))}</span>
             </div>
@@ -5430,10 +5670,9 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                     <th>Råvarekost pr pk</th>
                     <th>Pakning</th>
                     {locations.map((loc) => (
-                      <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>
-                        {loc}
-                      </th>
+                      <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>
                     ))}
+                    <th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn</th>
                     <th>Verdi</th>
                   </tr>
                   <tr style={{ background: "#f8fafc" }}>
@@ -5444,12 +5683,14 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                         <th key={`${loc}-løs`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs</th>
                       </>
                     ))}
+                    <th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>enheter</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {materials.map((m) => {
                     const value = materialInventoryValue(m);
+                    const wasteAmt = getMaterialWaste(m.id);
                     return (
                       <tr key={m.id}>
                         <td><b>{m.name}</b></td>
@@ -5460,26 +5701,17 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                           return (
                             <>
                               <td key={`${m.id}-${loc}-pk`} style={{ borderLeft: "2px solid #cbd5e1" }}>
-                                <input
-                                  type="number"
-                                  disabled={isLocked}
-                                  value={lc.packages || ""}
-                                  onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)}
-                                  style={{ minWidth: 70, textAlign: "center" }}
-                                />
+                                <input type="number" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} />
                               </td>
                               <td key={`${m.id}-${loc}-løs`}>
-                                <input
-                                  type="number"
-                                  disabled={isLocked}
-                                  value={lc.loose || ""}
-                                  onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)}
-                                  style={{ minWidth: 70, textAlign: "center" }}
-                                />
+                                <input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
                               </td>
                             </>
                           );
                         })}
+                        <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>
+                          <input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                        </td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
                     );
