@@ -246,7 +246,7 @@ type AppData = {
   storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
-  seenOrderDates: string[];
+  seenOrderIds: string[]
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
@@ -408,7 +408,7 @@ settings: {
   storkjokkenSpecialPrices: [],
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
-  seenOrderDates: [],
+  seenOrderIds: []
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -472,7 +472,18 @@ recurringStorkjokkenOrders:
 
 bakeryProductionDays:
   (raw as any).bakeryProductionDays || {},
-  seenOrderDates: (raw as any).seenOrderDates || [],
+  seenOrderIds: (() => {
+  const legacyDates: string[] = (raw as any).seenOrderDates || [];
+  const existing: string[] = (raw as any).seenOrderIds || [];
+  if (existing.length > 0) return existing;
+  if (legacyDates.length === 0) return [];
+  return (raw.orders || [])
+    .filter((o: any) =>
+      legacyDates.includes(o.date) &&
+      o.recurringNote?.startsWith("Importert fra webshop")
+    )
+    .map((o: any) => o.id);
+})(),
   };
 }
 
@@ -869,25 +880,30 @@ function CalendarDashboard({
     return Boolean(data.bakeryProductionDays?.[date]);
   }
 
-  // Finn datoer med nye webshopordre som ikke er sett
-  function hasUnseenWebshopOrder(date: string): boolean {
-    const seenDates = data.seenOrderDates || [];
-    if (seenDates.includes(date)) return false;
-    return data.orders.some(
+ function hasUnseenWebshopOrder(date: string): boolean {
+  const seenIds = data.seenOrderIds || [];
+  return data.orders.some(
+    (o) =>
+      o.date === date &&
+      !o.deletedAt &&
+      o.recurringNote?.startsWith("Importert fra webshop") &&
+      !seenIds.includes(o.id)
+  );
+}
+
+function markOrdersAsSeen(date: string) {
+  const seenIds = data.seenOrderIds || [];
+  const newIds = data.orders
+    .filter(
       (o) =>
         o.date === date &&
         !o.deletedAt &&
-        o.recurringNote?.startsWith("Importert fra webshop")
-    );
-  }
-
-  // Merk dato som sett
-  function markDateAsSeen(date: string) {
-    const seenDates = data.seenOrderDates || [];
-    if (!seenDates.includes(date)) {
-      updateData({ seenOrderDates: [...seenDates, date] });
-    }
-  }
+        o.recurringNote?.startsWith("Importert fra webshop") &&
+        !seenIds.includes(o.id)
+    )
+    .map((o) => o.id);
+  if (newIds.length) updateData({ seenOrderIds: [...seenIds, ...newIds] });
+}
 
   function addNote() {
     if (!noteTitle.trim() && !noteText.trim()) return;
@@ -962,7 +978,7 @@ function CalendarDashboard({
                     onClick={() => {
                       setSelectedDate(date);
                       setView("day");
-                      markDateAsSeen(date); // ← merk som sett ved klikk
+                      markOrdersAsSeen(date) // ← merk som sett ved klikk
                     }}
                     style={{
                       minHeight: 110,
@@ -1066,7 +1082,7 @@ function CalendarDashboard({
                           </td>
                           {/* Varselindikator i dagvisning */}
                           {o.recurringNote?.startsWith("Importert fra webshop") &&
-                            !(data.seenOrderDates || []).includes(o.date) && (
+                            !(data.seenOrderIds || []).includes(o.id) && (
                               <td><span style={{ color: "#f59e0b", fontWeight: 900 }}>🔔 Ny</span></td>
                             )}
                         </tr>
@@ -3000,21 +3016,35 @@ function formatTimeInput(value: string) {
   if (digits.length === 3) return `Kl ${digits.slice(0, 1)}:${digits.slice(1).padEnd(2, "0")}`;
   return `Kl ${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
 }
+function cleanWebshopText(raw: string): string {
+  return raw
+    .replace(/\[https?:\/\/[^\]]*\]/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/<mailto:[^>]*>/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 function parseNorwegianDateGlobal(text: string): { date: string; time: string } {
-const months: Record<string, string> = {
-  januar: "01", februar: "02", mars: "03", april: "04", mai: "05", juni: "06",
-  juli: "07", august: "08", september: "09", oktober: "10", november: "11", desember: "12",
-  jan: "01", feb: "02", mar: "03", apr: "04", jun: "06",
-  jul: "07", aug: "08", sep: "09", okt: "10", nov: "11", des: "12",
-  "jan.": "01", "feb.": "02", "mar.": "03", "apr.": "04", "jun.": "06",
-  "jul.": "07", "aug.": "08", "sep.": "09", "okt.": "10", "nov.": "11", "des.": "12",
-};
+  const months: Record<string, string> = {
+    januar: "01", februar: "02", mars: "03", april: "04", mai: "05", juni: "06",
+    juli: "07", august: "08", september: "09", oktober: "10", november: "11", desember: "12",
+    jan: "01", feb: "02", mar: "03", apr: "04", jun: "06",
+    jul: "07", aug: "08", sep: "09", okt: "10", nov: "11", des: "12",
+    "jan.": "01", "feb.": "02", "mar.": "03", "apr.": "04", "jun.": "06",
+    "jul.": "07", "aug.": "08", "sep.": "09", "okt.": "10", "nov.": "11", "des.": "12",
+  };
 
-  const match = text.match(/(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})\s+([a-zæøå.]+)\s+(\d{1,2}:\d{2})/i);
+  // Støtter tidsintervall som 18:15-18:30 – henter bare starttid
+  const match = text.match(
+    /(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)?\s*(\d{1,2})[.\s]+([a-zæøå.]+)[.\s]+(\d{1,2}:\d{2})(?:-\d{1,2}:\d{2})?/i
+  );
   if (!match) return { date: today(), time: "" };
+
   const day = match[1].padStart(2, "0");
-  const month = months[match[2].toLowerCase()] || "01";
+  const monthRaw = match[2].toLowerCase().replace(/\.$/, "");
+  const month = months[monthRaw] || months[match[2].toLowerCase()] || "01";
   const year = new Date().getFullYear();
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
@@ -3034,125 +3064,117 @@ function OrdersTab({ data, updateData, productAllergens }: {
     dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
   });
 
+  const todayStr = today();
+
   const [form, setForm] = useState<Order>(emptyOrder());
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [lineToAdd, setLineToAdd] = useState({ productId: "", quantity: 1 });
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [showWebshopImport, setShowWebshopImport] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
-
-  // Webshop import state
   const [webshopRawText, setWebshopRawText] = useState("");
   const [webshopPreview, setWebshopPreview] = useState<Order | null>(null);
   const [webshopUnmatched, setWebshopUnmatched] = useState<string[]>([]);
-
-  // Liste-state
   const [orderSearch, setOrderSearch] = useState("");
   const [sortField, setSortField] = useState<"date" | "customer" | "orderNumber">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [orderPage, setOrderPage] = useState(1);
+  const [showTodayOnly, setShowTodayOnly] = useState(false);
+  const [hideOldOrders, setHideOldOrders] = useState(true);
+  const [calendarView, setCalendarView] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(todayStr.slice(0, 7));
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(todayStr);
+
   const pageSize = 30;
 
-  // ── Webshop import ────────────────────────────────────────────────────────
-
   function parseWebshopOrder() {
-    const text = webshopRawText;
-const cleanText = text
-  .replace(/https?:\/\/[^\s\]]+/g, "")
-  .replace(/\[[\s]*\]/g, "");
+    const text = cleanWebshopText(webshopRawText);
+    const lines = text.split(/\n/).map((x) => x.trim()).filter(Boolean);
 
-const lines = cleanText.split(/\n/).map((x) => x.trim()).filter(Boolean);
-
-    // Ordrenummer
     const orderNumberMatch = text.match(/Bestilling\s+(\d{4,})/i) || text.match(/\b(\d{6,})\b/);
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
 
-    // Telefon – hent fra "Telefon: +47..." linjen
-   const phoneRaw =
-  cleanText.match(/Telefon:\s*(\+?[\d\s]{8,})/i)?.[1]?.trim() ||
-  cleanText.match(/Kundeinformasjon[\s\S]*?(\+47\d{8,}|\+47\s*\d[\d\s]{7,})/i)?.[1]?.trim() || "";
-const phoneMatch = phoneRaw.replace(/\s+/g, "");
+    const phoneRaw =
+      text.match(/Telefon:\s*(\+?[\d\s]{8,})/i)?.[1]?.trim() ||
+      text.match(/Kundeinformasjon[\s\S]*?(\+47[\d\s]{8,})/i)?.[1]?.trim() || "";
+    const phoneMatch = phoneRaw.replace(/\s+/g, "");
 
-    // Dato og tid
     const deliveryMatch = text.match(/Når:\s*(.+)/i);
     const dateInfo = parseNorwegianDateGlobal(deliveryMatch?.[1] || text);
 
     const deliveryAddress =
-  cleanText.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
-  cleanText.match(/Hentested:\s*(.+)/i)?.[1]?.trim() ||
-  "Hentes i butikk";
+      text.match(/Adresse:\s*(.+)/i)?.[1]?.trim() ||
+      text.match(/Hentested:\s*(.+)/i)?.[1]?.trim() ||
+      "Hentes i butikk";
 
-   let customer = cleanText.match(/Navn:\s*(.+)/i)?.[1]?.trim() || "";
-let companyName = "";
-const idx = lines.findIndex((l) => /kundeinformasjon/i.test(l));
-if (idx >= 0) {
-  const line1 = lines[idx + 1] || "";
-  const line2 = lines[idx + 2] || "";
-  if (line1 && line1 === line1.toUpperCase() && line1.length > 3) {
-    companyName = line1;
-    if (!customer) customer = line2;
-  } else {
-    if (!customer) customer = line1;
-  }
-}
+    let customer = "";
+    let companyName = "";
 
-    // Beskjed til sjåfør / notat
-    const driverNote = text.match(/Beskjed til sjåfør:\s*([\s\S]*?)(?:\n\n|\nKundeinformasjon|\nHusk)/i)?.[1]?.trim() || "";
+    const navnLine = text.match(/Navn:\s*(.+)/i)?.[1]?.trim() || "";
+    if (navnLine.includes("/")) {
+      const parts = navnLine.split("/").map((s) => s.trim());
+      companyName = parts[0] || "";
+      customer = parts[1] || "";
+    } else {
+      customer = navnLine;
+    }
 
-    // Betalingsinfo
+    const idx = lines.findIndex((l) => /kundeinformasjon/i.test(l));
+    if (idx >= 0) {
+      const line1 = lines[idx + 1] || "";
+      const line2 = lines[idx + 2] || "";
+      if (!companyName && line1 === line1.toUpperCase() && line1.length > 3) {
+        companyName = line1;
+        if (!customer) customer = line2;
+      } else if (!customer) {
+        customer = line1;
+      }
+    }
+
+    const driverNote =
+      text.match(/Beskjed til sjåfør:\s*([\s\S]*?)(?:\n\n|\nKundeinformasjon|\nHusk)/i)?.[1]?.trim() || "";
+
     const erBetaltPaaNett = /ikke ta imot betaling/i.test(text);
-const erFaktura = /faktura|etterskudd|ved henting|kontant/i.test(text);
-const paymentInfo = erBetaltPaaNett
-  ? "Betalt på nett"
-  : erFaktura
-    ? "Faktura / betaling ved henting"
-    : "Betalt på nett";
+    const erFaktura = /faktura|etterskudd|ved henting|kontant/i.test(text);
+    const paymentInfo = erBetaltPaaNett
+      ? "Betalt på nett"
+      : erFaktura ? "Faktura / betaling ved henting" : "Betalt på nett";
 
-    // Parse produktlinjer – støtter to formater:
-    // Format 1 (e-post): "PA000001\nProduktnamn\n10\n195,00\n1 950,00"
-    // Format 2 (gammel): "PA000001" på egen linje, antall+pris på neste linjer
     const nextUnmatched: string[] = [];
     const orderLines: OrderLine[] = [];
 
-    for (let i = 0; i < lines.length; i++) {
-      const productCodeMatch = lines[i].match(/^([A-ZÆØÅ]{1,4}\d{3,})$/i);
-      if (!productCodeMatch) continue;
+    const productCodeMap = new Map(
+      data.products
+        .filter((p) => p.productNumber)
+        .map((p) => [p.productNumber!.toLowerCase(), p])
+    );
 
-      const productCode = productCodeMatch[1];
-      const product = data.products.find(
-        (p) => p.productNumber?.toLowerCase() === productCode.toLowerCase()
-      );
+    for (let i = 0; i < lines.length; i++) {
+      const codeMatch = lines[i].match(/\b([A-ZÆØÅ]{1,4}\d{4,})\b/i);
+      if (!codeMatch) continue;
+
+      const productCode = codeMatch[1];
+      const product = productCodeMap.get(productCode.toLowerCase());
 
       if (!product) {
-        nextUnmatched.push(lines[i]);
+        nextUnmatched.push(productCode);
         continue;
       }
 
-      // Søk etter antall i de neste 5 linjene
-      // Format e-post: produktnavn på linje i+1, antall på linje i+2
-      // Format gammel: antall+pris kombinert på linje i+1
       let quantity = 1;
-const nextFive = lines.slice(i + 1, i + 6).map((l) => l.trim());
-for (let j = 0; j < nextFive.length; j++) {
-  // Kun tall på linjen (med eller uten mellomrom)
-  if (/^\d+$/.test(nextFive[j])) {
-    quantity = Number(nextFive[j]);
-    break;
-  }
-  // Stopp hvis vi treffer neste produktkode
-  if (/^[A-ZÆØÅ]{1,4}\d{3,}$/i.test(nextFive[j])) break;
-}
-if (quantity === 1) {
-  const combined = nextFive.join(" ");
-  const oldFormat = combined.match(/\b(\d+)\s+\d+[,.]?\d*/i);
-  if (oldFormat && Number(oldFormat[1]) > 0) quantity = Number(oldFormat[1]);
-}
+      const nextLines = lines.slice(i + 1, i + 7);
+      for (let j = 0; j < nextLines.length; j++) {
+        const l = nextLines[j].trim();
+        if (/\b[A-ZÆØÅ]{1,4}\d{4,}\b/i.test(l)) break;
+        if (/^\d+$/.test(l)) { quantity = Number(l); break; }
+        const firstNum = l.match(/^(\d+)\s+[\d\s]+[,.]?\d*/);
+        if (firstNum) { quantity = Number(firstNum[1]); break; }
+      }
 
       orderLines.push({ productId: product.id, quantity });
     }
 
-    // Dedupliser
     const uniqueLines = Object.values(
       orderLines.reduce((acc, line) => {
         if (!acc[line.productId] || line.quantity > acc[line.productId].quantity)
@@ -3161,49 +3183,31 @@ if (quantity === 1) {
       }, {} as Record<string, OrderLine>)
     );
 
-    // Allergier fra fritekst
-const allergyNote =
-  cleanText.match(/Tilpasse til allergier[^\n]*\n([^\n]+)/i)?.[1]?.trim() ||
-  cleanText.match(/Allergi[^:]*:\s*(.+)/i)?.[1]?.trim() ||
-  "";
+    const allergyNote =
+      text.match(/Tilpasse til allergier[^\n]*\n([^\n]+)/i)?.[1]?.trim() ||
+      text.match(/Allergi[^:]*:\s*(.+)/i)?.[1]?.trim() || "";
 
-const unmatchedNote = nextUnmatched.length
-  ? `Ikke matchet tekst:\n${nextUnmatched.join("\n")}`
-  : "";
+    const unmatchedNote = nextUnmatched.length
+      ? `Ikke matchet produktkode:\n${nextUnmatched.join(", ")}` : "";
 
-const note = [
-  driverNote,
-  allergyNote ? `Allergier (fra bestilling): ${allergyNote}` : "",
-  unmatchedNote,
-].filter(Boolean).join("\n\n");
+    const note = [driverNote, allergyNote ? `Allergier (fra bestilling): ${allergyNote}` : "", unmatchedNote]
+      .filter(Boolean).join("\n\n");
 
     const nextOrder: Order = {
       id: `webshop-${orderNumber}-${Date.now()}`,
-      orderNumber,
-      type: "bakeri",
+      orderNumber, type: "catering",
       customerType: companyName ? "bedrift" : "privat",
       customer: customer || "Webshopkunde",
-      companyName,
-      orgNumber: "",
-      companyAddress: "",
-      phone: phoneMatch,
-      paymentInfo,
-      deliveryAddress,
-      date: dateInfo.date,
-      time: dateInfo.time,
-      note,
+      companyName, orgNumber: "", companyAddress: "",
+      phone: phoneMatch, paymentInfo, deliveryAddress,
+      date: dateInfo.date, time: dateInfo.time, note,
       guests: 1,
       productId: uniqueLines[0]?.productId || data.products[0]?.id || "",
-      orderLines: uniqueLines,
-      discountPercent: 0,
-      isRecurring: false,
-      recurringDays: [],
+      orderLines: uniqueLines, discountPercent: 0,
+      isRecurring: false, recurringDays: [],
       recurringNote: `Importert fra webshop. Ordrenr: ${orderNumber}`,
       allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
-      dietVegan: "0",
-      dietVegetarian: "0",
-      dietPregnant: "0",
-      dietOther: "",
+      dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
     };
 
     setWebshopPreview(nextOrder);
@@ -3212,16 +3216,23 @@ const note = [
 
   function createWebshopOrder() {
     if (!webshopPreview) return;
-    if (!webshopPreview.orderLines.length) return alert("Fant ingen produktlinjer. Sjekk at produktnummer finnes i Misemetrics.");
+    if (!webshopPreview.orderLines.length)
+      return alert("Fant ingen produktlinjer. Sjekk at produktnummer finnes i Misemetrics.");
 
-    // Sjekk om ordre med samme ordrenr finnes – oppdater i så fall
-    const existing = data.orders.find((o) => o.orderNumber && o.orderNumber === webshopPreview.orderNumber && !o.deletedAt);
+    const existing = data.orders.find(
+      (o) => o.orderNumber && o.orderNumber === webshopPreview.orderNumber && !o.deletedAt
+    );
+
     if (existing) {
-      if (!confirm(`Ordrenr ${webshopPreview.orderNumber} finnes allerede. Vil du oppdatere den eksisterende ordren?`)) return;
+      if (!confirm(`Ordrenr ${webshopPreview.orderNumber} finnes allerede. Oppdatere?`)) return;
       updateData({ orders: data.orders.map((o) => o.id === existing.id ? { ...webshopPreview, id: existing.id } : o) });
       alert("Eksisterende ordre oppdatert.");
     } else {
-      updateData({ orders: [webshopPreview, ...data.orders] });
+      const seenIds = data.seenOrderIds || [];
+      updateData({
+        orders: [webshopPreview, ...data.orders],
+        seenOrderIds: [...seenIds, webshopPreview.id],
+      });
       alert("Webshopordre opprettet.");
     }
 
@@ -3230,8 +3241,6 @@ const note = [
     setWebshopPreview(null);
     setWebshopUnmatched([]);
   }
-
-  // ── Ordre-funksjoner ──────────────────────────────────────────────────────
 
   function removeOrderLine(index: number) {
     setForm({ ...form, orderLines: form.orderLines.filter((_, i) => i !== index) });
@@ -3259,18 +3268,13 @@ const note = [
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  // Myk sletting – setter deletedAt, ikke fjerner fra listen
   function softDeleteOrder(id: string) {
     if (!confirm("Flytte ordren til papirkurv?")) return;
-    updateData({
-      orders: data.orders.map((o) => o.id === id ? { ...o, deletedAt: new Date().toISOString() } : o),
-    });
+    updateData({ orders: data.orders.map((o) => o.id === id ? { ...o, deletedAt: new Date().toISOString() } : o) });
   }
 
   function restoreOrder(id: string) {
-    updateData({
-      orders: data.orders.map((o) => o.id === id ? { ...o, deletedAt: undefined } : o),
-    });
+    updateData({ orders: data.orders.map((o) => o.id === id ? { ...o, deletedAt: undefined } : o) });
   }
 
   function permanentDeleteOrder(id: string) {
@@ -3278,8 +3282,15 @@ const note = [
     updateData({ orders: data.orders.filter((o) => o.id !== id) });
   }
 
+  function emptyTrash() {
+    if (!confirm(`Slette alle ${deletedOrders.length} ordre i papirkurven permanent?`)) return;
+    updateData({ orders: data.orders.filter((o) => !o.deletedAt) });
+  }
+
   function selectedAllergens(order: Order) {
-    return Object.entries(order.allergens || {}).filter(([, count]) => Number(count) > 0).map(([name, count]) => `${name}: ${count}`);
+    return Object.entries(order.allergens || {})
+      .filter(([, count]) => Number(count) > 0)
+      .map(([name, count]) => `${name}: ${count}`);
   }
 
   function orderSubtotalIncVat(order: Order) {
@@ -3288,9 +3299,12 @@ const note = [
       return sum + (product?.customerPrice || 0) * Number(line.quantity || 0);
     }, 0);
   }
-
-  function orderDiscountAmount(order: Order) { return orderSubtotalIncVat(order) * ((Number(order.discountPercent) || 0) / 100); }
-  function orderTotalIncVat(order: Order) { return orderSubtotalIncVat(order) - orderDiscountAmount(order); }
+  function orderDiscountAmount(order: Order) {
+    return orderSubtotalIncVat(order) * ((Number(order.discountPercent) || 0) / 100);
+  }
+  function orderTotalIncVat(order: Order) {
+    return orderSubtotalIncVat(order) - orderDiscountAmount(order);
+  }
 
   function expandProductForProduction(product: Product, multiplier: number, path: string[] = []): { name: string; amount: number; unit: string; source: string }[] {
     if (path.includes(product.id)) return [];
@@ -3317,30 +3331,26 @@ const note = [
       const lineTotal = (product?.customerPrice || 0) * line.quantity;
       return `<tr><td>${line.quantity}</td><td>${product?.name || "Ukjent"}</td><td>${currency(product?.customerPrice || 0)}</td><td>${currency(lineTotal)}</td></tr>`;
     }).join("");
-
     const subtotalInc = orderSubtotalIncVat(order);
     const discountAmount = orderDiscountAmount(order);
     const totalInc = orderTotalIncVat(order);
     const totalEx = exVatFromIncVat(totalInc, data.settings.foodVat);
     const noteAllergens = order.note?.match(/Allergier \(fra bestilling\):\s*(.+)/i)?.[1]?.trim() || "";
-const allergens = selectedAllergens(order).join(", ") || noteAllergens || "Ingen registrert";
+    const allergens = selectedAllergens(order).join(", ") || noteAllergens || "Ingen registrert";
     const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
-    const customerName = order.customerType === "bedrift" ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
-
+    const customerName = order.customerType === "bedrift"
+      ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
     let prodSection = "";
     if (includeProduction) {
       const isBakery = order.type === "bakeri" || order.type === "egenprodusert";
       if (isBakery) {
         const prodPages = order.orderLines.map((line) => {
-          const product = data.products.find((p) => p.id === line.productId);
-          if (!product) return "";
+          const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
           const qty = Number(line.quantity) || 1;
-
           const recipeMap: Record<string, { name: string; totalAmount: number; unit: string; ingredientRows: string }> = {};
           product.lines.forEach((pl) => {
             if (pl.itemType !== "recipe") return;
-            const recipe = data.recipes.find((r) => r.id === pl.itemId);
-            if (!recipe) return;
+            const recipe = data.recipes.find((r) => r.id === pl.itemId); if (!recipe) return;
             const totalAmount = Number(pl.amount || 0) * qty;
             const recipeBaseAmount = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
             const scale = totalAmount / Math.max(recipeBaseAmount, 1);
@@ -3352,93 +3362,44 @@ const allergens = selectedAllergens(order).join(", ") || noteAllergens || "Ingen
             }).join("");
             recipeMap[recipe.id] = { name: recipe.name, totalAmount, unit: pl.unit, ingredientRows };
           });
-
           const directMaterialRows = product.lines.filter((pl) => pl.itemType === "material").map((pl) => {
             const m = data.materials.find((x) => x.id === pl.itemId);
             return `<tr><td>${escapeHtml(m?.name || "Ukjent")}</td><td class="right">${num(Number(pl.amount || 0) * qty, 3)} ${escapeHtml(pl.unit)}</td></tr>`;
           }).join("");
-
           const recipeBlocks = Object.values(recipeMap).map((entry) =>
             `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(entry.name)} – ${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)} (for ${qty} stk)</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${entry.ingredientRows}</tbody></table></div>`
           ).join("");
-
-          const directSection = directMaterialRows ? `<div class="recipe-block"><h3>Direkte råvarer – ${escapeHtml(product.name)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${directMaterialRows}</tbody></table></div>` : "";
-
+          const directSection = directMaterialRows
+            ? `<div class="recipe-block"><h3>Direkte råvarer – ${escapeHtml(product.name)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${directMaterialRows}</tbody></table></div>` : "";
           return `<div class="prod-product"><h2>${qty} × ${escapeHtml(product.name)}</h2>${recipeBlocks}${directSection}</div>`;
         }).join("");
-
         prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPages}`;
       } else {
         const prodRows = order.orderLines.map((line) => {
-          const product = data.products.find((p) => p.id === line.productId);
-          if (!product) return "";
+          const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
           const rowsForProduct = expandProductForProduction(product, Number(line.quantity) || 0).map((r) => `<tr><td>${r.name}</td><td>${num(r.amount)} ${r.unit}</td></tr>`).join("");
           return `<tr><td colspan="2" style="background:#111827;color:white;font-weight:800;">${line.quantity} × ${product.name}</td></tr>${rowsForProduct}`;
         }).join("");
         prodSection = `<h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table>`;
       }
     }
-
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>
-body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}
-.top{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:12px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}
-table{width:100%;border-collapse:collapse;margin-top:8px}
-th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}
-th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}
-.prod-product{border:2px solid #111827;border-radius:12px;padding:16px;margin:16px 0;break-inside:avoid}
-.prod-product h2{margin:0 0 12px;font-size:18px}
-.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}
-.recipe-block h3{margin:0 0 8px;font-size:14px}
-@media print{button{display:none}body{padding:18px}}
-</style></head><body>
-<button onclick="window.print()">Print</button>
-<div class="top">
-  <div style="display:flex;align-items:center;gap:14px">
-    <img src="/logo.png" style="height:50px;width:auto;object-fit:contain" />
-    <div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div>
-  </div>
-  <div style="text-align:right">
-    <b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br>
-    <p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
-  </div>
-</div>
-<div class="grid">
-  <div class="box">
-    <h2>Kunde</h2>
-    <p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p>
-    <p>Kontakt: ${escapeHtml(order.customer || "-")}</p>
-    <p>Telefon: ${escapeHtml(order.phone || "-")}</p>
-    <p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p>
-    <p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>
-    ${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}
-  </div>
-  <div class="box">
-    <h2>Hensyn</h2>
-    <p><b>Dietter:</b> ${escapeHtml(diets)}</p>
-    <p><b>Allergier:</b> ${escapeHtml(allergens)}</p>
-  </div>
-</div>
-<h2>Ordrelinjer</h2>
-<table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>
-<div class="box">
-  <p>Sum før rabatt: ${currency(subtotalInc)}</p>
-  <p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p>
-  <p class="total">Total inkl. mva: ${currency(totalInc)}</p>
-  <p>Total eks. mva: ${currency(totalEx)}</p>
-</div>
-${prodSection}
-</body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}.prod-product{border:2px solid #111827;border-radius:12px;padding:16px;margin:16px 0;break-inside:avoid}.prod-product h2{margin:0 0 12px;font-size:18px}.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}.recipe-block h3{margin:0 0 8px;font-size:14px}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table><div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${prodSection}</body></html>`);
     w.document.close(); w.focus();
   }
 
-  function productName(id: string) { return data.products.find((p) => p.id === id)?.name || "Ukjent produkt"; }
+  function productName(id: string) {
+    return data.products.find((p) => p.id === id)?.name || "Ukjent produkt";
+  }
 
   function orderAllergenWarnings(order: Order) {
-    const orderAllergens = new Set(order.orderLines.flatMap((l) => { const p = data.products.find((x) => x.id === l.productId); return p ? productAllergens(p) : []; }));
-    return Object.entries(order.allergens || {}).filter(([allergen, count]) => Number(count) > 0 && orderAllergens.has(allergen)).map(([allergen]) => allergen);
+    const orderAllergens = new Set(order.orderLines.flatMap((l) => {
+      const p = data.products.find((x) => x.id === l.productId);
+      return p ? productAllergens(p) : [];
+    }));
+    return Object.entries(order.allergens || {})
+      .filter(([allergen, count]) => Number(count) > 0 && orderAllergens.has(allergen))
+      .map(([allergen]) => allergen);
   }
 
   function printProductPopup(product: Product) {
@@ -3455,8 +3416,6 @@ ${prodSection}
     w.document.close(); w.focus();
   }
 
-  // ── Filtrering og sortering ───────────────────────────────────────────────
-
   const activeOrders = data.orders.filter((o) => !o.deletedAt);
   const deletedOrders = data.orders.filter((o) => !!o.deletedAt);
 
@@ -3465,13 +3424,22 @@ ${prodSection}
     else { setSortField(field); setSortDir("asc"); }
     setOrderPage(1);
   }
-
   function sortIcon(field: typeof sortField) {
     if (sortField !== field) return " ↕";
     return sortDir === "asc" ? " ↑" : " ↓";
   }
 
+  const threeDaysAgo = (() => {
+    const d = new Date(); d.setDate(d.getDate() - 3);
+    return d.toISOString().slice(0, 10);
+  })();
+
   const filteredOrders = activeOrders
+    .filter((o) => {
+      if (showTodayOnly) return o.date === todayStr;
+      if (hideOldOrders) return o.date >= threeDaysAgo;
+      return true;
+    })
     .filter((o) => {
       if (!orderSearch.trim()) return true;
       const q = orderSearch.toLowerCase();
@@ -3485,7 +3453,10 @@ ${prodSection}
     .sort((a, b) => {
       let valA = "", valB = "";
       if (sortField === "date") { valA = `${a.date} ${a.time || ""}`; valB = `${b.date} ${b.time || ""}`; }
-      if (sortField === "customer") { valA = a.customerType === "bedrift" ? (a.companyName || a.customer) : a.customer; valB = b.customerType === "bedrift" ? (b.companyName || b.customer) : b.customer; }
+      if (sortField === "customer") {
+        valA = a.customerType === "bedrift" ? (a.companyName || a.customer) : a.customer;
+        valB = b.customerType === "bedrift" ? (b.companyName || b.customer) : b.customer;
+      }
       if (sortField === "orderNumber") { valA = a.orderNumber || ""; valB = b.orderNumber || ""; }
       return sortDir === "asc" ? valA.localeCompare(valB, "no-NO") : valB.localeCompare(valA, "no-NO");
     });
@@ -3493,47 +3464,67 @@ ${prodSection}
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const pagedOrders = filteredOrders.slice((orderPage - 1) * pageSize, orderPage * pageSize);
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
+  function localDateKey(d: Date) {
+    const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  function calDayOrders(date: string) {
+    return activeOrders.filter((o) => o.date === date).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  }
+  const calMonthStart = new Date(`${calendarMonth}-01T12:00:00`);
+  const calYear = calMonthStart.getFullYear();
+  const calMonth = calMonthStart.getMonth();
+  const calFirstDay = new Date(calYear, calMonth, 1);
+  const calStartOffset = (calFirstDay.getDay() + 6) % 7;
+  const calDays: string[] = [];
+  const calStart = new Date(calYear, calMonth, 1);
+  calStart.setDate(calStart.getDate() - calStartOffset);
+  for (let i = 0; i < 42; i++) { const d = new Date(calStart); d.setDate(calStart.getDate() + i); calDays.push(localDateKey(d)); }
+  function changeCalMonth(delta: number) {
+    const base = new Date(`${calendarMonth}-01T12:00:00`);
+    base.setMonth(base.getMonth() + delta);
+    setCalendarMonth(localDateKey(base).slice(0, 7));
+  }
+  const calSelectedOrders = calDayOrders(calendarSelectedDate);
   return (
     <section className="card">
-      {/* Header */}
       <div className="between">
         <h2>Ordre</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn" onClick={() => setShowTrash(!showTrash)}>
+          <button
+            className={showTrash ? "btn active" : "btn"}
+            onClick={() => setShowTrash(!showTrash)}
+          >
             🗑 Papirkurv {deletedOrders.length > 0 && `(${deletedOrders.length})`}
           </button>
           <button className="btn" onClick={() => { setShowWebshopImport(!showWebshopImport); setShowNewOrder(false); }}>
             {showWebshopImport ? "Lukk webshopimport" : "Importer fra webshop"}
           </button>
           <button className="btn" onClick={() => {
-  const url = `https://${window.location.host}/api/calendar`;
-  navigator.clipboard.writeText(url);
-  alert(`Kalender-URL kopiert!\n\n${url}\n\nLim inn i kalenderappen din under "Abonner fra nett".`);
-}}>
-  📅 Kopier kalender-URL
-</button>
+            const url = `https://${window.location.host}/api/calendar`;
+            navigator.clipboard.writeText(url);
+            alert(`Kalender-URL kopiert!\n\n${url}\n\nLim inn i kalenderappen under «Abonner fra nett».`);
+          }}>
+            📅 Kopier kalender-URL
+          </button>
           <button className="btn active" onClick={() => { setShowNewOrder(!showNewOrder); setShowWebshopImport(false); }}>
             {showNewOrder ? "Skjul skjema" : "Ny ordre"}
           </button>
         </div>
       </div>
 
-      {/* Webshopimport */}
       {showWebshopImport && (
         <div className="soft-box">
           <h3>Importer webshopordre</h3>
           <p style={{ color: "#64748b" }}>
-            Lim inn tekst fra ordrebekreftelsen. Systemet matcher på produktnummer (f.eks. PA000001).
-            Uleselig info havner i notatfeltet. Hvis ordrenr allerede finnes, tilbys oppdatering.
+            Lim inn e-posttekst fra Postmark/webshop. Systemet matcher på produktnummer (f.eks. CA000004).
+            URL-lenker og støytekst fjernes automatisk.
           </p>
           <textarea className="textarea" value={webshopRawText} onChange={(e) => setWebshopRawText(e.target.value)} placeholder="Lim inn e-posttekst her..." style={{ minHeight: 200 }} />
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
             <button className="btn active" onClick={parseWebshopOrder}>Les ordre</button>
             <button className="btn" onClick={() => { setWebshopRawText(""); setWebshopPreview(null); setWebshopUnmatched([]); }}>Tøm</button>
           </div>
-
           {webshopPreview && (
             <div className="soft-box" style={{ marginTop: 14 }}>
               <h4>Forhåndsvisning</h4>
@@ -3549,11 +3540,16 @@ ${prodSection}
               {webshopPreview.note && <p style={{ whiteSpace: "pre-wrap" }}><b>Notat:</b><br />{webshopPreview.note}</p>}
               <table>
                 <thead><tr><th>Produkt</th><th>Antall</th></tr></thead>
-                <tbody>{webshopPreview.orderLines.map((line, i) => { const product = data.products.find((p) => p.id === line.productId); return <tr key={i}><td>{product?.productNumber ? `${product.productNumber} · ` : ""}{product?.name || "Ukjent produkt"}</td><td>{line.quantity}</td></tr>; })}</tbody>
+                <tbody>
+                  {webshopPreview.orderLines.map((line, i) => {
+                    const product = data.products.find((p) => p.id === line.productId);
+                    return <tr key={i}><td>{product?.productNumber ? `${product.productNumber} · ` : ""}{product?.name || "Ukjent produkt"}</td><td>{line.quantity}</td></tr>;
+                  })}
+                </tbody>
               </table>
               {webshopUnmatched.length > 0 && (
                 <div style={{ marginTop: 12, color: "#64748b" }}>
-                  <b>Havner i notat (ikke matchet som produkt):</b>
+                  <b>Ikke matchet (havner i notat):</b>
                   <ul>{webshopUnmatched.map((line, i) => <li key={i}>{line}</li>)}</ul>
                 </div>
               )}
@@ -3565,59 +3561,48 @@ ${prodSection}
         </div>
       )}
 
-      {/* Ny/rediger ordre */}
       {showNewOrder && (
         <div className="soft-box full-width">
           <h3>{editingOrderId ? "Rediger ordre" : "Ny ordre"}</h3>
-
           <div className="form-grid four">
-            <label>Ordrenr (webshop/intern)
-              <input value={form.orderNumber || ""} onChange={(e) => setForm({ ...form, orderNumber: e.target.value })} placeholder="F.eks. 686488" />
-            </label>
+            <label>Ordrenr<input value={form.orderNumber || ""} onChange={(e) => setForm({ ...form, orderNumber: e.target.value })} placeholder="F.eks. 686488" /></label>
             <label>Ordretype
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as Order["type"], customerType: e.target.value === "storkjokken" ? "storkjokken" : form.customerType })}>
-                <option value="catering">Catering</option>
-                <option value="bakeri">Bakeri</option>
-                <option value="pasmuurt">Påsmurt</option>
-                <option value="egenprodusert">Egenprodusert</option>
+                <option value="catering">Catering</option><option value="bakeri">Bakeri</option>
+                <option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option>
                 <option value="storkjokken">Storkjøkken</option>
               </select>
             </label>
             <label>Kundetype
               <select value={form.customerType} onChange={(e) => setForm({ ...form, customerType: e.target.value as Order["customerType"] })}>
-                <option value="privat">Privat</option>
-                <option value="bedrift">Bedrift</option>
-                <option value="storkjokken">Storkjøkken</option>
+                <option value="privat">Privat</option><option value="bedrift">Bedrift</option><option value="storkjokken">Storkjøkken</option>
               </select>
             </label>
             <label>Dato<input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
             <label>Tid<input value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} onBlur={(e) => setForm({ ...form, time: formatTimeInput(e.target.value) })} placeholder="f.eks. 1015" /></label>
           </div>
-
           {form.customerType === "bedrift" || form.customerType === "storkjokken" ? (
             <div className="form-grid four">
-              <label>Bedriftsnavn<input value={form.companyName || ""} onChange={(e) => setForm({ ...form, companyName: e.target.value })} placeholder="Bedrift" /></label>
-              <label>Orgnr<input value={form.orgNumber || ""} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} placeholder="Org.nr" /></label>
-              <label>Bedriftsadresse<input value={form.companyAddress || ""} onChange={(e) => setForm({ ...form, companyAddress: e.target.value })} placeholder="Adresse" /></label>
-              <label>Kontaktperson<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kontaktperson" /></label>
+              <label>Bedriftsnavn<input value={form.companyName || ""} onChange={(e) => setForm({ ...form, companyName: e.target.value })} /></label>
+              <label>Orgnr<input value={form.orgNumber || ""} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} /></label>
+              <label>Bedriftsadresse<input value={form.companyAddress || ""} onChange={(e) => setForm({ ...form, companyAddress: e.target.value })} /></label>
+              <label>Kontaktperson<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} /></label>
             </div>
           ) : (
             <div className="form-grid four">
               <label>Kundenavn<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kunde" /></label>
             </div>
           )}
-
           <div className="form-grid four">
-            <label>Telefon<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefonnummer" /></label>
-            <label>Leveringsadresse<input value={form.deliveryAddress} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" /></label>
+            <label>Telefon<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+            <label>Leveringsadresse<input value={form.deliveryAddress} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} /></label>
             <label>Betalingsinfo<input value={form.paymentInfo || ""} onChange={(e) => setForm({ ...form, paymentInfo: e.target.value })} placeholder="F.eks. Betalt på nett" /></label>
-            <label style={{ gridColumn: "1 / -1" }}>Notat / fritekst
+            <label style={{ gridColumn: "1 / -1" }}>Notat
               <textarea className="textarea" value={form.note || ""} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Fritekst, beskjed, info osv." />
             </label>
-            <label>Antall gjester / porsjoner<input type="number" value={form.guests} onChange={(e) => setForm({ ...form, guests: Number(e.target.value) || 0 })} /></label>
+            <label>Antall gjester<input type="number" value={form.guests} onChange={(e) => setForm({ ...form, guests: Number(e.target.value) || 0 })} /></label>
             <label>Rabatt %<input type="number" value={form.discountPercent || 0} onChange={(e) => setForm({ ...form, discountPercent: Number(e.target.value) || 0 })} /></label>
           </div>
-
           {form.type === "storkjokken" && (
             <div className="soft-box">
               <h3>Fast ordre / gjentagelse</h3>
@@ -3628,7 +3613,6 @@ ${prodSection}
               </>}
             </div>
           )}
-
           <h3>Legg til produkt / meny</h3>
           <div className="form-grid three">
             <select value={lineToAdd.productId} onChange={(e) => setLineToAdd({ ...lineToAdd, productId: e.target.value })}>
@@ -3638,19 +3622,11 @@ ${prodSection}
             <input type="number" value={lineToAdd.quantity} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
             <button className="btn" onClick={() => { if (!lineToAdd.productId) return; setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] }); setLineToAdd({ productId: "", quantity: form.guests || 1 }); }}>Legg til</button>
           </div>
-
           <h3>Produkter i ordre</h3>
           {form.orderLines.map((line, i) => {
             const product = data.products.find((p) => p.id === line.productId);
-            return (
-              <div key={i} className="pill">
-                {line.quantity} × {product?.name}
-                <button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>×</button>
-                {product && <button className="btn" style={{ marginLeft: 8 }} onClick={() => printProductPopup(product)}>Se oppskrift</button>}
-              </div>
-            );
+            return <div key={i} className="pill">{line.quantity} × {product?.name}<button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>×</button>{product && <button className="btn" style={{ marginLeft: 8 }} onClick={() => printProductPopup(product)}>Se oppskrift</button>}</div>;
           })}
-
           <h3>Dietter / hensyn</h3>
           <div className="form-grid four">
             <label>Vegetar<input type="number" value={form.dietVegetarian || "0"} onChange={(e) => setForm({ ...form, dietVegetarian: e.target.value })} /></label>
@@ -3658,21 +3634,14 @@ ${prodSection}
             <label>Gravid<input type="number" value={form.dietPregnant || "0"} onChange={(e) => setForm({ ...form, dietPregnant: e.target.value })} /></label>
             <label>Andre hensyn<input value={form.dietOther || ""} onChange={(e) => setForm({ ...form, dietOther: e.target.value })} placeholder="Fritekst" /></label>
           </div>
-
           <h3>Allergier i ordren</h3>
           <div className="chips">
             {defaultAllergens.map((a) => {
               const active = (form.allergens[a] || 0) > 0;
-              return (
-                <div key={a}>
-                  <button type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: { ...form.allergens, [a]: active ? 0 : 1 } })}>{a}</button>
-                  {active && <input style={{ marginTop: 4, width: 60 }} type="number" value={form.allergens[a]} onChange={(e) => setForm({ ...form, allergens: { ...form.allergens, [a]: Number(e.target.value) } })} />}
-                </div>
-              );
+              return <div key={a}><button type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: { ...form.allergens, [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={form.allergens[a]} onChange={(e) => setForm({ ...form, allergens: { ...form.allergens, [a]: Number(e.target.value) } })} />}</div>;
             })}
           </div>
           {orderAllergenWarnings(form).length > 0 && <div className="warning"><b>Varsel:</b> Ordren inneholder produkter med {orderAllergenWarnings(form).join(", ")}.</div>}
-
           <h3>Ordresum</h3>
           <div className="metric-row">
             <Metric label="Sum før rabatt" value={currency(orderSubtotalIncVat(form))} />
@@ -3680,48 +3649,106 @@ ${prodSection}
             <Metric label="Sum inkl. mva" value={currency(orderTotalIncVat(form))} dark />
             <Metric label="Sum eks. mva" value={currency(exVatFromIncVat(orderTotalIncVat(form), data.settings.foodVat))} />
           </div>
-
           <button className="btn active" onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>
           {editingOrderId && <button className="btn" style={{ marginLeft: 8 }} onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt redigering</button>}
         </div>
       )}
 
-      {/* Søk og sortering */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "16px 0 8px" }}>
-        <input
-          value={orderSearch}
-          onChange={(e) => { setOrderSearch(e.target.value); setOrderPage(1); }}
-          placeholder="Søk ordrenr, kunde, bedrift eller telefon..."
-          style={{ flex: 1, minWidth: 200 }}
-        />
+      {calendarView && (
+        <div className="soft-box" style={{ marginTop: 12 }}>
+          <div className="between" style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn" onClick={() => changeCalMonth(-1)}>←</button>
+              <b style={{ textTransform: "capitalize" }}>
+                {new Date(`${calendarMonth}-01T12:00:00`).toLocaleDateString("no-NO", { month: "long", year: "numeric" })}
+              </b>
+              <button className="btn" onClick={() => changeCalMonth(1)}>→</button>
+            </div>
+            <button className="btn" onClick={() => setCalendarView(false)}>Skjul kalender</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+            {["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"].map((d) => (
+              <b key={d} style={{ padding: "4px 6px", fontSize: 12, color: "#64748b" }}>{d}</b>
+            ))}
+            {calDays.map((date) => {
+              const inMonth = date.slice(0, 7) === calendarMonth;
+              const orders = calDayOrders(date);
+              const isToday = date === todayStr;
+              const isSelected = date === calendarSelectedDate;
+              return (
+                <button key={date} onClick={() => setCalendarSelectedDate(date)}
+                  style={{ minHeight: 64, textAlign: "left", padding: 8, borderRadius: 10, border: isSelected ? "2px solid #0f172a" : isToday ? "2px solid #166534" : "1px solid #dbe4ef", background: isSelected ? "#0f172a" : isToday ? "#dcfce7" : orders.length > 0 ? "#eff6ff" : "white", opacity: inMonth ? 1 : 0.4, cursor: "pointer", color: isSelected ? "white" : "inherit" }}>
+                  <b style={{ fontSize: 13 }}>{Number(date.slice(8, 10))}</b>
+                  {orders.length > 0 && <div style={{ marginTop: 3, fontSize: 11, color: isSelected ? "#93c5fd" : "#3b82f6", fontWeight: 700 }}>{orders.length} ordre</div>}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <h3 style={{ marginBottom: 8 }}>{formatDateNo(calendarSelectedDate)} – {calSelectedOrders.length} ordre</h3>
+            {calSelectedOrders.length === 0 && <p style={{ color: "#64748b" }}>Ingen ordre denne dagen.</p>}
+            {calSelectedOrders.map((o) => {
+              const displayName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
+              return (
+                <div key={o.id} className="editable-row">
+                  <div>
+                    <b>{o.time || "--"}</b> {displayName}
+                    {o.orderNumber && <span style={{ marginLeft: 8, fontSize: 12, color: "#64748b" }}>#{o.orderNumber}</span>}
+                    <br />
+                    <small style={{ color: "#64748b" }}>{o.orderLines.map((l) => `${l.quantity}×${productName(l.productId)}`).join(", ")}</small>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn" onClick={() => { setCalendarView(false); setTimeout(() => setExpandedOrderId(o.id), 100); }}>Vis</button>
+                    <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "16px 0 8px", alignItems: "center" }}>
+        <input value={orderSearch} onChange={(e) => { setOrderSearch(e.target.value); setOrderPage(1); }} placeholder="Søk ordrenr, kunde, bedrift eller telefon..." style={{ flex: 1, minWidth: 200 }} />
       </div>
+
       <div className="chips" style={{ marginBottom: 8 }}>
+        <button className={showTodayOnly ? "btn active" : "btn"} onClick={() => { setShowTodayOnly(!showTodayOnly); if (!showTodayOnly) setHideOldOrders(false); setOrderPage(1); }}>
+          📅 I dag ({activeOrders.filter((o) => o.date === todayStr).length})
+        </button>
+        <button className={hideOldOrders && !showTodayOnly ? "btn active" : "btn"} onClick={() => { setHideOldOrders(true); setShowTodayOnly(false); setOrderPage(1); }}>
+          Siste 3 dager+
+        </button>
+        <button className={!hideOldOrders && !showTodayOnly ? "btn active" : "btn"} onClick={() => { setHideOldOrders(false); setShowTodayOnly(false); setOrderPage(1); }}>
+          Alle ordre
+        </button>
+        <button className={calendarView ? "btn active" : "btn"} onClick={() => setCalendarView(!calendarView)}>
+          🗓 Kalender
+        </button>
         <button className="btn" onClick={() => toggleSort("date")}>Dato{sortIcon("date")}</button>
         <button className="btn" onClick={() => toggleSort("customer")}>Kunde{sortIcon("customer")}</button>
         <button className="btn" onClick={() => toggleSort("orderNumber")}>Ordrenr{sortIcon("orderNumber")}</button>
       </div>
+
       <p style={{ color: "#64748b", margin: "0 0 12px" }}>
-        {orderSearch ? `${filteredOrders.length} treff` : `${activeOrders.length} aktive ordre`}
-        {!orderSearch && " · Alle datoer vises, sortert etter valgt felt"}
+        {showTodayOnly ? `Viser ${filteredOrders.length} ordre for i dag` : hideOldOrders ? `${filteredOrders.length} ordre (siste 3 dager og fremover)` : `${activeOrders.length} aktive ordre totalt`}
+        {orderSearch && ` · ${filteredOrders.length} treff`}
+        {hideOldOrders && !showTodayOnly && (
+          <button className="link" style={{ marginLeft: 8, fontSize: 13 }} onClick={() => { setHideOldOrders(false); setOrderPage(1); }}>Vis alle</button>
+        )}
       </p>
 
-      {/* Ordreliste – kun overskrift, ekspanderes ved klikk */}
       {pagedOrders.map((o) => {
         const warnings = orderAllergenWarnings(o);
         const isExpanded = expandedOrderId === o.id;
-        const displayName = o.customerType === "bedrift" || o.customerType === "storkjokken"
-          ? o.companyName || o.customer
-          : o.customer;
+        const displayName = o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer;
         const total = orderTotalIncVat(o);
-
+        const isToday = o.date === todayStr;
         return (
-          <div key={o.id} className="order-row">
-            {/* Klikkbar overskrift */}
-            <button
-              className="order-row-header"
-              onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}
-            >
+          <div key={o.id} className="order-row" style={{ borderLeft: isToday ? "4px solid #166534" : undefined, background: isToday ? "#f0fdf4" : undefined }}>
+            <button className="order-row-header" onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}>
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                {isToday && <span style={{ background: "#166534", color: "white", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>I dag</span>}
                 <b>{formatDateNo(o.date)} {o.time || ""}</b>
                 <span>{displayName}</span>
                 {o.orderNumber && <span style={{ background: "#f1f5f9", borderRadius: 6, padding: "2px 8px", fontSize: 12 }}>#{o.orderNumber}</span>}
@@ -3734,8 +3761,6 @@ ${prodSection}
                 <span style={{ color: "#64748b" }}>{isExpanded ? "▲" : "▼"}</span>
               </div>
             </button>
-
-            {/* Ekspandert innhold */}
             {isExpanded && (
               <div className="order-row-body">
                 <div className="grid two" style={{ gap: 12, marginBottom: 12 }}>
@@ -3753,20 +3778,14 @@ ${prodSection}
                     {warnings.length > 0 && <div className="warning"><b>Allergivarsel:</b> {warnings.join(", ")}</div>}
                   </div>
                 </div>
-
                 <table>
                   <thead><tr><th>Antall</th><th>Produkt</th><th>Pris</th><th>Sum</th></tr></thead>
-                  <tbody>{o.orderLines.map((l, i) => {
-                    const product = data.products.find((p) => p.id === l.productId);
-                    return <tr key={i}><td>{l.quantity}</td><td>{product?.name || "Ukjent"}</td><td>{currency(product?.customerPrice || 0)}</td><td>{currency((product?.customerPrice || 0) * l.quantity)}</td></tr>;
-                  })}</tbody>
+                  <tbody>{o.orderLines.map((l, i) => { const product = data.products.find((p) => p.id === l.productId); return <tr key={i}><td>{l.quantity}</td><td>{product?.name || "Ukjent"}</td><td>{currency(product?.customerPrice || 0)}</td><td>{currency((product?.customerPrice || 0) * l.quantity)}</td></tr>; })}</tbody>
                 </table>
-
                 <details style={{ marginTop: 10 }}>
                   <summary style={{ cursor: "pointer", color: "#64748b" }}>Produksjonsgrunnlag</summary>
                   <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody></table>
                 </details>
-
                 <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                   <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
                   <button className="btn" onClick={() => printOrder(o, true)}>Print med grunnlag</button>
@@ -3785,10 +3804,12 @@ ${prodSection}
         <button className="btn" disabled={orderPage >= totalPages} onClick={() => setOrderPage(orderPage + 1)}>Neste</button>
       </div>
 
-      {/* Papirkurv */}
       {showTrash && (
         <div className="soft-box" style={{ marginTop: 24 }}>
-          <h3>🗑 Papirkurv – {deletedOrders.length} ordre</h3>
+          <div className="between">
+            <h3>🗑 Papirkurv – {deletedOrders.length} ordre</h3>
+            {deletedOrders.length > 0 && <button className="btn danger" onClick={emptyTrash}>Tøm papirkurv</button>}
+          </div>
           <p style={{ color: "#64748b" }}>Ordre i papirkurven kan gjenopprettes eller slettes permanent.</p>
           {deletedOrders.length === 0 && <p>Papirkurven er tom.</p>}
           {deletedOrders.map((o) => {
@@ -3798,10 +3819,8 @@ ${prodSection}
                 <div>
                   <b>{formatDateNo(o.date)} {o.time || ""} · {displayName}</b>
                   {o.orderNumber && <span style={{ marginLeft: 8, fontSize: 12, color: "#64748b" }}>#{o.orderNumber}</span>}
-                  <br />
-                  <small>{o.orderLines.map((l) => `${l.quantity}×${productName(l.productId)}`).join(", ")}</small>
-                  <br />
-                  <small style={{ color: "#64748b" }}>Slettet: {o.deletedAt ? formatDateNo(o.deletedAt.slice(0, 10)) : "-"}</small>
+                  <br /><small>{o.orderLines.map((l) => `${l.quantity}×${productName(l.productId)}`).join(", ")}</small>
+                  <br /><small style={{ color: "#64748b" }}>Slettet: {o.deletedAt ? formatDateNo(o.deletedAt.slice(0, 10)) : "-"}</small>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="btn" onClick={() => restoreOrder(o.id)}>Gjenopprett</button>
@@ -3814,33 +3833,10 @@ ${prodSection}
       )}
 
       <style jsx global>{`
-        .order-row {
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          margin: 8px 0;
-          overflow: hidden;
-          background: white;
-        }
-        .order-row-header {
-          width: 100%;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 14px 16px;
-          background: white;
-          border: 0;
-          cursor: pointer;
-          text-align: left;
-          gap: 12px;
-        }
-        .order-row-header:hover {
-          background: #f8fafc;
-        }
-        .order-row-body {
-          padding: 0 16px 16px;
-          border-top: 1px solid #e2e8f0;
-          background: #fafafa;
-        }
+        .order-row { border: 1px solid #e2e8f0; border-radius: 14px; margin: 8px 0; overflow: hidden; background: white; }
+        .order-row-header { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: inherit; border: 0; cursor: pointer; text-align: left; gap: 12px; }
+        .order-row-header:hover { filter: brightness(0.97); }
+        .order-row-body { padding: 0 16px 16px; border-top: 1px solid #e2e8f0; background: #fafafa; }
       `}</style>
     </section>
   );
