@@ -5066,8 +5066,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     setExpandedMobileId(opening ? m.id : null);
     if (opening) {
       setTimeout(() => {
-        cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 50);
+cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      }, 50);
     }
   }
 
@@ -5122,8 +5121,7 @@ function MobileProductCard({ p }: { p: Product }) {
     setExpandedMobileId(opening ? cardId : null);
     if (opening) {
       setTimeout(() => {
-        cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 50);
+cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      }, 50);
     }
   }
 
