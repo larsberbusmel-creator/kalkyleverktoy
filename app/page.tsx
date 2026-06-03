@@ -4804,6 +4804,15 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const [expandedMobileId, setExpandedMobileId] = useState<string | null>(null);
   const pageSize = 50;
 
+  function toggleMobileCard(id: string) {
+  const currentScroll = window.scrollY;
+  setExpandedMobileId((prev) => prev === id ? null : id);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: currentScroll, behavior: "instant" as ScrollBehavior });
+    });
+  });
+}
   const categoryLocations: Record<string, string[]> = {
     "Mel og frø":             ["Kjøkken", "Lager"],
     "Meieri":                 ["Kjølerom", "Kafé"],
@@ -5072,7 +5081,7 @@ cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      
 
   return (
     <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-      <button onClick={handleToggle} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+      <button onClick={() => toggleMobileCard(m.id)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
         <div>
           <b style={{ fontSize: 15 }}>{m.name}</b>
           <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
@@ -5127,7 +5136,7 @@ cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      
 
   return (
     <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-      <button onClick={handleToggle} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+      <button onClick={() => toggleMobileCard(cardId)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
         <div>
           <b style={{ fontSize: 15 }}>{p.name}</b>
           <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
