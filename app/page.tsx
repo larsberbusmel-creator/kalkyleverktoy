@@ -4801,6 +4801,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState("Alle");
   const [inventoryPage, setInventoryPage] = useState(1);
   const [showInventoryStats, setShowInventoryStats] = useState(false);
+  const [expandedMobileId, setExpandedMobileId] = useState<string | null>(null);
   const pageSize = 50;
 
   const categoryLocations: Record<string, string[]> = {
@@ -4835,7 +4836,6 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const counts = currentInventory.items || {};
   const waste = currentInventory.waste || {};
   const isLocked = !!currentInventory.locked;
-
   const [year, month] = inventoryMonth.split("-");
 
   const xlsxColors: Record<string, string> = {
@@ -4857,133 +4857,42 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     "Mat (annet)": "#f8fafc",
   };
 
-  // ── Svinn per rad ─────────────────────────────────────────────────────────
-
-  function getMaterialWaste(materialId: string): number {
-    const item = counts[materialId] as any;
-    return item?.waste || 0;
-  }
-
+  function getMaterialWaste(materialId: string): number { return (counts[materialId] as any)?.waste || 0; }
   function updateMaterialWaste(materialId: string, wasteAmount: number) {
     const material = data.materials.find((m) => m.id === materialId);
     const existing = (counts[materialId] as any) || {};
-    updateData({
-      inventoryCounts: {
-        ...countsByMonth,
-        [inventoryMonth]: {
-          ...currentInventory,
-          waste,
-          items: {
-            ...counts,
-            [materialId]: {
-              ...existing,
-              packagePrice: material?.packagePrice || existing.packagePrice || 0,
-              pricePerUnit: material?.pricePerUnit || existing.pricePerUnit || 0,
-              waste: wasteAmount,
-            },
-          },
-        },
-      },
-    });
+    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packagePrice: material?.packagePrice || existing.packagePrice || 0, pricePerUnit: material?.pricePerUnit || existing.pricePerUnit || 0, waste: wasteAmount } } } } });
   }
-
-  function getProductWaste(productId: string): number {
-    const key = `product_${productId}`;
-    const item = counts[key] as any;
-    return item?.waste || 0;
-  }
-
+  function getProductWaste(productId: string): number { return (counts[`product_${productId}`] as any)?.waste || 0; }
   function updateProductWaste(product: Product, wasteAmount: number) {
     const key = `product_${product.id}`;
     const existing = (counts[key] as any) || {};
-    updateData({
-      inventoryCounts: {
-        ...countsByMonth,
-        [inventoryMonth]: {
-          ...currentInventory,
-          waste,
-          items: {
-            ...counts,
-            [key]: {
-              ...existing,
-              waste: wasteAmount,
-            },
-          },
-        },
-      },
-    });
+    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [key]: { ...existing, waste: wasteAmount } } } } });
   }
-
-  function materialWasteValue(m: Material): number {
-    const w = getMaterialWaste(m.id);
-    return w * m.pricePerUnit;
-  }
-
-  function productWasteValue(p: Product): number {
-    const w = getProductWaste(p.id);
-    return w * productUnitCost(p);
-  }
-
-  function totalWasteValue(): number {
-    const matWaste = data.materials.reduce((sum, m) => sum + materialWasteValue(m), 0);
-    const prodWaste = data.products
-      .filter((p) => egenprodusertCategories.includes(p.category))
-      .reduce((sum, p) => sum + productWasteValue(p), 0);
-    return matWaste + prodWaste;
-  }
-
+  function materialWasteValue(m: Material): number { return getMaterialWaste(m.id) * m.pricePerUnit; }
+  function productWasteValue(p: Product): number { return getProductWaste(p.id) * productUnitCost(p); }
+  function totalWasteValue(): number { return data.materials.reduce((sum, m) => sum + materialWasteValue(m), 0) + data.products.filter((p) => egenprodusertCategories.includes(p.category)).reduce((sum, p) => sum + productWasteValue(p), 0); }
   function bucketWasteValue(bucket: string): number {
-    if (egenprodusertCategories.includes(bucket)) {
-      return data.products
-        .filter((p) => p.category === bucket)
-        .reduce((sum, p) => sum + productWasteValue(p), 0);
-    }
-    return data.materials
-      .filter((m) => m.category === bucket)
-      .reduce((sum, m) => sum + materialWasteValue(m), 0);
+    if (egenprodusertCategories.includes(bucket)) return data.products.filter((p) => p.category === bucket).reduce((sum, p) => sum + productWasteValue(p), 0);
+    return data.materials.filter((m) => m.category === bucket).reduce((sum, m) => sum + materialWasteValue(m), 0);
   }
 
-  // ── Råvare-funksjoner ─────────────────────────────────────────────────────
-
- function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
+  function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
     const item = counts[materialId] as any;
     if (!item) return { packages: 0, loose: 0 };
     if (item.locations?.[location]) return item.locations[location];
-    // Bakoverkompatibilitet: vis gamle packages/loose på første sted
-    const locations = categoryLocations[data.materials.find((m) => m.id === materialId)?.category || ""] || [];
-    if (locations[0] === location) {
-      return { packages: item.packages || 0, loose: item.loose || 0 };
-    }
+    const locs = categoryLocations[data.materials.find((m) => m.id === materialId)?.category || ""] || [];
+    if (locs[0] === location) return { packages: item.packages || 0, loose: item.loose || 0 };
     return { packages: 0, loose: 0 };
   }
 
   function updateLocationCount(materialId: string, location: string, packages: number, loose: number) {
     const material = data.materials.find((m) => m.id === materialId);
     const existing = (counts[materialId] as any) || {};
-    const existingLocations = existing.locations || {};
-    const newLocations = { ...existingLocations, [location]: { packages, loose } };
+    const newLocations = { ...(existing.locations || {}), [location]: { packages, loose } };
     const totalPackages = Object.values(newLocations).reduce((s: number, l: any) => s + (l.packages || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-    updateData({
-      inventoryCounts: {
-        ...countsByMonth,
-        [inventoryMonth]: {
-          ...currentInventory,
-          waste,
-          items: {
-            ...counts,
-            [materialId]: {
-              ...existing,
-              packages: totalPackages,
-              loose: totalLoose,
-              packagePrice: material?.packagePrice || 0,
-              pricePerUnit: material?.pricePerUnit || 0,
-              locations: newLocations,
-            },
-          },
-        },
-      },
-    });
+    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: material?.packagePrice || 0, pricePerUnit: material?.pricePerUnit || 0, locations: newLocations } } } } });
   }
 
   function materialInventoryValue(m: Material) {
@@ -4991,11 +4900,8 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     return c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit);
   }
 
-  // ── Egenprodusert-funksjoner ──────────────────────────────────────────────
-
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
-    const key = `product_${productId}`;
-    const item = counts[key] as any;
+    const item = counts[`product_${productId}`] as any;
     if (!item) return { cases: 0, loose: 0 };
     if (item.locations?.[location]) return item.locations[location];
     return { cases: 0, loose: 0 };
@@ -5004,75 +4910,28 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   function updateProductCount(product: Product, location: string, cases: number, loose: number) {
     const key = `product_${product.id}`;
     const existing = (counts[key] as any) || {};
-    const existingLocations = existing.locations || {};
-    const newLocations = { ...existingLocations, [location]: { cases, loose } };
+    const newLocations = { ...(existing.locations || {}), [location]: { cases, loose } };
     const totalCases = Object.values(newLocations).reduce((s: number, l: any) => s + (l.cases || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-    updateData({
-      inventoryCounts: {
-        ...countsByMonth,
-        [inventoryMonth]: {
-          ...currentInventory,
-          waste,
-          items: {
-            ...counts,
-            [key]: {
-              ...existing,
-              packages: totalCases,
-              loose: totalLoose,
-              packagePrice: 0,
-              pricePerUnit: 0,
-              locations: newLocations,
-            },
-          },
-        },
-      },
-    });
+    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [key]: { ...existing, packages: totalCases, loose: totalLoose, packagePrice: 0, pricePerUnit: 0, locations: newLocations } } } } });
   }
 
   function productInventoryValue(product: Product, unitCost: number): number {
-    const key = `product_${product.id}`;
-    const c = counts[key] as any || { packages: 0, loose: 0 };
-    const unitsPerCase = Number(product.unitsPerCase || 1);
-    return (c.packages * unitsPerCase + c.loose) * unitCost;
+    const c = counts[`product_${product.id}`] as any || { packages: 0, loose: 0 };
+    return (c.packages * Number(product.unitsPerCase || 1) + c.loose) * unitCost;
   }
-
-  function egenprodusertBucketValue(bucket: string): number {
-    return data.products
-      .filter((p) => p.category === bucket)
-      .reduce((sum, p) => sum + productInventoryValue(p, productUnitCost(p)), 0);
-  }
-
-  // ── Felles ───────────────────────────────────────────────────────────────
-
+  function egenprodusertBucketValue(bucket: string): number { return data.products.filter((p) => p.category === bucket).reduce((sum, p) => sum + productInventoryValue(p, productUnitCost(p)), 0); }
   function belongsToBucket(m: Material, bucket: string) {
     if (bucket === "Alle") return true;
     if (bucket === "Mat") return !drinkBuckets.includes(m.category) && m.category !== "Deli";
-    if (drinkBuckets.includes(bucket)) return m.category === bucket;
     return m.category === bucket;
   }
-
   function bucketValue(bucket: string) {
     if (egenprodusertCategories.includes(bucket)) return egenprodusertBucketValue(bucket);
     return data.materials.reduce((sum, m) => belongsToBucket(m, bucket) ? sum + materialInventoryValue(m) : sum, 0);
   }
 
-  function updateWaste(bucket: string, amount: number) {
-    updateData({
-      inventoryCounts: {
-        ...countsByMonth,
-        [inventoryMonth]: {
-          ...currentInventory,
-          items: counts,
-          waste: { ...waste, [bucket]: amount },
-        },
-      },
-    });
-  }
-
-  const totalMaterials = data.materials
-    .filter((m) => !egenprodusertCategories.includes(m.category))
-    .reduce((sum, m) => sum + materialInventoryValue(m), 0);
+  const totalMaterials = data.materials.filter((m) => !egenprodusertCategories.includes(m.category)).reduce((sum, m) => sum + materialInventoryValue(m), 0);
   const totalEgenprodusert = egenprodusertCategories.reduce((sum, b) => sum + egenprodusertBucketValue(b), 0);
   const total = totalMaterials + totalEgenprodusert;
 
@@ -5080,371 +4939,217 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     .filter((m) => `${m.name} ${m.category}`.toLowerCase().includes(inventorySearch.toLowerCase()))
     .filter((m) => inventoryCategoryFilter === "Alle" ? true : belongsToBucket(m, inventoryCategoryFilter))
     .filter((m) => !egenprodusertCategories.includes(m.category))
-    .sort((a, b) => {
-      const idxA = accountingBuckets.indexOf(a.category);
-      const idxB = accountingBuckets.indexOf(b.category);
-      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB) || a.name.localeCompare(b.name, "no-NO");
-    });
+    .sort((a, b) => { const idxA = accountingBuckets.indexOf(a.category); const idxB = accountingBuckets.indexOf(b.category); return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB) || a.name.localeCompare(b.name, "no-NO"); });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleMaterials = filtered.slice((inventoryPage - 1) * pageSize, inventoryPage * pageSize);
-
-  // Dynamisk gruppering – henter alle kategorier fra data
-  const allMaterialCategories = Array.from(new Set(data.materials.map((m) => m.category)))
-    .filter((c) => !egenprodusertCategories.includes(c));
-
-  const groupedMaterials = allMaterialCategories.reduce((acc, bucket) => {
-    const items = visibleMaterials.filter((m) => m.category === bucket);
-    if (items.length > 0) acc[bucket] = items;
-    return acc;
-  }, {} as Record<string, Material[]>);
+  const allMaterialCategories = Array.from(new Set(data.materials.map((m) => m.category))).filter((c) => !egenprodusertCategories.includes(c));
+  const groupedMaterials = allMaterialCategories.reduce((acc, bucket) => { const items = visibleMaterials.filter((m) => m.category === bucket); if (items.length > 0) acc[bucket] = items; return acc; }, {} as Record<string, Material[]>);
 
   function valueForBucketInMonth(monthKey: string, bucket: string) {
     if (egenprodusertCategories.includes(bucket)) {
-      const monthData = countsByMonth[monthKey];
-      const items = monthData?.items || {};
-      return data.products
-        .filter((p) => p.category === bucket)
-        .reduce((sum, p) => {
-          const key = `product_${p.id}`;
-          const c = items[key] as any || { packages: 0, loose: 0 };
-          const unitsPerCase = Number(p.unitsPerCase || 1);
-          return sum + (c.packages * unitsPerCase + c.loose) * productUnitCost(p);
-        }, 0);
+      const items = countsByMonth[monthKey]?.items || {};
+      return data.products.filter((p) => p.category === bucket).reduce((sum, p) => { const c = items[`product_${p.id}`] as any || { packages: 0, loose: 0 }; return sum + (c.packages * Number(p.unitsPerCase || 1) + c.loose) * productUnitCost(p); }, 0);
     }
-    const monthData = countsByMonth[monthKey];
-    const items = monthData?.items || {};
-    return data.materials.reduce((sum, m) => {
-      if (!belongsToBucket(m, bucket)) return sum;
-      const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
-      return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit);
-    }, 0);
+    const items = countsByMonth[monthKey]?.items || {};
+    return data.materials.reduce((sum, m) => { if (!belongsToBucket(m, bucket)) return sum; const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit }; return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit); }, 0);
   }
 
   const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
     const monthData = countsByMonth[monthKey];
-    const totalValue = statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0);
-    return { monthKey, total: totalValue, wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) };
+    return { monthKey, total: statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0), wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) };
   }).slice(-12);
-
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
-
-  // ── Excel-eksport ─────────────────────────────────────────────────────────
 
   async function exportInventoryXlsx() {
     const ExcelJS = await import("exceljs");
     const wb = new ExcelJS.Workbook();
-
-    const sheetNames: Record<string, string> = {
-      "Kaffe/te": "Kaffe-te",
-      "Kjøkken, egenprodusert": "Kjøkken-egenprod",
-      "Bakeri, egenprodusert": "Bakeri-egenprod",
-    };
-
-    function getColor(bucket: string) {
-      return xlsxColors[bucket] || "607D8B";
-    }
-
-    function safeSheetName(name: string) {
-      return (sheetNames[name] || name).replace(/[\/\\?*[\]]/g, "-").slice(0, 31);
-    }
-
-    function addStyledHeaderRow(ws: any, values: string[], color: string) {
-      const row = ws.addRow(values);
-      row.eachCell((cell: any) => {
-        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
-        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-        cell.alignment = { horizontal: "center" };
-      });
-      return row;
-    }
-
-    // Dynamisk – alle råvarekategorier fra data
-    const allCategories = Array.from(new Set(data.materials.map((m) => m.category)))
-      .filter((c) => !egenprodusertCategories.includes(c));
-
+    const sheetNames: Record<string, string> = { "Kaffe/te": "Kaffe-te", "Kjøkken, egenprodusert": "Kjøkken-egenprod", "Bakeri, egenprodusert": "Bakeri-egenprod" };
+    function getColor(bucket: string) { return xlsxColors[bucket] || "607D8B"; }
+    function safeSheetName(name: string) { return (sheetNames[name] || name).replace(/[\/\\?*[\]]/g, "-").slice(0, 31); }
+    function addStyledHeaderRow(ws: any, values: string[], color: string) { const row = ws.addRow(values); row.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }; cell.alignment = { horizontal: "center" }; }); return row; }
+    const allCategories = Array.from(new Set(data.materials.map((m) => m.category))).filter((c) => !egenprodusertCategories.includes(c));
     allCategories.forEach((bucket) => {
-      const materials = data.materials
-        .filter((m) => m.category === bucket)
-        .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
-      if (materials.length === 0) return;
-
+      const materials = data.materials.filter((m) => m.category === bucket).sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
+      if (!materials.length) return;
       const locations = categoryLocations[bucket] || ["Lager"];
       const ws = wb.addWorksheet(safeSheetName(bucket));
       const color = getColor(bucket);
-      const totalCols = 3 + locations.length * 2 + 1 + 1; // +1 for Svinn
-
-      ws.columns = [
-        { width: 30 }, { width: 14 }, { width: 12 },
-        ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]),
-        { width: 10 }, // Svinn
-        { width: 14 }, // Verdi
-      ];
-
+      const totalCols = 3 + locations.length * 2 + 2;
+      ws.columns = [{ width: 30 }, { width: 14 }, { width: 12 }, ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]), { width: 10 }, { width: 14 }];
       const titleRow = ws.addRow([`Varetelling ${inventoryMonth} – ${bucket}`]);
-      ws.mergeCells(1, 1, 1, totalCols);
-      titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-      titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
-      titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
-      titleRow.height = 28;
-      ws.addRow([]);
-
+      ws.mergeCells(1, 1, 1, totalCols); titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } }; titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } }; titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" }; titleRow.height = 28; ws.addRow([]);
       const locHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), "Svinn", ""]);
-      locations.forEach((loc, i) => {
-        const col = 4 + i * 2;
-        ws.mergeCells(3, col, 3, col + 1);
-        const cell = locHeaderRow.getCell(col);
-        cell.value = loc;
-        cell.font = { bold: true, color: { argb: "FF000000" } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
-        cell.alignment = { horizontal: "center" };
-        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } };
-      });
-
-      addStyledHeaderRow(ws, [
-        "Vare", "Råvarekost pr pk", "Pakning",
-        ...locations.flatMap(() => ["Pakker", "Løs"]),
-        "Svinn", "Verdi"
-      ], color);
-
+      locations.forEach((loc, i) => { const col = 4 + i * 2; ws.mergeCells(3, col, 3, col + 1); const cell = locHeaderRow.getCell(col); cell.value = loc; cell.font = { bold: true, color: { argb: "FF000000" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.alignment = { horizontal: "center" }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } }; });
+      addStyledHeaderRow(ws, ["Vare", "Råvarekost pr pk", "Pakning", ...locations.flatMap(() => ["Pakker", "Løs"]), "Svinn", "Verdi"], color);
       materials.forEach((m) => {
-        const value = materialInventoryValue(m);
-        const wasteAmt = getMaterialWaste(m.id);
+        const value = materialInventoryValue(m); const wasteAmt = getMaterialWaste(m.id);
         const rowValues: any[] = [m.name, m.packagePrice, `${m.packageSize} ${m.unit}`];
-        locations.forEach((loc) => {
-          const lc = getLocationCount(m.id, loc);
-          rowValues.push(lc.packages || "");
-          rowValues.push(lc.loose || "");
-        });
-        rowValues.push(wasteAmt || "");
-        rowValues.push(value);
+        locations.forEach((loc) => { const lc = getLocationCount(m.id, loc); rowValues.push(lc.packages || ""); rowValues.push(lc.loose || ""); });
+        rowValues.push(wasteAmt || ""); rowValues.push(value);
         const row = ws.addRow(rowValues);
-        row.eachCell((cell: any, colNumber: number) => {
-          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
-          if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00";
-        });
-        locations.forEach((_, i) => {
-          const col = 4 + i * 2;
-          row.getCell(col).border = { ...row.getCell(col).border, left: { style: "medium" } };
-          row.getCell(col + 1).border = { ...row.getCell(col + 1).border, right: { style: "medium" } };
-        });
+        row.eachCell((cell: any, colNumber: number) => { cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } }; if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00"; });
+        locations.forEach((_, i) => { const col = 4 + i * 2; row.getCell(col).border = { ...row.getCell(col).border, left: { style: "medium" } }; row.getCell(col + 1).border = { ...row.getCell(col + 1).border, right: { style: "medium" } }; });
       });
-
-      const sumRow = ws.addRow([
-        `SUM ${bucket}`, "", "",
-        ...locations.flatMap(() => ["", ""]),
-        bucketWasteValue(bucket),
-        bucketValue(bucket),
-      ]);
-      sumRow.eachCell((cell: any, colNumber: number) => {
-        cell.font = { bold: true };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
-        cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
-        if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00";
-      });
+      const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), bucketWasteValue(bucket), bucketValue(bucket)]);
+      sumRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00"; });
     });
-
-    // Egenproduserte ark – dynamisk fra produktkategorier
-    const allEgenprodCategories = Array.from(new Set(data.products.map((p) => p.category)))
-      .filter((c) => egenprodusertCategories.includes(c));
-
+    const allEgenprodCategories = Array.from(new Set(data.products.map((p) => p.category))).filter((c) => egenprodusertCategories.includes(c));
     allEgenprodCategories.forEach((bucket) => {
       const products = data.products.filter((p) => p.category === bucket);
-      if (products.length === 0) return;
-
+      if (!products.length) return;
       const locations = categoryLocations[bucket] || ["Lager"];
       const ws = wb.addWorksheet(safeSheetName(bucket));
       const color = getColor(bucket);
-      const totalCols = 3 + locations.length * 2 + 1 + 1; // +1 for Svinn
-
-      ws.columns = [
-        { width: 30 }, { width: 14 }, { width: 12 },
-        ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]),
-        { width: 10 }, // Svinn
-        { width: 14 }, // Verdi
-      ];
-
+      const totalCols = 3 + locations.length * 2 + 2;
+      ws.columns = [{ width: 30 }, { width: 14 }, { width: 12 }, ...locations.flatMap(() => [{ width: 10 }, { width: 10 }]), { width: 10 }, { width: 14 }];
       const titleRow = ws.addRow([`Varetelling ${inventoryMonth} – ${bucket} (egenprodusert)`]);
-      ws.mergeCells(1, 1, 1, totalCols);
-      titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-      titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } };
-      titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
-      titleRow.height = 28;
-      ws.addRow([]);
-
+      ws.mergeCells(1, 1, 1, totalCols); titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } }; titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${color}` } }; titleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" }; titleRow.height = 28; ws.addRow([]);
       const locHeaderRow = ws.addRow(["", "", "", ...locations.flatMap((loc) => [loc, ""]), "Svinn", ""]);
-      locations.forEach((loc, i) => {
-        const col = 4 + i * 2;
-        ws.mergeCells(3, col, 3, col + 1);
-        const cell = locHeaderRow.getCell(col);
-        cell.value = loc;
-        cell.font = { bold: true, color: { argb: "FF000000" } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
-        cell.alignment = { horizontal: "center" };
-        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } };
-      });
-
-      addStyledHeaderRow(ws, [
-        "Produkt", "Kostpris/stk", "Per eske",
-        ...locations.flatMap(() => ["Esker", "Løs stk"]),
-        "Svinn stk", "Verdi"
-      ], color);
-
+      locations.forEach((loc, i) => { const col = 4 + i * 2; ws.mergeCells(3, col, 3, col + 1); const cell = locHeaderRow.getCell(col); cell.value = loc; cell.font = { bold: true, color: { argb: "FF000000" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.alignment = { horizontal: "center" }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "medium" }, right: { style: "medium" } }; });
+      addStyledHeaderRow(ws, ["Produkt", "Kostpris/stk", "Per eske", ...locations.flatMap(() => ["Esker", "Løs stk"]), "Svinn stk", "Verdi"], color);
       products.forEach((p) => {
-        const unitCost = productUnitCost(p);
-        const unitsPerCase = Number(p.unitsPerCase || 1);
-        const value = productInventoryValue(p, unitCost);
-        const wasteAmt = getProductWaste(p.id);
-        const rowValues: any[] = [p.name, unitCost, unitsPerCase];
-        locations.forEach((loc) => {
-          const lc = getProductCount(p.id, loc);
-          rowValues.push(lc.cases || "");
-          rowValues.push(lc.loose || "");
-        });
-        rowValues.push(wasteAmt || "");
-        rowValues.push(value);
+        const unitCost = productUnitCost(p); const value = productInventoryValue(p, unitCost); const wasteAmt = getProductWaste(p.id);
+        const rowValues: any[] = [p.name, unitCost, Number(p.unitsPerCase || 1)];
+        locations.forEach((loc) => { const lc = getProductCount(p.id, loc); rowValues.push(lc.cases || ""); rowValues.push(lc.loose || ""); });
+        rowValues.push(wasteAmt || ""); rowValues.push(value);
         const row = ws.addRow(rowValues);
-        row.eachCell((cell: any, colNumber: number) => {
-          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
-          if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00";
-        });
-        locations.forEach((_, i) => {
-          const col = 4 + i * 2;
-          row.getCell(col).border = { ...row.getCell(col).border, left: { style: "medium" } };
-          row.getCell(col + 1).border = { ...row.getCell(col + 1).border, right: { style: "medium" } };
-        });
+        row.eachCell((cell: any, colNumber: number) => { cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } }; if (colNumber === 2 || colNumber === totalCols) cell.numFmt = "#,##0.00"; });
+        locations.forEach((_, i) => { const col = 4 + i * 2; row.getCell(col).border = { ...row.getCell(col).border, left: { style: "medium" } }; row.getCell(col + 1).border = { ...row.getCell(col + 1).border, right: { style: "medium" } }; });
       });
-
-      const sumRow = ws.addRow([
-        `SUM ${bucket}`, "", "",
-        ...locations.flatMap(() => ["", ""]),
-        bucketWasteValue(bucket),
-        egenprodusertBucketValue(bucket),
-      ]);
-      sumRow.eachCell((cell: any, colNumber: number) => {
-        cell.font = { bold: true };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
-        cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
-        if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00";
-      });
+      const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), bucketWasteValue(bucket), egenprodusertBucketValue(bucket)]);
+      sumRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00"; });
     });
-
-    // Svinn-fane
     const wsWaste = wb.addWorksheet("Svinn");
     wsWaste.columns = [{ width: 35 }, { width: 20 }, { width: 20 }];
-
     const wasteTitleRow = wsWaste.addRow([`Svinn – ${inventoryMonth}`]);
-    wsWaste.mergeCells(1, 1, 1, 3);
-    wasteTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-    wasteTitleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } };
-    wasteTitleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
-    wasteTitleRow.height = 28;
-    wsWaste.addRow([]);
-
+    wsWaste.mergeCells(1, 1, 1, 3); wasteTitleRow.getCell(1).font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } }; wasteTitleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } }; wasteTitleRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" }; wasteTitleRow.height = 28; wsWaste.addRow([]);
     const wasteHeaderRow = wsWaste.addRow(["Kategori / Produkt", "Svinn (mengde)", "Svinn (varekost)"]);
-    wasteHeaderRow.eachCell((cell: any) => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } };
-      cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-    });
-
-    // Råvarer med svinn
+    wasteHeaderRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }; });
     allCategories.forEach((bucket) => {
-      const materialsWithWaste = data.materials
-        .filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0)
-        .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
-      if (materialsWithWaste.length === 0) return;
-
+      const mw = data.materials.filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0).sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
+      if (!mw.length) return;
       const color = getColor(bucket);
       const catRow = wsWaste.addRow([bucket, "", currency(bucketWasteValue(bucket))]);
-      catRow.eachCell((cell: any) => {
-        cell.font = { bold: true };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
-        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-      });
-
-      materialsWithWaste.forEach((m) => {
-        const wasteAmt = getMaterialWaste(m.id);
-        const wasteVal = materialWasteValue(m);
-        const row = wsWaste.addRow([`  ${m.name}`, `${wasteAmt} ${m.unit}`, wasteVal]);
-        row.getCell(3).numFmt = "#,##0.00";
-        row.eachCell((cell: any) => {
-          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
-        });
-      });
+      catRow.eachCell((cell: any) => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }; });
+      mw.forEach((m) => { const row = wsWaste.addRow([`  ${m.name}`, `${getMaterialWaste(m.id)} ${m.unit}`, materialWasteValue(m)]); row.getCell(3).numFmt = "#,##0.00"; row.eachCell((cell: any) => { cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } }; }); });
     });
-
-    // Egenproduserte med svinn
     allEgenprodCategories.forEach((bucket) => {
-      const productsWithWaste = data.products
-        .filter((p) => p.category === bucket && getProductWaste(p.id) > 0);
-      if (productsWithWaste.length === 0) return;
-
+      const pw = data.products.filter((p) => p.category === bucket && getProductWaste(p.id) > 0);
+      if (!pw.length) return;
       const color = getColor(bucket);
       const catRow = wsWaste.addRow([`${bucket} (egenprodusert)`, "", currency(bucketWasteValue(bucket))]);
-      catRow.eachCell((cell: any) => {
-        cell.font = { bold: true };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } };
-        cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-      });
-
-      productsWithWaste.forEach((p) => {
-        const wasteAmt = getProductWaste(p.id);
-        const wasteVal = productWasteValue(p);
-        const row = wsWaste.addRow([`  ${p.name}`, `${wasteAmt} stk`, wasteVal]);
-        row.getCell(3).numFmt = "#,##0.00";
-        row.eachCell((cell: any) => {
-          cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } };
-        });
-      });
+      catRow.eachCell((cell: any) => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }; });
+      pw.forEach((p) => { const row = wsWaste.addRow([`  ${p.name}`, `${getProductWaste(p.id)} stk`, productWasteValue(p)]); row.getCell(3).numFmt = "#,##0.00"; row.eachCell((cell: any) => { cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } }; }); });
     });
-
     wsWaste.addRow([]);
     const totalWasteRow = wsWaste.addRow(["TOTAL SVINN", "", totalWasteValue()]);
-    totalWasteRow.eachCell((cell: any, colNumber: number) => {
-      cell.font = { bold: true };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } };
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
-      if (colNumber === 3) cell.numFmt = "#,##0.00";
-    });
-
+    totalWasteRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === 3) cell.numFmt = "#,##0.00"; });
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `varetelling-${inventoryMonth}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `varetelling-${inventoryMonth}.xlsx`; a.click(); URL.revokeObjectURL(url);
   }
+
+  // ── Mobilkort: råvare ─────────────────────────────────────────────────────
+
+  function MobileInventoryCard({ m }: { m: Material }) {
+    const locations = categoryLocations[m.category] || ["Lager"];
+    const value = materialInventoryValue(m);
+    const wasteAmt = getMaterialWaste(m.id);
+    const isExpanded = expandedMobileId === m.id;
+    const hasData = locations.some((loc) => { const lc = getLocationCount(m.id, loc); return lc.packages > 0 || lc.loose > 0; }) || wasteAmt > 0;
+    return (
+      <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
+        <button onClick={() => setExpandedMobileId(isExpanded ? null : m.id)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+          <div>
+            <b style={{ fontSize: 15 }}>{m.name}</b>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
+            {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
+          </div>
+          <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
+        </button>
+        {isExpanded && (
+          <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
+            {locations.map((loc) => {
+              const lc = getLocationCount(m.id, loc);
+              return (
+                <div key={loc} style={{ marginTop: 14 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <label style={{ fontSize: 13 }}>Pakker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                    <label style={{ fontSize: 13 }}>Løs ({m.unit})<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn</div>
+              <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
+            </div>
+            <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Mobilkort: egenprodusert ──────────────────────────────────────────────
+
+  function MobileProductCard({ p }: { p: Product }) {
+    const locations = categoryLocations[p.category] || ["Lager"];
+    const unitCost = productUnitCost(p);
+    const value = productInventoryValue(p, unitCost);
+    const wasteAmt = getProductWaste(p.id);
+    const cardId = `product_${p.id}`;
+    const isExpanded = expandedMobileId === cardId;
+    const hasData = locations.some((loc) => { const lc = getProductCount(p.id, loc); return lc.cases > 0 || lc.loose > 0; }) || wasteAmt > 0;
+    return (
+      <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
+        <button onClick={() => setExpandedMobileId(isExpanded ? null : cardId)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+          <div>
+            <b style={{ fontSize: 15 }}>{p.name}</b>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
+            {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
+          </div>
+          <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
+        </button>
+        {isExpanded && (
+          <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
+            {locations.map((loc) => {
+              const lc = getProductCount(p.id, loc);
+              return (
+                <div key={loc} style={{ marginTop: 14 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <label style={{ fontSize: 13 }}>Esker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                    <label style={{ fontSize: 13 }}>Løs stk<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn stk</div>
+              <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
+            </div>
+            <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <section className="card">
       <h2>Varetelling</h2>
+
       <div className="form-grid three">
-        <label>
-          Måned
-          <select value={month} onChange={(e) => { setInventoryMonth(`${year}-${e.target.value}`); setInventoryPage(1); }}>
-            <option value="01">Januar</option><option value="02">Februar</option>
-            <option value="03">Mars</option><option value="04">April</option>
-            <option value="05">Mai</option><option value="06">Juni</option>
-            <option value="07">Juli</option><option value="08">August</option>
-            <option value="09">September</option><option value="10">Oktober</option>
-            <option value="11">November</option><option value="12">Desember</option>
-          </select>
-        </label>
-        <label>
-          År
-          <select value={year} onChange={(e) => { setInventoryMonth(`${e.target.value}-${month}`); setInventoryPage(1); }}>
-            {Array.from({ length: 16 }, (_, i) => 2020 + i).map((y) => <option key={y} value={String(y)}>{y}</option>)}
-          </select>
-        </label>
+        <label>Måned<select value={month} onChange={(e) => { setInventoryMonth(`${year}-${e.target.value}`); setInventoryPage(1); }}><option value="01">Januar</option><option value="02">Februar</option><option value="03">Mars</option><option value="04">April</option><option value="05">Mai</option><option value="06">Juni</option><option value="07">Juli</option><option value="08">August</option><option value="09">September</option><option value="10">Oktober</option><option value="11">November</option><option value="12">Desember</option></select></label>
+        <label>År<select value={year} onChange={(e) => { setInventoryMonth(`${e.target.value}-${month}`); setInventoryPage(1); }}>{Array.from({ length: 16 }, (_, i) => 2020 + i).map((y) => <option key={y} value={String(y)}>{y}</option>)}</select></label>
         <Metric label="Sum varetelling" value={currency(total)} dark />
       </div>
 
-      {/* Summering per bucket */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 8, margin: "12px 0" }}>
         <div style={{ gridColumn: "1 / -1", fontWeight: 800, color: "#64748b", fontSize: 13 }}>Mat</div>
         {matSubBuckets.map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
@@ -5452,7 +5157,6 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         {["Deli", ...drinkBuckets].map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
       </div>
 
-      {/* Svinn – kollapsbar oversikt */}
       <details className="soft-box" style={{ padding: 0 }}>
         <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Svinn denne måneden <span style={{ fontWeight: 400, color: "#64748b" }}>{currency(totalWasteValue())}</span></span>
@@ -5460,76 +5164,22 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         </summary>
         <div style={{ padding: "0 16px 16px" }}>
           <table style={{ marginTop: 8 }}>
-            <thead>
-              <tr>
-                <th>Kategori / Produkt</th>
-                <th>Svinn (mengde)</th>
-                <th>Svinn (varekost)</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Kategori / Produkt</th><th>Svinn (mengde)</th><th>Svinn (varekost)</th></tr></thead>
             <tbody>
-              {allMaterialCategories.map((bucket) => {
-                const materialsWithWaste = data.materials.filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0);
-                if (materialsWithWaste.length === 0) return null;
-                return (
-                  <>
-                    <tr key={`waste-cat-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}>
-                      <td><b>{bucket}</b></td>
-                      <td></td>
-                      <td><b>{currency(bucketWasteValue(bucket))}</b></td>
-                    </tr>
-                    {materialsWithWaste.map((m) => (
-                      <tr key={`waste-${m.id}`}>
-                        <td style={{ paddingLeft: 24 }}>{m.name}</td>
-                        <td>{getMaterialWaste(m.id)} {m.unit}</td>
-                        <td>{currency(materialWasteValue(m))}</td>
-                      </tr>
-                    ))}
-                  </>
-                );
-              })}
-              {egenprodusertCategories.map((bucket) => {
-                const productsWithWaste = data.products.filter((p) => p.category === bucket && getProductWaste(p.id) > 0);
-                if (productsWithWaste.length === 0) return null;
-                return (
-                  <>
-                    <tr key={`waste-cat-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}>
-                      <td><b>{bucket} (egenprodusert)</b></td>
-                      <td></td>
-                      <td><b>{currency(bucketWasteValue(bucket))}</b></td>
-                    </tr>
-                    {productsWithWaste.map((p) => (
-                      <tr key={`waste-prod-${p.id}`}>
-                        <td style={{ paddingLeft: 24 }}>{p.name}</td>
-                        <td>{getProductWaste(p.id)} stk</td>
-                        <td>{currency(productWasteValue(p))}</td>
-                      </tr>
-                    ))}
-                  </>
-                );
-              })}
-              <tr style={{ background: "#0f172a", color: "white" }}>
-                <td><b>Total svinn</b></td>
-                <td></td>
-                <td><b>{currency(totalWasteValue())}</b></td>
-              </tr>
+              {allMaterialCategories.map((bucket) => { const mw = data.materials.filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0); if (!mw.length) return null; return (<><tr key={`wc-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}><td><b>{bucket}</b></td><td></td><td><b>{currency(bucketWasteValue(bucket))}</b></td></tr>{mw.map((m) => <tr key={`w-${m.id}`}><td style={{ paddingLeft: 24 }}>{m.name}</td><td>{getMaterialWaste(m.id)} {m.unit}</td><td>{currency(materialWasteValue(m))}</td></tr>)}</>); })}
+              {egenprodusertCategories.map((bucket) => { const pw = data.products.filter((p) => p.category === bucket && getProductWaste(p.id) > 0); if (!pw.length) return null; return (<><tr key={`wce-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}><td><b>{bucket} (egenprodusert)</b></td><td></td><td><b>{currency(bucketWasteValue(bucket))}</b></td></tr>{pw.map((p) => <tr key={`we-${p.id}`}><td style={{ paddingLeft: 24 }}>{p.name}</td><td>{getProductWaste(p.id)} stk</td><td>{currency(productWasteValue(p))}</td></tr>)}</>); })}
+              <tr style={{ background: "#0f172a", color: "white" }}><td><b>Total svinn</b></td><td></td><td><b>{currency(totalWasteValue())}</b></td></tr>
             </tbody>
           </table>
         </div>
       </details>
 
-      {/* Historikk */}
       <div className="soft-box">
         <div className="between">
           <h3>Historikk siste 12 registrerte måneder</h3>
-          <button className={showInventoryStats ? "btn active" : "btn"} onClick={() => setShowInventoryStats(!showInventoryStats)}>
-            {showInventoryStats ? "Skjul statistikk" : "Vis statistikk"}
-          </button>
+          <button className={showInventoryStats ? "btn active" : "btn"} onClick={() => setShowInventoryStats(!showInventoryStats)}>{showInventoryStats ? "Skjul statistikk" : "Vis statistikk"}</button>
         </div>
-        <table>
-          <thead><tr><th>Måned</th><th>Varebeholdning</th><th>Svinn</th></tr></thead>
-          <tbody>{inventoryHistory.map((h) => <tr key={h.monthKey}><td>{h.monthKey}</td><td>{currency(h.total)}</td><td>{currency(h.wasteTotal)}</td></tr>)}</tbody>
-        </table>
+        <table><thead><tr><th>Måned</th><th>Varebeholdning</th><th>Svinn</th></tr></thead><tbody>{inventoryHistory.map((h) => <tr key={h.monthKey}><td>{h.monthKey}</td><td>{currency(h.total)}</td><td>{currency(h.wasteTotal)}</td></tr>)}</tbody></table>
       </div>
 
       {showInventoryStats && (
@@ -5540,195 +5190,137 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
               <div key={h.monthKey} className="inventory-month">
                 <div className="between"><b>{h.monthKey}</b><b>{currency(h.total)}</b></div>
                 <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.max(4, (h.total / maxInventoryValue) * 100)}%` }} /></div>
-                <div className="inventory-breakdown">
-                  {statsBuckets.map((bucket) => (
-                    <div key={bucket} className="breakdown-row">
-                      <span>{bucket}</span>
-                      <span>{currency(valueForBucketInMonth(h.monthKey, bucket))}</span>
-                    </div>
-                  ))}
-                </div>
+                <div className="inventory-breakdown">{statsBuckets.map((bucket) => <div key={bucket} className="breakdown-row"><span>{bucket}</span><span>{currency(valueForBucketInMonth(h.monthKey, bucket))}</span></div>)}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Handlinger */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
-        <button className="btn" onClick={() => updateData({
-          inventoryCounts: {
-            ...countsByMonth,
-            [inventoryMonth]: { ...currentInventory, waste, locked: !isLocked, items: counts },
-          },
-        })}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>
+        <button className="btn" onClick={() => updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: !isLocked, items: counts } } })}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>
         <button className="btn active" onClick={exportInventoryXlsx}>Eksporter XLSX</button>
       </div>
 
-      {/* Søk og filter */}
-      <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); }} placeholder="Søk råvare eller produkt" />
-      <select value={inventoryCategoryFilter} onChange={(e) => { setInventoryCategoryFilter(e.target.value); setInventoryPage(1); }} style={{ marginBottom: 12 }}>
+      <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} placeholder="Søk råvare eller produkt" style={{ fontSize: 16, padding: "12px 14px" }} />
+      <select value={inventoryCategoryFilter} onChange={(e) => { setInventoryCategoryFilter(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} style={{ marginBottom: 12, fontSize: 16, padding: "10px 14px" }}>
         {internalBuckets.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
       </select>
-
       <p style={{ color: "#64748b" }}>Viser {filtered.length} råvarer.</p>
 
-      {/* Egenproduserte produkter */}
-      {egenprodusertCategories.map((bucket) => {
-        if (inventoryCategoryFilter !== "Alle" && inventoryCategoryFilter !== "Mat" && inventoryCategoryFilter !== bucket) return null;
-        const locations = categoryLocations[bucket] || ["Lager"];
-        const bucketProducts = data.products
-          .filter((p) => p.category === bucket)
-          .filter((p) => inventorySearch === "" || p.name.toLowerCase().includes(inventorySearch.toLowerCase()));
-        if (bucketProducts.length === 0) return null;
-        const color = bucketColors[bucket] || "#f8fafc";
-
-        return (
-          <div key={`egenprod-${bucket}`} style={{ marginBottom: 24 }}>
-            <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: "14px 14px 0 0", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <b>{bucket} <span style={{ fontWeight: 400, fontSize: 12, color: "#64748b" }}>egenprodusert</span></b>
-              <span style={{ color: "#64748b", fontSize: 13 }}>{currency(egenprodusertBucketValue(bucket))}</span>
+      {/* MOBILVISNING – kortliste */}
+      <div className="inventory-mobile-view">
+        {egenprodusertCategories.map((bucket) => {
+          if (inventoryCategoryFilter !== "Alle" && inventoryCategoryFilter !== "Mat" && inventoryCategoryFilter !== bucket) return null;
+          const bucketProducts = data.products.filter((p) => p.category === bucket).filter((p) => inventorySearch === "" || p.name.toLowerCase().includes(inventorySearch.toLowerCase()));
+          if (!bucketProducts.length) return null;
+          const color = bucketColors[bucket] || "#f8fafc";
+          return (
+            <div key={`mob-ep-${bucket}`} style={{ marginBottom: 20 }}>
+              <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <b>{bucket} <span style={{ fontWeight: 400, fontSize: 12, color: "#64748b" }}>egenprodusert</span></b>
+                <span style={{ color: "#64748b", fontSize: 13 }}>{currency(egenprodusertBucketValue(bucket))}</span>
+              </div>
+              {bucketProducts.map((p) => <MobileProductCard key={p.id} p={p} />)}
             </div>
-            <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
-              <table style={{ marginTop: 0 }}>
-                <thead>
-                  <tr>
-                    <th style={{ minWidth: 200 }}>Produkt</th>
-                    <th>Kostpris/stk</th>
-                    <th>Per eske</th>
-                    {locations.map((loc) => (
-                      <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>
-                    ))}
-                    <th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn stk</th>
-                    <th>Verdi</th>
-                  </tr>
-                  <tr style={{ background: "#f8fafc" }}>
-                    <th></th><th></th><th></th>
-                    {locations.map((loc) => (
-                      <>
-                        <th key={`${loc}-esker`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Esker</th>
-                        <th key={`${loc}-løs`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs stk</th>
-                      </>
-                    ))}
-                    <th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>stk</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bucketProducts.map((p) => {
-                    const unitCost = productUnitCost(p);
-                    const unitsPerCase = Number(p.unitsPerCase || 1);
-                    const value = productInventoryValue(p, unitCost);
-                    const wasteAmt = getProductWaste(p.id);
-                    return (
+          );
+        })}
+        {Object.entries(groupedMaterials).map(([bucket, materials]) => {
+          const color = bucketColors[bucket] || "#f8fafc";
+          return (
+            <div key={`mob-${bucket}`} style={{ marginBottom: 20 }}>
+              <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <b>{bucket}</b>
+                <span style={{ color: "#64748b", fontSize: 13 }}>{currency(bucketValue(bucket))}</span>
+              </div>
+              {materials.map((m) => <MobileInventoryCard key={m.id} m={m} />)}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* DESKTOPVISNING – tabell */}
+      <div className="inventory-desktop-view">
+        {egenprodusertCategories.map((bucket) => {
+          if (inventoryCategoryFilter !== "Alle" && inventoryCategoryFilter !== "Mat" && inventoryCategoryFilter !== bucket) return null;
+          const locations = categoryLocations[bucket] || ["Lager"];
+          const bucketProducts = data.products.filter((p) => p.category === bucket).filter((p) => inventorySearch === "" || p.name.toLowerCase().includes(inventorySearch.toLowerCase()));
+          if (!bucketProducts.length) return null;
+          const color = bucketColors[bucket] || "#f8fafc";
+          return (
+            <div key={`egenprod-${bucket}`} style={{ marginBottom: 24 }}>
+              <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: "14px 14px 0 0", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <b>{bucket} <span style={{ fontWeight: 400, fontSize: 12, color: "#64748b" }}>egenprodusert</span></b>
+                <span style={{ color: "#64748b", fontSize: 13 }}>{currency(egenprodusertBucketValue(bucket))}</span>
+              </div>
+              <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
+                <table style={{ marginTop: 0 }}>
+                  <thead>
+                    <tr><th style={{ minWidth: 200 }}>Produkt</th><th>Kostpris/stk</th><th>Per eske</th>{locations.map((loc) => <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>)}<th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn stk</th><th>Verdi</th></tr>
+                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-e`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Esker</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs stk</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>stk</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {bucketProducts.map((p) => { const unitCost = productUnitCost(p); const value = productInventoryValue(p, unitCost); const wasteAmt = getProductWaste(p.id); return (
                       <tr key={p.id}>
                         <td><b>{p.name}</b><br /><small style={{ color: "#64748b" }}>{p.productNumber || "-"}</small></td>
-                        <td>{currency(unitCost)}</td>
-                        <td>{unitsPerCase} stk</td>
-                        {locations.map((loc) => {
-                          const lc = getProductCount(p.id, loc);
-                          return (
-                            <>
-                              <td key={`${p.id}-${loc}-esker`} style={{ borderLeft: "2px solid #cbd5e1" }}>
-                                <input type="number" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} />
-                              </td>
-                              <td key={`${p.id}-${loc}-løs`}>
-                                <input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
-                              </td>
-                            </>
-                          );
-                        })}
-                        <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>
-                          <input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
-                        </td>
+                        <td>{currency(unitCost)}</td><td>{Number(p.unitsPerCase || 1)} stk</td>
+                        {locations.map((loc) => { const lc = getProductCount(p.id, loc); return (<><td key={`${p.id}-${loc}-e`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} /></td><td key={`${p.id}-${loc}-l`}><input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td></>); })}
+                        <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ); })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
 
-      {/* Telletabell – vanlige råvarer */}
-      {Object.entries(groupedMaterials).map(([bucket, materials]) => {
-        const locations = categoryLocations[bucket] || ["Lager"];
-        const color = bucketColors[bucket] || "#f8fafc";
-
-        return (
-          <div key={bucket} style={{ marginBottom: 24 }}>
-            <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: "14px 14px 0 0", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <b>{bucket}</b>
-              <span style={{ color: "#64748b", fontSize: 13 }}>{currency(bucketValue(bucket))}</span>
-            </div>
-            <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
-              <table style={{ marginTop: 0 }}>
-                <thead>
-                  <tr>
-                    <th style={{ minWidth: 200 }}>Vare</th>
-                    <th>Råvarekost pr pk</th>
-                    <th>Pakning</th>
-                    {locations.map((loc) => (
-                      <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>
-                    ))}
-                    <th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn</th>
-                    <th>Verdi</th>
-                  </tr>
-                  <tr style={{ background: "#f8fafc" }}>
-                    <th></th><th></th><th></th>
-                    {locations.map((loc) => (
-                      <>
-                        <th key={`${loc}-pk`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Pakker</th>
-                        <th key={`${loc}-løs`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs</th>
-                      </>
-                    ))}
-                    <th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>enheter</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {materials.map((m) => {
-                    const value = materialInventoryValue(m);
-                    const wasteAmt = getMaterialWaste(m.id);
-                    return (
+        {Object.entries(groupedMaterials).map(([bucket, materials]) => {
+          const locations = categoryLocations[bucket] || ["Lager"];
+          const color = bucketColors[bucket] || "#f8fafc";
+          return (
+            <div key={bucket} style={{ marginBottom: 24 }}>
+              <div style={{ background: color, border: "1px solid #e2e8f0", borderRadius: "14px 14px 0 0", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <b>{bucket}</b><span style={{ color: "#64748b", fontSize: 13 }}>{currency(bucketValue(bucket))}</span>
+              </div>
+              <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
+                <table style={{ marginTop: 0 }}>
+                  <thead>
+                    <tr><th style={{ minWidth: 200 }}>Vare</th><th>Råvarekost pr pk</th><th>Pakning</th>{locations.map((loc) => <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>)}<th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn</th><th>Verdi</th></tr>
+                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-p`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Pakker</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>enheter</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {materials.map((m) => { const value = materialInventoryValue(m); const wasteAmt = getMaterialWaste(m.id); return (
                       <tr key={m.id}>
-                        <td><b>{m.name}</b></td>
-                        <td>{currency(m.packagePrice)}</td>
-                        <td>{m.packageSize} {m.unit}</td>
-                        {locations.map((loc) => {
-                          const lc = getLocationCount(m.id, loc);
-                          return (
-                            <>
-                              <td key={`${m.id}-${loc}-pk`} style={{ borderLeft: "2px solid #cbd5e1" }}>
-                                <input type="number" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} />
-                              </td>
-                              <td key={`${m.id}-${loc}-løs`}>
-                                <input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
-                              </td>
-                            </>
-                          );
-                        })}
-                        <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>
-                          <input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
-                        </td>
+                        <td><b>{m.name}</b></td><td>{currency(m.packagePrice)}</td><td>{m.packageSize} {m.unit}</td>
+                        {locations.map((loc) => { const lc = getLocationCount(m.id, loc); return (<><td key={`${m.id}-${loc}-p`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} /></td><td key={`${m.id}-${loc}-l`}><input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td></>); })}
+                        <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ); })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       <div className="pager">
         <button className="btn" disabled={inventoryPage <= 1} onClick={() => setInventoryPage(inventoryPage - 1)}>Forrige</button>
         <span>Side {inventoryPage} av {totalPages}</span>
         <button className="btn" disabled={inventoryPage >= totalPages} onClick={() => setInventoryPage(inventoryPage + 1)}>Neste</button>
       </div>
+
+      <style jsx global>{`
+        .inventory-mobile-view { display: none; }
+        .inventory-desktop-view { display: block; }
+        @media (max-width: 768px) {
+          .inventory-mobile-view { display: block; }
+          .inventory-desktop-view { display: none; }
+        }
+      `}</style>
     </section>
   );
 }
