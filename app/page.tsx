@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -5053,90 +5053,114 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   // ── Mobilkort: råvare ─────────────────────────────────────────────────────
 
   function MobileInventoryCard({ m }: { m: Material }) {
-    const locations = categoryLocations[m.category] || ["Lager"];
-    const value = materialInventoryValue(m);
-    const wasteAmt = getMaterialWaste(m.id);
-    const isExpanded = expandedMobileId === m.id;
-    const hasData = locations.some((loc) => { const lc = getLocationCount(m.id, loc); return lc.packages > 0 || lc.loose > 0; }) || wasteAmt > 0;
-    return (
-      <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-        <button onClick={(e) => { e.preventDefault(); setExpandedMobileId(isExpanded ? null : m.id); }} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
-          <div>
-            <b style={{ fontSize: 15 }}>{m.name}</b>
-            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
-            {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
-          </div>
-          <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
-        </button>
-        {isExpanded && (
-          <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
-            {locations.map((loc) => {
-              const lc = getLocationCount(m.id, loc);
-              return (
-                <div key={loc} style={{ marginTop: 14 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <label style={{ fontSize: 13 }}>Pakker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                    <label style={{ fontSize: 13 }}>Løs ({m.unit})<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                  </div>
-                </div>
-              );
-            })}
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn</div>
-              <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
-            </div>
-            <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
-          </div>
-        )}
-      </div>
-    );
+  const locations = categoryLocations[m.category] || ["Lager"];
+  const value = materialInventoryValue(m);
+  const wasteAmt = getMaterialWaste(m.id);
+  const isExpanded = expandedMobileId === m.id;
+  const hasData = locations.some((loc) => { const lc = getLocationCount(m.id, loc); return lc.packages > 0 || lc.loose > 0; }) || wasteAmt > 0;
+  const cardRef = React.useRef<HTMLDivElement>(null);
+
+  function handleToggle(e: React.MouseEvent) {
+    e.preventDefault();
+    const opening = !isExpanded;
+    setExpandedMobileId(opening ? m.id : null);
+    if (opening) {
+      setTimeout(() => {
+        cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
   }
 
-  // ── Mobilkort: egenprodusert ──────────────────────────────────────────────
-
-  function MobileProductCard({ p }: { p: Product }) {
-    const locations = categoryLocations[p.category] || ["Lager"];
-    const unitCost = productUnitCost(p);
-    const value = productInventoryValue(p, unitCost);
-    const wasteAmt = getProductWaste(p.id);
-    const cardId = `product_${p.id}`;
-    const isExpanded = expandedMobileId === cardId;
-    const hasData = locations.some((loc) => { const lc = getProductCount(p.id, loc); return lc.cases > 0 || lc.loose > 0; }) || wasteAmt > 0;
-    return (
-      <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-        <button onClick={(e) => { e.preventDefault(); setExpandedMobileId(isExpanded ? null : cardId); }} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
-          <div>
-            <b style={{ fontSize: 15 }}>{p.name}</b>
-            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
-            {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
-          </div>
-          <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
-        </button>
-        {isExpanded && (
-          <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
-            {locations.map((loc) => {
-              const lc = getProductCount(p.id, loc);
-              return (
-                <div key={loc} style={{ marginTop: 14 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <label style={{ fontSize: 13 }}>Esker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                    <label style={{ fontSize: 13 }}>Løs stk<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                  </div>
+  return (
+    <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
+      <button onClick={handleToggle} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+        <div>
+          <b style={{ fontSize: 15 }}>{m.name}</b>
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
+          {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
+        </div>
+        <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
+      </button>
+      {isExpanded && (
+        <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
+          {locations.map((loc) => {
+            const lc = getLocationCount(m.id, loc);
+            return (
+              <div key={loc} style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <label style={{ fontSize: 13 }}>Pakker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                  <label style={{ fontSize: 13 }}>Løs ({m.unit})<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
                 </div>
-              );
-            })}
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn stk</div>
-              <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
-            </div>
-            <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn</div>
+            <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
           </div>
-        )}
-      </div>
-    );
+          <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileProductCard({ p }: { p: Product }) {
+  const locations = categoryLocations[p.category] || ["Lager"];
+  const unitCost = productUnitCost(p);
+  const value = productInventoryValue(p, unitCost);
+  const wasteAmt = getProductWaste(p.id);
+  const cardId = `product_${p.id}`;
+  const isExpanded = expandedMobileId === cardId;
+  const hasData = locations.some((loc) => { const lc = getProductCount(p.id, loc); return lc.cases > 0 || lc.loose > 0; }) || wasteAmt > 0;
+  const cardRef = React.useRef<HTMLDivElement>(null);
+
+  function handleToggle(e: React.MouseEvent) {
+    e.preventDefault();
+    const opening = !isExpanded;
+    setExpandedMobileId(opening ? cardId : null);
+    if (opening) {
+      setTimeout(() => {
+        cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
   }
+
+  return (
+    <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
+      <button onClick={handleToggle} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+        <div>
+          <b style={{ fontSize: 15 }}>{p.name}</b>
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
+          {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
+        </div>
+        <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
+      </button>
+      {isExpanded && (
+        <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
+          {locations.map((loc) => {
+            const lc = getProductCount(p.id, loc);
+            return (
+              <div key={loc} style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <label style={{ fontSize: 13 }}>Esker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                  <label style={{ fontSize: 13 }}>Løs stk<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn stk</div>
+            <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
+          </div>
+          <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
   // ── Render ────────────────────────────────────────────────────────────────
 
