@@ -5060,7 +5060,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     const hasData = locations.some((loc) => { const lc = getLocationCount(m.id, loc); return lc.packages > 0 || lc.loose > 0; }) || wasteAmt > 0;
     return (
       <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-        <button onClick={() => setExpandedMobileId(isExpanded ? null : m.id)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+        <button onClick={(e) => { e.preventDefault(); setExpandedMobileId(isExpanded ? null : m.id); }} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
           <div>
             <b style={{ fontSize: 15 }}>{m.name}</b>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
@@ -5105,7 +5105,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     const hasData = locations.some((loc) => { const lc = getProductCount(p.id, loc); return lc.cases > 0 || lc.loose > 0; }) || wasteAmt > 0;
     return (
       <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-        <button onClick={() => setExpandedMobileId(isExpanded ? null : cardId)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+        <button onClick={(e) => { e.preventDefault(); setExpandedMobileId(isExpanded ? null : cardId); }} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
           <div>
             <b style={{ fontSize: 15 }}>{p.name}</b>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
