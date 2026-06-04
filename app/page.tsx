@@ -5110,78 +5110,55 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     const totalWasteRow = wsWaste.addRow(["TOTAL SVINN", "", totalWasteValue()]);
     totalWasteRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === 3) cell.numFmt = "#,##0.00"; });
     // ── Forside ───────────────────────────────────────────────────────────────
-// Last inn forside-malen og fyll inn verdier fra varetelling
+const [yr, mo] = inventoryMonth.split("-");
+const monthNames: Record<string, string> = {
+  "01": "Januar", "02": "Februar", "03": "Mars", "04": "April",
+  "05": "Mai", "06": "Juni", "07": "Juli", "08": "August",
+  "09": "September", "10": "Oktober", "11": "November", "12": "Desember",
+};
+
+const matBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Frukt og grønt", "Krydder", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
+const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
+
+// Legg forside-ark FØRST i wb (samme workbook som resten)
 const forsideResponse = await fetch("/Varetelling_forside.xlsx");
 if (forsideResponse.ok) {
   const forsideBuffer = await forsideResponse.arrayBuffer();
   const forsideWb = new ExcelJS.Workbook();
   await forsideWb.xlsx.load(forsideBuffer);
-  const ws = forsideWb.worksheets[0];
+  const forsideWs = forsideWb.worksheets[0];
 
-  // Måned
-  const [yr, mo] = inventoryMonth.split("-");
-  const monthNames: Record<string, string> = {
-    "01": "Januar", "02": "Februar", "03": "Mars", "04": "April",
-    "05": "Mai", "06": "Juni", "07": "Juli", "08": "August",
-    "09": "September", "10": "Oktober", "11": "November", "12": "Desember",
-  };
-  ws.getCell("C4").value = `${monthNames[mo] || mo} ${yr}`;
+  // Fyll inn verdier
+  forsideWs.getCell("C4").value = `${monthNames[mo] || mo} ${yr}`;
+  forsideWs.getCell("C6").value = Math.round(matTotal * 100) / 100;
+  forsideWs.getCell("C10").value = Math.round(bucketValue("Brennevin") * 100) / 100;
+  forsideWs.getCell("C11").value = Math.round(bucketValue("Øl") * 100) / 100;
+  forsideWs.getCell("C14").value = Math.round(bucketValue("Mineralvann") * 100) / 100;
+  forsideWs.getCell("C15").value = Math.round((bucketValue("Vin") + bucketValue("Cider")) * 100) / 100;
+  forsideWs.getCell("C16").value = Math.round(bucketValue("Kaffe/te") * 100) / 100;
+  forsideWs.getCell("C25").value = Math.round(matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0) * 100) / 100;
+  forsideWs.getCell("C26").value = Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100;
+  forsideWs.getCell("C27").value = Math.round(bucketWasteValue("Brennevin") * 100) / 100;
+  forsideWs.getCell("C28").value = Math.round(bucketWasteValue("Øl") * 100) / 100;
+  forsideWs.getCell("C29").value = Math.round(bucketWasteValue("Mineralvann") * 100) / 100;
+  forsideWs.getCell("C30").value = Math.round(bucketWasteValue("Kaffe/te") * 100) / 100;
 
-  // Mat – sum av alle råvarekategorier unntatt drikke og deli
-  const matBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Frukt og grønt", "Krydder", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
-  const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
-  ws.getCell("C6").value = Math.round(matTotal * 100) / 100;
-
-  // Drikke
-  ws.getCell("C10").value = Math.round(bucketValue("Brennevin") * 100) / 100;
-  ws.getCell("C11").value = Math.round((bucketValue("Øl")) * 100) / 100;
-  ws.getCell("C14").value = Math.round(bucketValue("Mineralvann") * 100) / 100;
-  ws.getCell("C15").value = Math.round((bucketValue("Vin") + bucketValue("Cider")) * 100) / 100;
-  ws.getCell("C16").value = Math.round(bucketValue("Kaffe/te") * 100) / 100;
-
-  // Svinn (Brekkasje-seksjonen)
-  const matWasteBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Frukt og grønt", "Krydder", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
-  const matWaste = matWasteBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0);
-  ws.getCell("C25").value = Math.round(matWaste * 100) / 100;
-  ws.getCell("C26").value = Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100;
-  ws.getCell("C27").value = Math.round(bucketWasteValue("Brennevin") * 100) / 100;
-  ws.getCell("C28").value = Math.round(bucketWasteValue("Øl") * 100) / 100;
-  ws.getCell("C29").value = Math.round(bucketWasteValue("Mineralvann") * 100) / 100;
-  ws.getCell("C30").value = Math.round(bucketWasteValue("Kaffe/te") * 100) / 100;
-
-  // Kopier alle ark fra varetelling-wb inn i forsideWb (forside blir ark 1)
-  for (const sheet of wb.worksheets) {
-    const newWs = forsideWb.addWorksheet(sheet.name);
-    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      const newRow = newWs.getRow(rowNumber);
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-        const newCell = newRow.getCell(colNumber);
-        newCell.value = cell.value;
-        newCell.style = JSON.parse(JSON.stringify(cell.style));
-      });
-      newRow.height = row.height;
-      newRow.commit();
-    });
-    sheet.columns.forEach((col, i) => {
-      if (col.width) newWs.getColumn(i + 1).width = col.width;
-    });
-  }
-
-  const forsideBuffer2 = await forsideWb.xlsx.writeBuffer();
-  const blob = new Blob([forsideBuffer2], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `varetelling-${inventoryMonth}.xlsx`;
-  a.click();
-  URL.revokeObjectURL(url);
-  return; // Hopp over normal eksport nedenfor
+  // Flytt forsidearket inn i wb som første ark
+  forsideWs.name = "Forside";
+  (wb as any)._worksheets.unshift(undefined); // shift index
+  (wb as any)._worksheets[1] = forsideWs;
+  (forsideWs as any)._workbook = wb;
 }
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `varetelling-${inventoryMonth}.xlsx`; a.click(); URL.revokeObjectURL(url);
-  }
 
+const buffer = await wb.xlsx.writeBuffer();
+const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+const url = URL.createObjectURL(blob);
+const a = document.createElement("a");
+a.href = url;
+a.download = `varetelling-${inventoryMonth}.xlsx`;
+a.click();
+URL.revokeObjectURL(url);
+}
   // ── Mobilkort: råvare ─────────────────────────────────────────────────────
 
   function MobileInventoryCard({ m }: { m: Material }) {
