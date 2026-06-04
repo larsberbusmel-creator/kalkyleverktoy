@@ -5219,8 +5219,8 @@ async function exportInventoryXlsx() {
     fInputGreen(wsFront, 5, 8);
 
     // ── Rad 6–8: Mat ─────────────────────────────────────────────────────────
-    const matBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Frukt og grønt", "Krydder", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
-    const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
+const drinkCategories = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
+const matBuckets = data.materialCategories.filter((c: string) => !drinkCategories.includes(c));    const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
 
     wsFront.getRow(6).height = 24.75;
     fLbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):");
@@ -5318,8 +5318,8 @@ async function exportInventoryXlsx() {
     fHdr(wsFront, 24, 4, "Beløp:", green, false);
 
     // ── Rad 25–31: Brekkasje rader ────────────────────────────────────────────
-    const matWasteTotal = matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0);
-    const brekkasjeRader = [
+const matWasteTotal = matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0);    
+const brekkasjeRader = [
       { label: "Mat:", bv: Math.round(matWasteTotal * 100) / 100 },
       { label: "Vin + Cider:", bv: Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100 },
       { label: "Brennevin:", bv: Math.round(bucketWasteValue("Brennevin") * 100) / 100 },
