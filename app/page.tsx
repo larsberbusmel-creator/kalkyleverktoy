@@ -4893,7 +4893,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const matSubBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder"];
   const accountingBuckets = [...matSubBuckets, "Deli", ...drinkBuckets];
   const internalBuckets = ["Alle", "Mat", ...matSubBuckets, "Deli", ...drinkBuckets];
-  const statsBuckets = [...matSubBuckets, "Deli", ...drinkBuckets];
+  const statsBuckets = ["Mat",...matSubBuckets, "Deli", ...drinkBuckets];
 
   const countsByMonth = data.inventoryCounts || {};
   const currentInventory = countsByMonth[inventoryMonth] || { locked: false, waste: {}, items: {} };
@@ -5019,10 +5019,22 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     return data.materials.reduce((sum, m) => { if (!belongsToBucket(m, bucket)) return sum; const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit }; return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit); }, 0);
   }
 
-  const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
-    const monthData = countsByMonth[monthKey];
-    return { monthKey, total: statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0), wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) };
-  }).slice(-12);
+ const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
+  const monthData = countsByMonth[monthKey];
+  const items = monthData.items || {};
+  const matTotal = data.materials
+    .filter((m) => !egenprodusertCategories.includes(m.category))
+    .reduce((sum, m) => {
+      const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
+      return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit);
+    }, 0);
+  const egenprodTotal = egenprodusertCategories.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0);
+  return {
+    monthKey,
+    total: matTotal + egenprodTotal,
+    wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0),
+  };
+}).slice(-12);
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
   
 async function exportInventoryXlsx() {
