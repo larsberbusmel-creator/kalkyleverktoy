@@ -162,6 +162,7 @@ type InventoryMonthData = {
   locked?: boolean;
   waste?: Record<string, number>;
   items: Record<string, InventoryCount>;
+  kassasvinn?: number;
 };
 
 type RentalAddon = { id: string; name: string; price: number };
@@ -4900,8 +4901,8 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const counts = currentInventory.items || {};
   const waste = currentInventory.waste || {};
   const isLocked = !!currentInventory.locked;
-  const kassasvinn = (currentInventory as any).kassasvinn || 0;
-  const [year, month] = inventoryMonth.split("-");
+const kassasvinn = currentInventory.kassasvinn || 0;  
+const [year, month] = inventoryMonth.split("-");
 
   function updateKassasvinn(val: number) {
     updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, kassasvinn: val } } });
