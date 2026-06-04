@@ -5032,14 +5032,26 @@ function getLocationCount(materialId: string, location: string): { packages: num
   }
 
   const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
-    const monthData = countsByMonth[monthKey];
-    const monthKassasvinn = (monthData as any).kassasvinn || 0;
-    return {
-      monthKey,
-      total: statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0),
-      wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) + monthKassasvinn,
-    };
-  }).slice(-12);
+  const monthData = countsByMonth[monthKey];
+  const monthKassasvinn = monthData.kassasvinn || 0;
+  const items = monthData.items || {};
+  const monthMatTotal = data.materials
+    .filter((m) => !egenprodusertCategories.includes(m.category))
+    .reduce((sum, m) => {
+      const c = items[m.id] as any || {};
+      const packages = Number(c.packages || 0);
+      const loose = Number(c.loose || 0);
+      const packagePrice = c.packagePrice ?? m.packagePrice;
+      const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+      return sum + packages * packagePrice + loose * pricePerUnit;
+    }, 0);
+  const monthEgenprodTotal = egenprodusertCategories.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0);
+  return {
+    monthKey,
+    total: monthMatTotal + monthEgenprodTotal,
+    wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) + monthKassasvinn,
+  };
+}).slice(-12);
 
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
 
