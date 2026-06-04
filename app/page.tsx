@@ -780,6 +780,12 @@ function productCost(product: Product, visited: string[] = []) {
   );
 }
 
+// ============================================================
+// ERSTATNING FOR CalendarDashboard i app/page.tsx
+// Finn: function CalendarDashboard(
+// Erstatt frem til neste function med dette
+// ============================================================
+
 function CalendarDashboard({
   data,
   updateData,
@@ -839,12 +845,7 @@ function CalendarDashboard({
   }
 
   function dateKey(d: Date) { return localDateKey(d); }
-
-  function addDaysDate(d: Date, days: number) {
-    const next = new Date(d);
-    next.setDate(next.getDate() + days);
-    return next;
-  }
+  function addDaysDate(d: Date, days: number) { const next = new Date(d); next.setDate(next.getDate() + days); return next; }
 
   function norwegianHolidayName(date: string) {
     const y = Number(date.slice(0, 4));
@@ -867,67 +868,44 @@ function CalendarDashboard({
   }
 
   function dayOrders(date: string) {
-    return data.orders
-      .filter((o) => o.date === date && !o.deletedAt)
-      .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+    return data.orders.filter((o) => o.date === date && !o.deletedAt).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  }
+  function dayNotes(date: string) { return (data.calendarNotes || []).filter((n) => n.date === date); }
+  function hasProduction(date: string) { return Boolean(data.bakeryProductionDays?.[date]); }
+
+  function hasUnseenWebshopOrder(date: string): boolean {
+    const seenIds = data.seenOrderIds || [];
+    return data.orders.some((o) => o.date === date && !o.deletedAt && o.recurringNote?.startsWith("Importert fra webshop") && !seenIds.includes(o.id));
   }
 
-  function dayNotes(date: string) {
-    return (data.calendarNotes || []).filter((n) => n.date === date);
+  function markOrdersAsSeen(date: string) {
+    const seenIds = data.seenOrderIds || [];
+    const newIds = data.orders.filter((o) => o.date === date && !o.deletedAt && o.recurringNote?.startsWith("Importert fra webshop") && !seenIds.includes(o.id)).map((o) => o.id);
+    if (newIds.length) updateData({ seenOrderIds: [...seenIds, ...newIds] });
   }
-
-  function hasProduction(date: string) {
-    return Boolean(data.bakeryProductionDays?.[date]);
-  }
-
- function hasUnseenWebshopOrder(date: string): boolean {
-  const seenIds = data.seenOrderIds || [];
-  return data.orders.some(
-    (o) =>
-      o.date === date &&
-      !o.deletedAt &&
-      o.recurringNote?.startsWith("Importert fra webshop") &&
-      !seenIds.includes(o.id)
-  );
-}
-
-function markOrdersAsSeen(date: string) {
-  const seenIds = data.seenOrderIds || [];
-  const newIds = data.orders
-    .filter(
-      (o) =>
-        o.date === date &&
-        !o.deletedAt &&
-        o.recurringNote?.startsWith("Importert fra webshop") &&
-        !seenIds.includes(o.id)
-    )
-    .map((o) => o.id);
-  if (newIds.length) updateData({ seenOrderIds: [...seenIds, ...newIds] });
-}
 
   function addNote() {
     if (!noteTitle.trim() && !noteText.trim()) return;
-    const next: CalendarNote = {
-      id: `note-${Date.now()}`,
-      date: selectedDate,
-      title: noteTitle.trim() || "Notat",
-      text: noteText.trim(),
-    };
+    const next: CalendarNote = { id: `note-${Date.now()}`, date: selectedDate, title: noteTitle.trim() || "Notat", text: noteText.trim() };
     updateData({ calendarNotes: [next, ...(data.calendarNotes || [])] });
     setNoteTitle(""); setNoteText("");
   }
-
-  function deleteNote(id: string) {
-    updateData({ calendarNotes: (data.calendarNotes || []).filter((n) => n.id !== id) });
-  }
+  function deleteNote(id: string) { updateData({ calendarNotes: (data.calendarNotes || []).filter((n) => n.id !== id) }); }
 
   const selectedOrders = dayOrders(selectedDate);
   const selectedNotes = dayNotes(selectedDate);
   const selectedProduction = data.bakeryProductionDays?.[selectedDate];
 
+  function handleDayClick(date: string) {
+    setSelectedDate(date);
+    setView("day");
+    markOrdersAsSeen(date);
+  }
+
   return (
     <section>
       <div className="card">
+        {/* Toppknapper */}
         <div className="between">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className={view === "month" ? "btn active" : "btn"} onClick={() => setView("month")}>Måned</button>
@@ -938,119 +916,178 @@ function markOrdersAsSeen(date: string) {
 
         {view === "month" && (
           <>
-            <div className="between" style={{ marginTop: 16 }}>
-              <button className="btn" onClick={() => changeMonth(-1)}>Forrige</button>
-              <h1 style={{ textTransform: "capitalize", fontSize: 38, fontWeight: 900, margin: 0 }}>
-                {monthName(monthDate)}
-              </h1>
-              <button className="btn" onClick={() => changeMonth(1)}>Neste</button>
+            {/* Månednavigasjon – kompakt på mobil */}
+            <div className="cal-month-nav">
+              <button className="btn" onClick={() => changeMonth(-1)}>←</button>
+              <h1 className="cal-month-title">{monthName(monthDate)}</h1>
+              <button className="btn" onClick={() => changeMonth(1)}>→</button>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginTop: 16 }}>
-              {["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"].map((d) => (
-                <b key={d} style={{ padding: 8 }}>{d}</b>
-              ))}
-              {days.map((date) => {
-                const inMonth = date.slice(0, 7) === monthDate.slice(0, 7);
-                const orders = dayOrders(date);
-                const notes = dayNotes(date);
-                const production = hasProduction(date);
-                const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
-                const isSunday = dayOfWeek === 0;
-                const isToday = date === todayDate;
-                const isPast = date < todayDate;
-                const holidayName = norwegianHolidayName(date);
-                const unseenWebshop = hasUnseenWebshopOrder(date);
+            {/* DESKTOP: full kalender med navn og detaljer */}
+            <div className="cal-desktop">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginTop: 16 }}>
+                {["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"].map((d) => (
+                  <b key={d} style={{ padding: 8 }}>{d}</b>
+                ))}
+                {days.map((date) => {
+                  const inMonth = date.slice(0, 7) === monthDate.slice(0, 7);
+                  const orders = dayOrders(date);
+                  const notes = dayNotes(date);
+                  const production = hasProduction(date);
+                  const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
+                  const isSunday = dayOfWeek === 0;
+                  const isToday = date === todayDate;
+                  const isPast = date < todayDate;
+                  const holidayName = norwegianHolidayName(date);
+                  const unseenWebshop = hasUnseenWebshopOrder(date);
+                  const dayBackground = isToday ? "#dcfce7" : holidayName || isSunday ? "#fee2e2" : isPast ? "#f5efe3" : inMonth ? "white" : "#f1f5f9";
+                  return (
+                    <button key={date} onClick={() => handleDayClick(date)}
+                      style={{ minHeight: 110, textAlign: "left", padding: 10, borderRadius: 14, border: isToday ? "2px solid #166534" : unseenWebshop ? "2px solid #f59e0b" : holidayName ? "2px solid #dc2626" : "1px solid #dbe4ef", background: dayBackground, opacity: inMonth ? 1 : 0.55, cursor: "pointer", position: "relative" }}>
+                      <b>{Number(date.slice(8, 10))}</b>
+                      {unseenWebshop && <div style={{ position: "absolute", top: 8, right: 8, background: "#f59e0b", color: "white", borderRadius: "999px", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 }}>🔔</div>}
+                      {holidayName && <div style={{ marginTop: 4, fontSize: 11, color: "#991b1b", fontWeight: 800 }}>{holidayName}</div>}
+                      {production && <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800 }}>🥖 Produksjon</div>}
+                      {orders.slice(0, 3).map((o) => <div key={o.id} style={{ marginTop: 4, fontSize: 12 }}>{o.time || "--"} {o.customerType === "bedrift" ? o.companyName || o.customer : o.customer}</div>)}
+                      {notes.slice(0, 2).map((n) => <div key={n.id} style={{ marginTop: 4, fontSize: 12, color: "#166534" }}>📝 {n.title}</div>)}
+                      {orders.length + notes.length > 5 && <small>+ flere</small>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-                const dayBackground = isToday
-                  ? "#dcfce7"
-                  : holidayName || isSunday
-                    ? "#fee2e2"
-                    : isPast
-                      ? "#f5efe3"
-                      : inMonth
-                        ? "white"
-                        : "#f1f5f9";
+            {/* MOBIL: kompakt 7-kolonne kalender – bare dato + indikatorer */}
+            <div className="cal-mobile">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginTop: 12 }}>
+                {["M", "T", "O", "T", "F", "L", "S"].map((d, i) => (
+                  <b key={i} style={{ textAlign: "center", fontSize: 11, color: "#64748b", padding: "4px 0" }}>{d}</b>
+                ))}
+                {days.map((date) => {
+                  const inMonth = date.slice(0, 7) === monthDate.slice(0, 7);
+                  const orders = dayOrders(date);
+                  const notes = dayNotes(date);
+                  const production = hasProduction(date);
+                  const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
+                  const isSunday = dayOfWeek === 0;
+                  const isToday = date === todayDate;
+                  const isPast = date < todayDate;
+                  const holidayName = norwegianHolidayName(date);
+                  const unseenWebshop = hasUnseenWebshopOrder(date);
+                  const hasContent = orders.length > 0 || notes.length > 0 || production;
 
-                return (
-                  <button
-                    key={date}
-                    onClick={() => {
-                      setSelectedDate(date);
-                      setView("day");
-                      markOrdersAsSeen(date) // ← merk som sett ved klikk
-                    }}
-                    style={{
-                      minHeight: 110,
-                      textAlign: "left",
-                      padding: 10,
-                      borderRadius: 14,
-                      border: isToday
-                        ? "2px solid #166534"
-                        : unseenWebshop
-                          ? "2px solid #f59e0b"  // ← gul kant ved ny webshopordre
-                          : holidayName
-                            ? "2px solid #dc2626"
-                            : "1px solid #dbe4ef",
-                      background: dayBackground,
-                      opacity: inMonth ? 1 : 0.55,
-                      cursor: "pointer",
-                      position: "relative",
-                    }}
-                  >
-                    <b>{Number(date.slice(8, 10))}</b>
+                  const bg = isToday ? "#dcfce7"
+                    : holidayName || isSunday ? "#fee2e2"
+                    : isPast && inMonth ? "#f5efe3"
+                    : "white";
 
-                    {/* Varsellampe – rød prikk med antall nye webshopordre */}
-                    {unseenWebshop && (
-                      <div style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        background: "#f59e0b",
-                        color: "white",
-                        borderRadius: "999px",
-                        width: 20,
-                        height: 20,
+                  const borderColor = isToday ? "#166534"
+                    : unseenWebshop ? "#f59e0b"
+                    : holidayName ? "#dc2626"
+                    : hasContent ? "#94a3b8"
+                    : "#e2e8f0";
+
+                  const borderWidth = isToday || unseenWebshop || holidayName ? 2 : 1;
+
+                  return (
+                    <button key={date} onClick={() => handleDayClick(date)}
+                      style={{
+                        minHeight: 48,
+                        borderRadius: 8,
+                        border: `${borderWidth}px solid ${borderColor}`,
+                        background: bg,
+                        opacity: inMonth ? 1 : 0.35,
+                        cursor: "pointer",
+                        padding: "4px 2px",
                         display: "flex",
+                        flexDirection: "column",
                         alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 11,
-                        fontWeight: 900,
+                        gap: 2,
+                        position: "relative",
                       }}>
-                        🔔
-                      </div>
-                    )}
+                      <b style={{ fontSize: 13 }}>{Number(date.slice(8, 10))}</b>
 
-                    {holidayName && (
-                      <div style={{ marginTop: 4, fontSize: 11, color: "#991b1b", fontWeight: 800 }}>
-                        {holidayName}
+                      {/* Indikatorer */}
+                      <div style={{ display: "flex", gap: 2, flexWrap: "wrap", justifyContent: "center" }}>
+                        {orders.length > 0 && (
+                          <span style={{ background: "#3b82f6", color: "white", borderRadius: 999, fontSize: 9, fontWeight: 700, padding: "1px 4px", lineHeight: 1.4 }}>
+                            {orders.length}
+                          </span>
+                        )}
+                        {production && (
+                          <span style={{ fontSize: 10 }}>🥖</span>
+                        )}
+                        {notes.length > 0 && (
+                          <span style={{ fontSize: 10 }}>📝</span>
+                        )}
+                        {unseenWebshop && (
+                          <span style={{ fontSize: 10 }}>🔔</span>
+                        )}
                       </div>
-                    )}
-                    {production && (
-                      <div style={{ marginTop: 6, fontSize: 12, fontWeight: 800 }}>🥖 Produksjon</div>
-                    )}
-                    {orders.slice(0, 3).map((o) => (
-                      <div key={o.id} style={{ marginTop: 4, fontSize: 12 }}>
-                        {o.time || "--"} {o.customerType === "bedrift" ? o.companyName || o.customer : o.customer}
-                      </div>
-                    ))}
-                    {notes.slice(0, 2).map((n) => (
-                      <div key={n.id} style={{ marginTop: 4, fontSize: 12, color: "#166534" }}>
-                        📝 {n.title}
-                      </div>
-                    ))}
-                    {orders.length + notes.length > 5 && <small>+ flere</small>}
-                  </button>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Ordreliste for valgt dato på mobil */}
+              {(() => {
+                const dateOrders = dayOrders(selectedDate);
+                const dateNotes = dayNotes(selectedDate);
+                const dateProd = data.bakeryProductionDays?.[selectedDate];
+                const hasAnything = dateOrders.length > 0 || dateNotes.length > 0 || dateProd;
+                if (!hasAnything) return (
+                  <p style={{ color: "#64748b", marginTop: 14, textAlign: "center", fontSize: 13 }}>
+                    Trykk på en dag for å se detaljer
+                  </p>
                 );
-              })}
+                return (
+                  <div style={{ marginTop: 14, border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+                    <div style={{ background: "#f8fafc", padding: "10px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <b style={{ fontSize: 14 }}>{formatDateNo(selectedDate)}</b>
+                      <button className="btn" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => setView("day")}>Åpne dag →</button>
+                    </div>
+                    {dateProd && (
+                      <div style={{ padding: "8px 14px", borderBottom: "1px solid #f1f5f9", fontSize: 13 }}>
+                        🥖 <b>Produksjon registrert</b>
+                      </div>
+                    )}
+                    {dateOrders.map((o) => (
+                      <div key={o.id} style={{ padding: "8px 14px", borderBottom: "1px solid #f1f5f9", fontSize: 13 }} onClick={() => setTab("orders")}>
+                        <b>{o.time || "--"}</b> {o.customerType === "bedrift" ? o.companyName || o.customer : o.customer}
+                        <div style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>
+                          {o.orderLines.map((l) => { const p = data.products.find((x) => x.id === l.productId); return `${l.quantity}×${p?.name || "?"}`; }).join(", ")}
+                        </div>
+                      </div>
+                    ))}
+                    {dateNotes.map((n) => (
+                      <div key={n.id} style={{ padding: "8px 14px", borderBottom: "1px solid #f1f5f9", fontSize: 13, color: "#166534" }}>
+                        📝 <b>{n.title}</b>{n.text ? ` – ${n.text}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </>
         )}
 
         {view === "day" && (
           <div style={{ marginTop: 20 }}>
+            {/* Dag-navigasjon på mobil */}
             <div className="between">
-              <h2>{formatDateNo(selectedDate)}</h2>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button className="btn" onClick={() => {
+                  const d = new Date(selectedDate + "T12:00:00");
+                  d.setDate(d.getDate() - 1);
+                  setSelectedDate(localDateKey(d));
+                }}>←</button>
+                <h2 style={{ margin: 0 }}>{formatDateNo(selectedDate)}</h2>
+                <button className="btn" onClick={() => {
+                  const d = new Date(selectedDate + "T12:00:00");
+                  d.setDate(d.getDate() + 1);
+                  setSelectedDate(localDateKey(d));
+                }}>→</button>
+              </div>
               <button className="btn" onClick={() => setView("month")}>Til måned</button>
             </div>
 
@@ -1070,21 +1107,11 @@ function markOrdersAsSeen(date: string) {
                       {selectedOrders.map((o) => (
                         <tr key={o.id} className="click-row" onClick={() => setTab("orders")}>
                           <td>{o.time || "-"}</td>
-                          <td>{o.customerType === "bedrift" || o.customerType === "storkjokken"
-                            ? o.companyName || o.customer
-                            : o.customer}
-                          </td>
-                          <td>
-                            {o.orderLines.map((l) => {
-                              const p = data.products.find((x) => x.id === l.productId);
-                              return `${l.quantity} × ${p?.name || "Produkt"}`;
-                            }).join(", ")}
-                          </td>
-                          {/* Varselindikator i dagvisning */}
-                          {o.recurringNote?.startsWith("Importert fra webshop") &&
-                            !(data.seenOrderIds || []).includes(o.id) && (
-                              <td><span style={{ color: "#f59e0b", fontWeight: 900 }}>🔔 Ny</span></td>
-                            )}
+                          <td>{o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer}</td>
+                          <td>{o.orderLines.map((l) => { const p = data.products.find((x) => x.id === l.productId); return `${l.quantity} × ${p?.name || "Produkt"}`; }).join(", ")}</td>
+                          {o.recurringNote?.startsWith("Importert fra webshop") && !(data.seenOrderIds || []).includes(o.id) && (
+                            <td><span style={{ color: "#f59e0b", fontWeight: 900 }}>🔔 Ny</span></td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -1116,6 +1143,34 @@ function markOrdersAsSeen(date: string) {
           </div>
         )}
       </div>
+
+      <style jsx global>{`
+        /* Månednavigasjon */
+        .cal-month-nav {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-top: 16px;
+          gap: 8px;
+        }
+        .cal-month-title {
+          text-transform: capitalize;
+          font-size: 38px;
+          font-weight: 900;
+          margin: 0;
+          text-align: center;
+        }
+
+        /* Desktop: full kalender */
+        .cal-desktop { display: block; }
+        .cal-mobile  { display: none; }
+
+        @media (max-width: 768px) {
+          .cal-desktop { display: none; }
+          .cal-mobile  { display: block; }
+          .cal-month-title { font-size: 22px; }
+        }
+      `}</style>
     </section>
   );
 }
