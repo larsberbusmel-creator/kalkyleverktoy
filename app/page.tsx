@@ -4893,14 +4893,19 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const matSubBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder"];
   const accountingBuckets = [...matSubBuckets, "Deli", ...drinkBuckets];
   const internalBuckets = ["Alle", "Mat", ...matSubBuckets, "Deli", ...drinkBuckets];
-  const statsBuckets = ["Mat",...matSubBuckets, "Deli", ...drinkBuckets];
+  const statsBuckets = ["Mat", ...matSubBuckets, "Deli", ...drinkBuckets];
 
   const countsByMonth = data.inventoryCounts || {};
   const currentInventory = countsByMonth[inventoryMonth] || { locked: false, waste: {}, items: {} };
   const counts = currentInventory.items || {};
   const waste = currentInventory.waste || {};
   const isLocked = !!currentInventory.locked;
+  const kassasvinn = (currentInventory as any).kassasvinn || 0;
   const [year, month] = inventoryMonth.split("-");
+
+  function updateKassasvinn(val: number) {
+    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, kassasvinn: val } } });
+  }
 
   const xlsxColors: Record<string, string> = {
     "Mel og frø": "8BC34A", "Meieri": "FFF176", "Kjøtt": "EF9A9A",
@@ -4935,20 +4940,22 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   }
   function materialWasteValue(m: Material): number { return getMaterialWaste(m.id) * m.pricePerUnit; }
   function productWasteValue(p: Product): number { return getProductWaste(p.id) * productUnitCost(p); }
-  function totalWasteValue(): number { return data.materials.reduce((sum, m) => sum + materialWasteValue(m), 0) + data.products.filter((p) => egenprodusertCategories.includes(p.category)).reduce((sum, p) => sum + productWasteValue(p), 0); }
+  function totalWasteValue(): number {
+    return data.materials.reduce((sum, m) => sum + materialWasteValue(m), 0)
+      + data.products.filter((p) => egenprodusertCategories.includes(p.category)).reduce((sum, p) => sum + productWasteValue(p), 0)
+      + kassasvinn;
+  }
   function bucketWasteValue(bucket: string): number {
     if (egenprodusertCategories.includes(bucket)) return data.products.filter((p) => p.category === bucket).reduce((sum, p) => sum + productWasteValue(p), 0);
     return data.materials.filter((m) => m.category === bucket).reduce((sum, m) => sum + materialWasteValue(m), 0);
   }
 
-  function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
-    const item = counts[materialId] as any;
-    if (!item) return { packages: 0, loose: 0 };
-    if (item.locations?.[location]) return item.locations[location];
-    const locs = categoryLocations[data.materials.find((m) => m.id === materialId)?.category || ""] || [];
-    if (locs[0] === location) return { packages: item.packages || 0, loose: item.loose || 0 };
-    return { packages: 0, loose: 0 };
-  }
+function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
+  const item = counts[materialId] as any;
+  if (!item) return { packages: 0, loose: 0 };
+  if (item.locations?.[location]) return item.locations[location];
+  return { packages: 0, loose: 0 };
+}
 
   function updateLocationCount(materialId: string, location: string, packages: number, loose: number) {
     const material = data.materials.find((m) => m.id === materialId);
@@ -4960,13 +4967,13 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   }
 
   function materialInventoryValue(m: Material) {
-  const c = counts[m.id] as any || {};
-  const packages = Number(c.packages || 0);
-  const loose = Number(c.loose || 0);
-  const packagePrice = c.packagePrice ?? m.packagePrice;
-  const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
-  return packages * packagePrice + loose * pricePerUnit;
-}
+    const c = counts[m.id] as any || {};
+    const packages = Number(c.packages || 0);
+    const loose = Number(c.loose || 0);
+    const packagePrice = c.packagePrice ?? m.packagePrice;
+    const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+    return packages * packagePrice + loose * pricePerUnit;
+  }
 
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
     const item = counts[`product_${productId}`] as any;
@@ -5023,14 +5030,19 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     return data.materials.reduce((sum, m) => { if (!belongsToBucket(m, bucket)) return sum; const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit }; return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit); }, 0);
   }
 
- const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
-  const monthData = countsByMonth[monthKey];
-  return { monthKey, total: statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0), wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) };
-}).slice(-12);
-  
+  const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
+    const monthData = countsByMonth[monthKey];
+    const monthKassasvinn = (monthData as any).kassasvinn || 0;
+    return {
+      monthKey,
+      total: statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0),
+      wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) + monthKassasvinn,
+    };
+  }).slice(-12);
+
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
-  
-async function exportInventoryXlsx() {
+
+  async function exportInventoryXlsx() {
     const ExcelJS = await import("exceljs");
     const wb = new ExcelJS.Workbook();
     const sheetNames: Record<string, string> = { "Kaffe/te": "Kaffe-te", "Kjøkken, egenprodusert": "Kjøkken-egenprod", "Bakeri, egenprodusert": "Bakeri-egenprod" };
@@ -5111,10 +5123,16 @@ async function exportInventoryXlsx() {
       catRow.eachCell((cell: any) => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }; });
       pw.forEach((p) => { const row = wsWaste.addRow([`  ${p.name}`, `${getProductWaste(p.id)} stk`, productWasteValue(p)]); row.getCell(3).numFmt = "#,##0.00"; row.eachCell((cell: any) => { cell.border = { top: { style: "hair" }, bottom: { style: "hair" }, left: { style: "thin" }, right: { style: "thin" } }; }); });
     });
+    // Kassasvinn på Svinn-arket
+    if (kassasvinn > 0) {
+      wsWaste.addRow([]);
+      const kassaRow = wsWaste.addRow(["Igjen ved dagsslutt, måned", "", kassasvinn]);
+      kassaRow.getCell(3).numFmt = "#,##0.00";
+      kassaRow.eachCell((cell: any) => { cell.font = { bold: true }; cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }; });
+    }
     wsWaste.addRow([]);
     const totalWasteRow = wsWaste.addRow(["TOTAL SVINN", "", totalWasteValue()]);
     totalWasteRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === 3) cell.numFmt = "#,##0.00"; });
-  
 
     // ── Forside – bygges direkte i ExcelJS ───────────────────────────────────
     const [yr, mo] = inventoryMonth.split("-");
@@ -5126,36 +5144,26 @@ async function exportInventoryXlsx() {
     const månedLabel = `${monthNames[mo] || mo} ${yr}`;
 
     const wsFront = wb.addWorksheet("Forside");
-
-    // Kolonnebredder – matcher originalen
     wsFront.columns = [
-      { width: 8.5  }, // A
-      { width: 37.5 }, // B – varekategori
-      { width: 15.5 }, // C – sum varetelling
-      { width: 18   }, // D – kjøkkenrekvisisjon
-      { width: 8.5  }, // E
-      { width: 4    }, // F (tom)
-      { width: 53   }, // G – kontantbeholdning tekst
-      { width: 31.5 }, // H – kontantbeholdning beløp
+      { width: 8.5  }, { width: 37.5 }, { width: 15.5 }, { width: 18 },
+      { width: 8.5  }, { width: 4    }, { width: 53   }, { width: 31.5 },
     ];
 
-    const blue  = "BDD7EE"; // theme3 ≈ lys blå
-    const green = "E2EFDA"; // theme9 ≈ lys grønn
+    const blue  = "BDD7EE";
+    const green = "E2EFDA";
     const thin  = { style: "thin" as const };
     const border = { top: thin, bottom: thin, left: thin, right: thin };
 
     function fHdr(ws: any, rowNum: number, col: number, val: string, bg: string, bold = true) {
       const cell = ws.getCell(rowNum, col);
-      cell.value = val;
-      cell.font = { bold, size: 11 };
+      cell.value = val; cell.font = { bold, size: 11 };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg } };
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       cell.border = border;
     }
     function fLbl(ws: any, rowNum: number, col: number, val: string, bold = false) {
       const cell = ws.getCell(rowNum, col);
-      cell.value = val;
-      cell.font = { bold, size: 11 };
+      cell.value = val; cell.font = { bold, size: 11 };
       cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
       cell.border = border;
     }
@@ -5169,8 +5177,7 @@ async function exportInventoryXlsx() {
     }
     function fInputBlue(ws: any, rowNum: number, col: number, val: string) {
       const cell = ws.getCell(rowNum, col);
-      cell.value = val;
-      cell.font = { bold: true, size: 11 };
+      cell.value = val; cell.font = { bold: true, size: 11 };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
       cell.border = border;
@@ -5179,79 +5186,47 @@ async function exportInventoryXlsx() {
       const cell = ws.getCell(rowNum, col);
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } };
       cell.alignment = { horizontal: "right", vertical: "middle" };
-      cell.border = border;
-      cell.font = { size: 18 };
+      cell.border = border; cell.font = { size: 18 };
     }
-    function mergeF(ws: any, r1: number, c1: number, r2: number, c2: number) {
-      ws.mergeCells(r1, c1, r2, c2);
-    }
+    function mergeF(ws: any, r1: number, c1: number, r2: number, c2: number) { ws.mergeCells(r1, c1, r2, c2); }
 
-    // ── Rad 2–3: Firmanavn (B2:D3 merget) + kontantbeholdning høyre ──────────
     wsFront.getRow(1).height = 15.75;
     wsFront.getRow(2).height = 16.5;
     wsFront.getRow(3).height = 16.5;
-    mergeF(wsFront, 2, 2, 3, 4); // B2:D3
+    mergeF(wsFront, 2, 2, 3, 4);
     fInputBlue(wsFront, 2, 2, "Guttan på Torget AS");
-
-    // G2: kontantbeholdning label
-    const g2 = wsFront.getCell(2, 7);
-    g2.value = "Kontantbeholdning / Cash ";
-    g2.font = { size: 11 };
-    g2.alignment = { horizontal: "left", vertical: "middle" };
-
-    // H2: selskap input (blå)
+    const g2 = wsFront.getCell(2, 7); g2.value = "Kontantbeholdning / Cash "; g2.font = { size: 11 }; g2.alignment = { horizontal: "left", vertical: "middle" };
     fInputBlue(wsFront, 2, 8, "(selskap/company)");
-    // H3: dato input (blå)
     fInputBlue(wsFront, 3, 8, "(dato/date)");
 
-    // ── Rad 4: VAREBEHOLDNING PR + dato ──────────────────────────────────────
     wsFront.getRow(4).height = 19.35;
     fHdr(wsFront, 4, 2, "VAREBEHOLDNING PR: ", blue, true);
-    mergeF(wsFront, 4, 3, 4, 4); // C4:D4
+    mergeF(wsFront, 4, 3, 4, 4);
     fInputBlue(wsFront, 4, 3, månedLabel);
 
-    // ── Rad 5: Kolonneheaders ─────────────────────────────────────────────────
     wsFront.getRow(5).height = 34.5;
     fHdr(wsFront, 5, 2, "Varekategori:", blue, true);
-    mergeF(wsFront, 5, 3, 5, 4); // C5:D5
+    mergeF(wsFront, 5, 3, 5, 4);
     fHdr(wsFront, 5, 3, "Sum:", blue, true);
-
-    const g5 = wsFront.getCell(5, 7);
-    g5.value = "Kontantbeholdning in-house (inkl. vekselkasser)/cash in house (incl. cash till)";
-    g5.font = { size: 11 };
-    g5.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-    g5.border = border;
+    const g5 = wsFront.getCell(5, 7); g5.value = "Kontantbeholdning in-house (inkl. vekselkasser)/cash in house (incl. cash till)"; g5.font = { size: 11 }; g5.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g5.border = border;
     fInputGreen(wsFront, 5, 8);
 
-    // ── Rad 6–8: Mat ─────────────────────────────────────────────────────────
-const drinkCategories = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
-const matBuckets = data.materialCategories.filter((c: string) => 
-  !drinkCategories.includes(c) && c !== "Mat"
-);    
-const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
+    const drinkCategories = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
+    const matBuckets = data.materialCategories.filter((c: string) => !drinkCategories.includes(c) && c !== "Mat");
+    const matTotal = matBuckets.reduce((sum: number, b: string) => sum + bucketValue(b), 0);
 
     wsFront.getRow(6).height = 24.75;
     fLbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):");
     mergeF(wsFront, 6, 3, 6, 4);
     fVal(wsFront, 6, 3, Math.round(matTotal * 100) / 100);
-
-    const g6 = wsFront.getCell(6, 7);
-    g6.value = "Levert Loomis siste mnd/ Delivered to Loomis last month";
-    g6.font = { size: 11 };
-    g6.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-    g6.border = border;
+    const g6 = wsFront.getCell(6, 7); g6.value = "Levert Loomis siste mnd/ Delivered to Loomis last month"; g6.font = { size: 11 }; g6.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g6.border = border;
     fInputGreen(wsFront, 6, 8);
 
     wsFront.getRow(7).height = 41.25;
     fLbl(wsFront, 7, 2, "Mat (Evt. eksternt lager):");
     mergeF(wsFront, 7, 3, 7, 4);
     fVal(wsFront, 7, 3, 0);
-
-    const g7 = wsFront.getCell(7, 7);
-    g7.value = "Poser til Loomis, ikke levert / Bags for Loomis in the safe but not delivered";
-    g7.font = { size: 11 };
-    g7.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-    g7.border = border;
+    const g7 = wsFront.getCell(7, 7); g7.value = "Poser til Loomis, ikke levert / Bags for Loomis in the safe but not delivered"; g7.font = { size: 11 }; g7.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g7.border = border;
     fInputGreen(wsFront, 7, 8);
 
     wsFront.getRow(8).height = 24.75;
@@ -5259,31 +5234,13 @@ const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
     mergeF(wsFront, 8, 3, 8, 4);
     fVal(wsFront, 8, 3, 0);
 
-    // ── Rad 9: Total Mat ──────────────────────────────────────────────────────
     wsFront.getRow(9).height = 24.75;
     fLbl(wsFront, 9, 2, "Total Mat:", true);
     mergeF(wsFront, 9, 3, 9, 4);
-    const c9 = wsFront.getCell(9, 3);
-    c9.value = { formula: "SUM(C6:C8)" };
-    c9.numFmt = "#,##0.00";
-    c9.alignment = { horizontal: "right", vertical: "middle" };
-    c9.border = border;
-    c9.font = { bold: true };
+    const c9 = wsFront.getCell(9, 3); c9.value = { formula: "SUM(C6:C8)" }; c9.numFmt = "#,##0.00"; c9.alignment = { horizontal: "right", vertical: "middle" }; c9.border = border; c9.font = { bold: true };
+    const g9 = wsFront.getCell(9, 7); g9.value = "Sum / Total"; g9.font = { size: 11 }; g9.alignment = { horizontal: "left", vertical: "middle" }; g9.border = border;
+    const h9 = wsFront.getCell(9, 8); h9.value = { formula: "SUM(H5:H7)" }; h9.numFmt = "#,##0.00"; h9.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } }; h9.alignment = { horizontal: "right", vertical: "middle" }; h9.border = border; h9.font = { size: 11 };
 
-    const g9 = wsFront.getCell(9, 7);
-    g9.value = "Sum / Total";
-    g9.font = { size: 11 };
-    g9.alignment = { horizontal: "left", vertical: "middle" };
-    g9.border = border;
-    const h9 = wsFront.getCell(9, 8);
-    h9.value = { formula: "SUM(H5:H7)" };
-    h9.numFmt = "#,##0.00";
-    h9.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
-    h9.alignment = { horizontal: "right", vertical: "middle" };
-    h9.border = border;
-    h9.font = { size: 11 };
-
-    // ── Rad 10–17: Drikke ─────────────────────────────────────────────────────
     const drikkeRader = [
       { label: "Brennevin:", v: bucketValue("Brennevin") },
       { label: "Øl (fatøl + flaske/boks):", v: bucketValue("Øl") },
@@ -5301,22 +5258,14 @@ const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
       fVal(wsFront, r, 3, Math.round(v * 100) / 100);
     });
 
-    // ── Rad 18: Total varebeholdning ──────────────────────────────────────────
     fLbl(wsFront, 18, 2, "Total varebeholdning mat og drikke:", true);
     mergeF(wsFront, 18, 3, 18, 4);
-    const c18 = wsFront.getCell(18, 3);
-    c18.value = { formula: "SUM(C10:C17)+C9" };
-    c18.numFmt = "#,##0.00";
-    c18.alignment = { horizontal: "right", vertical: "middle" };
-    c18.border = border;
-    c18.font = { bold: true };
+    const c18 = wsFront.getCell(18, 3); c18.value = { formula: "SUM(C10:C17)+C9" }; c18.numFmt = "#,##0.00"; c18.alignment = { horizontal: "right", vertical: "middle" }; c18.border = border; c18.font = { bold: true };
 
-    // ── Rad 21–22: Brekkasje header (merget B21:D22) ─────────────────────────
     wsFront.getRow(21).height = 15.75;
-    mergeF(wsFront, 21, 2, 22, 4); // B21:D22
+    mergeF(wsFront, 21, 2, 22, 4);
     fHdr(wsFront, 21, 2, "BREKKASJE / KJØKKENREKVISISJON", blue, true);
 
-    // ── Rad 23–24: Kolonneheaders brekkasje ──────────────────────────────────
     wsFront.getRow(23).height = 30.75;
     fLbl(wsFront, 23, 2, "Varekategori:", true);
     fHdr(wsFront, 23, 3, "Brekkasje:", blue, false);
@@ -5325,16 +5274,15 @@ const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
     fHdr(wsFront, 24, 3, "Beløp:", blue, false);
     fHdr(wsFront, 24, 4, "Beløp:", green, false);
 
-    // ── Rad 25–31: Brekkasje rader ────────────────────────────────────────────
-const matWasteTotal = matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0);    
-const brekkasjeRader = [
+    const matWasteTotal = matBuckets.reduce((sum: number, b: string) => sum + bucketWasteValue(b), 0);
+    const brekkasjeRader = [
+      { label: "Igjen ved dagsslutt, måned:", bv: Math.round(kassasvinn * 100) / 100 },
       { label: "Mat:", bv: Math.round(matWasteTotal * 100) / 100 },
       { label: "Vin + Cider:", bv: Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100 },
       { label: "Brennevin:", bv: Math.round(bucketWasteValue("Brennevin") * 100) / 100 },
       { label: "Øl:", bv: Math.round(bucketWasteValue("Øl") * 100) / 100 },
       { label: "Mineralvann:", bv: Math.round(bucketWasteValue("Mineralvann") * 100) / 100 },
       { label: "Kaffe/te:", bv: Math.round(bucketWasteValue("Kaffe/te") * 100) / 100 },
-      { label: "Tobakk:", bv: 0 },
     ];
     brekkasjeRader.forEach(({ label, bv }, i) => {
       const r = 25 + i;
@@ -5343,28 +5291,14 @@ const brekkasjeRader = [
       fVal(wsFront, r, 4, 0, green);
     });
 
-    // ── Rad 32: Total brekkasje ───────────────────────────────────────────────
+    // Rad 32: Total (nå 7 rader: 25-31)
     fLbl(wsFront, 32, 2, "Total:", true);
-    const c32 = wsFront.getCell(32, 3);
-    c32.value = { formula: "SUM(C25:C31)" };
-    c32.numFmt = "#,##0.00";
-    c32.font = { bold: true };
-    c32.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
-    c32.alignment = { horizontal: "right", vertical: "middle" };
-    c32.border = border;
-    const d32 = wsFront.getCell(32, 4);
-    d32.value = { formula: "SUM(D25:D31)" };
-    d32.numFmt = "#,##0.00";
-    d32.font = { bold: true };
-    d32.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } };
-    d32.alignment = { horizontal: "right", vertical: "middle" };
-    d32.border = border;
+    const c32 = wsFront.getCell(32, 3); c32.value = { formula: "SUM(C25:C31)" }; c32.numFmt = "#,##0.00"; c32.font = { bold: true }; c32.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } }; c32.alignment = { horizontal: "right", vertical: "middle" }; c32.border = border;
+    const d32 = wsFront.getCell(32, 4); d32.value = { formula: "SUM(D25:D31)" }; d32.numFmt = "#,##0.00"; d32.font = { bold: true }; d32.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } }; d32.alignment = { horizontal: "right", vertical: "middle" }; d32.border = border;
 
-    // ── Rad 35: Kommentar ─────────────────────────────────────────────────────
     wsFront.getRow(35).height = 15.75;
     fLbl(wsFront, 35, 2, "Kommentar:");
 
-    // Flytt Forside-arket til første posisjon
     const allSheets = (wb as any)._worksheets.filter(Boolean);
     const frontIdx = allSheets.findIndex((s: any) => s.name === "Forside");
     if (frontIdx > 0) {
@@ -5382,118 +5316,93 @@ const brekkasjeRader = [
     a.download = `varetelling-${inventoryMonth}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
-}
-  // ── Mobilkort: råvare ─────────────────────────────────────────────────────
+  }
 
   function MobileInventoryCard({ m }: { m: Material }) {
-  const locations = categoryLocations[m.category] || ["Lager"];
-  const value = materialInventoryValue(m);
-  const wasteAmt = getMaterialWaste(m.id);
-  const isExpanded = expandedMobileId === m.id;
-  const hasData = locations.some((loc) => { const lc = getLocationCount(m.id, loc); return lc.packages > 0 || lc.loose > 0; }) || wasteAmt > 0;
-  const cardRef = React.useRef<HTMLDivElement>(null);
-
-  function handleToggle(e: React.MouseEvent) {
-    e.preventDefault();
-    const opening = !isExpanded;
-    setExpandedMobileId(opening ? m.id : null);
-    if (opening) {
-      setTimeout(() => {
-cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      }, 50);
-    }
+    const locations = categoryLocations[m.category] || ["Lager"];
+    const value = materialInventoryValue(m);
+    const wasteAmt = getMaterialWaste(m.id);
+    const isExpanded = expandedMobileId === m.id;
+    const hasData = locations.some((loc) => { const lc = getLocationCount(m.id, loc); return lc.packages > 0 || lc.loose > 0; }) || wasteAmt > 0;
+    const cardRef = React.useRef<HTMLDivElement>(null);
+    return (
+      <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
+        <button onClick={() => toggleMobileCard(m.id)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+          <div>
+            <b style={{ fontSize: 15 }}>{m.name}</b>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
+            {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
+          </div>
+          <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
+        </button>
+        {isExpanded && (
+          <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
+            {locations.map((loc) => {
+              const lc = getLocationCount(m.id, loc);
+              return (
+                <div key={loc} style={{ marginTop: 14 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <label style={{ fontSize: 13 }}>Pakker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                    <label style={{ fontSize: 13 }}>Løs ({m.unit})<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn</div>
+              <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
+            </div>
+            <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
+          </div>
+        )}
+      </div>
+    );
   }
 
-  return (
-    <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-      <button onClick={() => toggleMobileCard(m.id)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
-        <div>
-          <b style={{ fontSize: 15 }}>{m.name}</b>
-          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
-          {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
-        </div>
-        <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
-      </button>
-      {isExpanded && (
-        <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
-          {locations.map((loc) => {
-            const lc = getLocationCount(m.id, loc);
-            return (
-              <div key={loc} style={{ marginTop: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <label style={{ fontSize: 13 }}>Pakker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                  <label style={{ fontSize: 13 }}>Løs ({m.unit})<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                </div>
-              </div>
-            );
-          })}
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn</div>
-            <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
+  function MobileProductCard({ p }: { p: Product }) {
+    const locations = categoryLocations[p.category] || ["Lager"];
+    const unitCost = productUnitCost(p);
+    const value = productInventoryValue(p, unitCost);
+    const wasteAmt = getProductWaste(p.id);
+    const cardId = `product_${p.id}`;
+    const isExpanded = expandedMobileId === cardId;
+    const hasData = locations.some((loc) => { const lc = getProductCount(p.id, loc); return lc.cases > 0 || lc.loose > 0; }) || wasteAmt > 0;
+    const cardRef = React.useRef<HTMLDivElement>(null);
+    return (
+      <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
+        <button onClick={() => toggleMobileCard(cardId)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
+          <div>
+            <b style={{ fontSize: 15 }}>{p.name}</b>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
+            {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
           </div>
-          <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MobileProductCard({ p }: { p: Product }) {
-  const locations = categoryLocations[p.category] || ["Lager"];
-  const unitCost = productUnitCost(p);
-  const value = productInventoryValue(p, unitCost);
-  const wasteAmt = getProductWaste(p.id);
-  const cardId = `product_${p.id}`;
-  const isExpanded = expandedMobileId === cardId;
-  const hasData = locations.some((loc) => { const lc = getProductCount(p.id, loc); return lc.cases > 0 || lc.loose > 0; }) || wasteAmt > 0;
-  const cardRef = React.useRef<HTMLDivElement>(null);
-
-  function handleToggle(e: React.MouseEvent) {
-    e.preventDefault();
-    const opening = !isExpanded;
-    setExpandedMobileId(opening ? cardId : null);
-    if (opening) {
-      setTimeout(() => {
-cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      }, 50);
-    }
+          <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
+        </button>
+        {isExpanded && (
+          <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
+            {locations.map((loc) => {
+              const lc = getProductCount(p.id, loc);
+              return (
+                <div key={loc} style={{ marginTop: 14 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <label style={{ fontSize: 13 }}>Esker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                    <label style={{ fontSize: 13 }}>Løs stk<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn stk</div>
+              <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
+            </div>
+            <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
+          </div>
+        )}
+      </div>
+    );
   }
-
-  return (
-    <div ref={cardRef} style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 8, overflow: "hidden", background: hasData ? "#f0fdf4" : "white" }}>
-      <button onClick={() => toggleMobileCard(cardId)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", gap: 12 }}>
-        <div>
-          <b style={{ fontSize: 15 }}>{p.name}</b>
-          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
-          {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
-        </div>
-        <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
-      </button>
-      {isExpanded && (
-        <div style={{ padding: "0 16px 16px", borderTop: "1px solid #e2e8f0" }}>
-          {locations.map((loc) => {
-            const lc = getProductCount(p.id, loc);
-            return (
-              <div key={loc} style={{ marginTop: 14 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <label style={{ fontSize: 13 }}>Esker<input type="number" inputMode="numeric" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                  <label style={{ fontSize: 13 }}>Løs stk<input type="number" inputMode="numeric" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} placeholder="0" style={{ marginTop: 4, fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", background: isLocked ? "#f8fafc" : "white" }} /></label>
-                </div>
-              </div>
-            );
-          })}
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn stk</div>
-            <input type="number" inputMode="numeric" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} placeholder="0" style={{ fontSize: 18, padding: "10px 12px", borderRadius: 10, border: "1px solid #f59e0b", width: "100%", background: isLocked ? "#f8fafc" : "#fffbeb" }} />
-          </div>
-          <div style={{ marginTop: 12, textAlign: "right", fontSize: 14, fontWeight: 700 }}>Verdi: {currency(value)}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <section className="card">
@@ -5512,6 +5421,21 @@ cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      
         {["Deli", ...drinkBuckets].map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
       </div>
 
+      {/* Kassasvinn-felt */}
+      <div className="soft-box" style={{ marginBottom: 12 }}>
+        <label style={{ fontWeight: 800, fontSize: 14 }}>
+          Igjen ved dagsslutt, måned (råvarekost kr)
+          <input
+            type="number"
+            disabled={isLocked}
+            value={kassasvinn || ""}
+            onChange={(e) => updateKassasvinn(Number(e.target.value) || 0)}
+            placeholder="0"
+            style={{ marginTop: 8, fontSize: 16, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd5e1", width: "100%", maxWidth: 300, display: "block", background: isLocked ? "#f8fafc" : "white" }}
+          />
+        </label>
+      </div>
+
       <details className="soft-box" style={{ padding: 0 }}>
         <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Svinn denne måneden <span style={{ fontWeight: 400, color: "#64748b" }}>{currency(totalWasteValue())}</span></span>
@@ -5521,6 +5445,7 @@ cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      
           <table style={{ marginTop: 8 }}>
             <thead><tr><th>Kategori / Produkt</th><th>Svinn (mengde)</th><th>Svinn (varekost)</th></tr></thead>
             <tbody>
+              {kassasvinn > 0 && <tr style={{ background: "#fffbeb" }}><td><b>Igjen ved dagsslutt, måned</b></td><td>-</td><td><b>{currency(kassasvinn)}</b></td></tr>}
               {allMaterialCategories.map((bucket) => { const mw = data.materials.filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0); if (!mw.length) return null; return (<><tr key={`wc-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}><td><b>{bucket}</b></td><td></td><td><b>{currency(bucketWasteValue(bucket))}</b></td></tr>{mw.map((m) => <tr key={`w-${m.id}`}><td style={{ paddingLeft: 24 }}>{m.name}</td><td>{getMaterialWaste(m.id)} {m.unit}</td><td>{currency(materialWasteValue(m))}</td></tr>)}</>); })}
               {egenprodusertCategories.map((bucket) => { const pw = data.products.filter((p) => p.category === bucket && getProductWaste(p.id) > 0); if (!pw.length) return null; return (<><tr key={`wce-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}><td><b>{bucket} (egenprodusert)</b></td><td></td><td><b>{currency(bucketWasteValue(bucket))}</b></td></tr>{pw.map((p) => <tr key={`we-${p.id}`}><td style={{ paddingLeft: 24 }}>{p.name}</td><td>{getProductWaste(p.id)} stk</td><td>{currency(productWasteValue(p))}</td></tr>)}</>); })}
               <tr style={{ background: "#0f172a", color: "white" }}><td><b>Total svinn</b></td><td></td><td><b>{currency(totalWasteValue())}</b></td></tr>
@@ -5563,7 +5488,6 @@ cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      
       </select>
       <p style={{ color: "#64748b" }}>Viser {filtered.length} råvarer.</p>
 
-      {/* MOBILVISNING – kortliste */}
       <div className="inventory-mobile-view">
         {egenprodusertCategories.map((bucket) => {
           if (inventoryCategoryFilter !== "Alle" && inventoryCategoryFilter !== "Mat" && inventoryCategoryFilter !== bucket) return null;
@@ -5594,7 +5518,6 @@ cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      
         })}
       </div>
 
-      {/* DESKTOPVISNING – tabell */}
       <div className="inventory-desktop-view">
         {egenprodusertCategories.map((bucket) => {
           if (inventoryCategoryFilter !== "Alle" && inventoryCategoryFilter !== "Mat" && inventoryCategoryFilter !== bucket) return null;
@@ -5630,7 +5553,6 @@ cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });      
             </div>
           );
         })}
-
         {Object.entries(groupedMaterials).map(([bucket, materials]) => {
           const locations = categoryLocations[bucket] || ["Lager"];
           const color = bucketColors[bucket] || "#f8fafc";
