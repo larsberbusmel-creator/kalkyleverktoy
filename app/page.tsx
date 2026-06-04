@@ -5049,8 +5049,16 @@ function getLocationCount(materialId: string, location: string): { packages: num
   return {
     monthKey,
     total: monthMatTotal + monthEgenprodTotal,
-    wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) + monthKassasvinn,
-  };
+wasteTotal: (() => {
+  const materialWaste = data.materials.reduce((sum, m) => {
+    const c = items[m.id] as any || {};
+    return sum + Number(c.waste || 0) * m.pricePerUnit;
+  }, 0);
+  const egenprodWaste = data.products
+    .filter((p) => egenprodusertCategories.includes(p.category))
+    .reduce((sum, p) => sum + Number((items[`product_${p.id}`] as any)?.waste || 0) * productUnitCost(p), 0);
+  return materialWaste + egenprodWaste + monthKassasvinn;
+})(),  };
 }).slice(-12);
 
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
