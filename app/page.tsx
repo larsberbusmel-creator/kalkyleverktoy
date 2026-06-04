@@ -4893,7 +4893,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const matSubBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder"];
   const accountingBuckets = [...matSubBuckets, "Deli", ...drinkBuckets];
   const internalBuckets = ["Alle", "Mat", ...matSubBuckets, "Deli", ...drinkBuckets];
-  const statsBuckets = ["Mat", ...matSubBuckets, "Deli", ...drinkBuckets];
+  const statsBuckets = [...matSubBuckets, "Deli", ...drinkBuckets];
 
   const countsByMonth = data.inventoryCounts || {};
   const currentInventory = countsByMonth[inventoryMonth] || { locked: false, waste: {}, items: {} };
