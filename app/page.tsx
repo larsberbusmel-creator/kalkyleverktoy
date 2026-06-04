@@ -5112,224 +5112,268 @@ async function exportInventoryXlsx() {
   
 
     // ── Forside – bygges direkte i ExcelJS ───────────────────────────────────
-const [yr, mo] = inventoryMonth.split("-");
-const monthNames: Record<string, string> = {
-  "01": "Januar", "02": "Februar", "03": "Mars", "04": "April",
-  "05": "Mai", "06": "Juni", "07": "Juli", "08": "August",
-  "09": "September", "10": "Oktober", "11": "November", "12": "Desember",
-};
-const månedLabel = `${monthNames[mo] || mo} ${yr}`;
+    const [yr, mo] = inventoryMonth.split("-");
+    const monthNames: Record<string, string> = {
+      "01": "Januar", "02": "Februar", "03": "Mars", "04": "April",
+      "05": "Mai", "06": "Juni", "07": "Juli", "08": "August",
+      "09": "September", "10": "Oktober", "11": "November", "12": "Desember",
+    };
+    const månedLabel = `${monthNames[mo] || mo} ${yr}`;
 
-const wsFront = wb.addWorksheet("Forside");
+    const wsFront = wb.addWorksheet("Forside");
 
-// Kolonnebredder
-wsFront.columns = [
-  { width: 3 },  // A
-  { width: 32 }, // B – varekategori
-  { width: 16 }, // C – sum
-  { width: 3 },  // D
-  { width: 3 },  // E
-  { width: 3 },  // F
-  { width: 40 }, // G – kontant
-  { width: 18 }, // H – beløp
-];
+    // Kolonnebredder – matcher originalen
+    wsFront.columns = [
+      { width: 8.5  }, // A
+      { width: 37.5 }, // B – varekategori
+      { width: 15.5 }, // C – sum varetelling
+      { width: 18   }, // D – kjøkkenrekvisisjon
+      { width: 8.5  }, // E
+      { width: 4    }, // F (tom)
+      { width: 53   }, // G – kontantbeholdning tekst
+      { width: 31.5 }, // H – kontantbeholdning beløp
+    ];
 
-const blue   = "BDD7EE";
-const green  = "E2EFDA";
-const black  = "000000";
-const white  = "FFFFFFFF";
-const darkBg = "1F3864";
+    const blue  = "BDD7EE"; // theme3 ≈ lys blå
+    const green = "E2EFDA"; // theme9 ≈ lys grønn
+    const thin  = { style: "thin" as const };
+    const border = { top: thin, bottom: thin, left: thin, right: thin };
 
-function hdr(ws: any, row: number, col: number, val: string, bg: string, bold = true, center = true) {
-  const cell = ws.getCell(row, col);
-  cell.value = val;
-  cell.font = { bold, color: { argb: bg === darkBg ? white : "FF" + black }, size: 10 };
-  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg } };
-  cell.alignment = { horizontal: center ? "center" : "left", vertical: "middle", wrapText: true };
-  cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-}
+    function fHdr(ws: any, rowNum: number, col: number, val: string, bg: string, bold = true) {
+      const cell = ws.getCell(rowNum, col);
+      cell.value = val;
+      cell.font = { bold, size: 11 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = border;
+    }
+    function fLbl(ws: any, rowNum: number, col: number, val: string, bold = false) {
+      const cell = ws.getCell(rowNum, col);
+      cell.value = val;
+      cell.font = { bold, size: 11 };
+      cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+      cell.border = border;
+    }
+    function fVal(ws: any, rowNum: number, col: number, value: number | string | { formula: string }, bg?: string) {
+      const cell = ws.getCell(rowNum, col);
+      cell.value = value;
+      if (typeof value === "number") cell.numFmt = "#,##0.00";
+      if (bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg } };
+      cell.alignment = { horizontal: "right", vertical: "middle" };
+      cell.border = border;
+    }
+    function fInputBlue(ws: any, rowNum: number, col: number, val: string) {
+      const cell = ws.getCell(rowNum, col);
+      cell.value = val;
+      cell.font = { bold: true, size: 11 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = border;
+    }
+    function fInputGreen(ws: any, rowNum: number, col: number) {
+      const cell = ws.getCell(rowNum, col);
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } };
+      cell.alignment = { horizontal: "right", vertical: "middle" };
+      cell.border = border;
+      cell.font = { size: 18 };
+    }
+    function mergeF(ws: any, r1: number, c1: number, r2: number, c2: number) {
+      ws.mergeCells(r1, c1, r2, c2);
+    }
 
-function val(ws: any, row: number, col: number, value: number | string, bg = "FFFFFFFF", numFmt = "#,##0.00") {
-  const cell = ws.getCell(row, col);
-  cell.value = value;
-  if (typeof value === "number") cell.numFmt = numFmt;
-  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg.replace("#", "") } };
-  cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-  cell.alignment = { horizontal: "right", vertical: "middle" };
-}
+    // ── Rad 2–3: Firmanavn (B2:D3 merget) + kontantbeholdning høyre ──────────
+    wsFront.getRow(1).height = 15.75;
+    wsFront.getRow(2).height = 16.5;
+    wsFront.getRow(3).height = 16.5;
+    mergeF(wsFront, 2, 2, 3, 4); // B2:D3
+    fInputBlue(wsFront, 2, 2, "Guttan på Torget AS");
 
-function lbl(ws: any, row: number, col: number, text: string, bg = "FFFFFFFF", bold = false) {
-  const cell = ws.getCell(row, col);
-  cell.value = text;
-  cell.font = { bold, size: 10 };
-  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg.replace("#", "") } };
-  cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-  cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-}
+    // G2: kontantbeholdning label
+    const g2 = wsFront.getCell(2, 7);
+    g2.value = "Kontantbeholdning / Cash ";
+    g2.font = { size: 11 };
+    g2.alignment = { horizontal: "left", vertical: "middle" };
 
-function merge(ws: any, r1: number, c1: number, r2: number, c2: number) {
-  ws.mergeCells(r1, c1, r2, c2);
-}
+    // H2: selskap input (blå)
+    fInputBlue(wsFront, 2, 8, "(selskap/company)");
+    // H3: dato input (blå)
+    fInputBlue(wsFront, 3, 8, "(dato/date)");
 
-// ── Rad 1: Firmanavn ──────────────────────────────────────────────────────
-merge(wsFront, 1, 2, 1, 3);
-hdr(wsFront, 1, 2, "Guttan på Torget AS", blue, true, true);
-merge(wsFront, 1, 7, 1, 7);
-lbl(wsFront, 1, 7, "Kontantbeholdning / Cash", "FFFFFFFF", false);
-hdr(wsFront, 1, 8, "(selskap/company)", blue, false, true);
+    // ── Rad 4: VAREBEHOLDNING PR + dato ──────────────────────────────────────
+    wsFront.getRow(4).height = 19.35;
+    fHdr(wsFront, 4, 2, "VAREBEHOLDNING PR: ", blue, true);
+    mergeF(wsFront, 4, 3, 4, 4); // C4:D4
+    fInputBlue(wsFront, 4, 3, månedLabel);
 
-// ── Rad 2: Dato ───────────────────────────────────────────────────────────
-hdr(wsFront, 2, 8, "(dato/date)", blue, false, true);
+    // ── Rad 5: Kolonneheaders ─────────────────────────────────────────────────
+    wsFront.getRow(5).height = 34.5;
+    fHdr(wsFront, 5, 2, "Varekategori:", blue, true);
+    mergeF(wsFront, 5, 3, 5, 4); // C5:D5
+    fHdr(wsFront, 5, 3, "Sum:", blue, true);
 
-// ── Rad 3: Varebeholdning PR ──────────────────────────────────────────────
-wsFront.getRow(3).height = 20;
-hdr(wsFront, 3, 2, "VAREBEHOLDNING PR:", blue, true, false);
-hdr(wsFront, 3, 3, månedLabel, blue, true, true);
+    const g5 = wsFront.getCell(5, 7);
+    g5.value = "Kontantbeholdning in-house (inkl. vekselkasser)/cash in house (incl. cash till)";
+    g5.font = { size: 11 };
+    g5.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+    g5.border = border;
+    fInputGreen(wsFront, 5, 8);
 
-// ── Rad 4: Kontantbeholdning in-house ─────────────────────────────────────
-merge(wsFront, 4, 7, 4, 7);
-lbl(wsFront, 4, 7, "Kontantbeholdning in-house (inkl. vekselkasser)/cash in house (incl. cash till)", "FFFFFFFF");
-val(wsFront, 4, 8, "", green);
+    // ── Rad 6–8: Mat ─────────────────────────────────────────────────────────
+    const matBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Frukt og grønt", "Krydder", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
+    const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
 
-// ── Rad 5: Varekategori / Sum header ──────────────────────────────────────
-wsFront.getRow(5).height = 28;
-hdr(wsFront, 5, 2, "Varekategori:", blue, true, false);
-hdr(wsFront, 5, 3, "Sum:", blue, true, true);
-merge(wsFront, 5, 7, 5, 7);
-lbl(wsFront, 5, 7, "Levert Loomis siste mnd/ Delivered to Loomis last month", "FFFFFFFF");
-val(wsFront, 5, 8, "", green);
+    wsFront.getRow(6).height = 24.75;
+    fLbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):");
+    mergeF(wsFront, 6, 3, 6, 4);
+    fVal(wsFront, 6, 3, Math.round(matTotal * 100) / 100);
 
-// ── Rad 6: Mat kjøkken ────────────────────────────────────────────────────
-const matBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Frukt og grønt", "Krydder", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
-const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
+    const g6 = wsFront.getCell(6, 7);
+    g6.value = "Levert Loomis siste mnd/ Delivered to Loomis last month";
+    g6.font = { size: 11 };
+    g6.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+    g6.border = border;
+    fInputGreen(wsFront, 6, 8);
 
-wsFront.getRow(6).height = 28;
-lbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):");
-val(wsFront, 6, 3, Math.round(matTotal * 100) / 100);
-merge(wsFront, 6, 7, 7, 7);
-lbl(wsFront, 6, 7, "Poser til Loomis, ikke levert / Bags for Loomis in the safe but not delivered", "FFFFFFFF");
-val(wsFront, 6, 8, "", green);
+    wsFront.getRow(7).height = 41.25;
+    fLbl(wsFront, 7, 2, "Mat (Evt. eksternt lager):");
+    mergeF(wsFront, 7, 3, 7, 4);
+    fVal(wsFront, 7, 3, 0);
 
-// ── Rad 7: Mat eksternt lager ─────────────────────────────────────────────
-wsFront.getRow(7).height = 28;
-lbl(wsFront, 7, 2, "Mat (Evt. eksternt lager):");
-val(wsFront, 7, 3, 0);
+    const g7 = wsFront.getCell(7, 7);
+    g7.value = "Poser til Loomis, ikke levert / Bags for Loomis in the safe but not delivered";
+    g7.font = { size: 11 };
+    g7.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+    g7.border = border;
+    fInputGreen(wsFront, 7, 8);
 
-// ── Rad 8: Mat bar ────────────────────────────────────────────────────────
-lbl(wsFront, 8, 2, "Mat (Telt på bar-telleliste):");
-val(wsFront, 8, 3, 0);
+    wsFront.getRow(8).height = 24.75;
+    fLbl(wsFront, 8, 2, "Mat (Telt på bar-telleliste):");
+    mergeF(wsFront, 8, 3, 8, 4);
+    fVal(wsFront, 8, 3, 0);
 
-// ── Rad 9: Total Mat ──────────────────────────────────────────────────────
-lbl(wsFront, 9, 2, "Total Mat:", "FFFFFFFF", true);
-const totalMatCell = wsFront.getCell(9, 3);
-totalMatCell.value = { formula: `SUM(C6:C8)` };
-totalMatCell.numFmt = "#,##0.00";
-totalMatCell.font = { bold: true };
-totalMatCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-totalMatCell.alignment = { horizontal: "right" };
-lbl(wsFront, 9, 7, "Sum / Total", "FFFFFFFF", true);
-const sumTotalCell = wsFront.getCell(9, 8);
-sumTotalCell.value = { formula: `SUM(H4:H6)` };
-sumTotalCell.numFmt = "#,##0.00";
-sumTotalCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
-sumTotalCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-sumTotalCell.alignment = { horizontal: "right" };
+    // ── Rad 9: Total Mat ──────────────────────────────────────────────────────
+    wsFront.getRow(9).height = 24.75;
+    fLbl(wsFront, 9, 2, "Total Mat:", true);
+    mergeF(wsFront, 9, 3, 9, 4);
+    const c9 = wsFront.getCell(9, 3);
+    c9.value = { formula: "SUM(C6:C8)" };
+    c9.numFmt = "#,##0.00";
+    c9.alignment = { horizontal: "right", vertical: "middle" };
+    c9.border = border;
+    c9.font = { bold: true };
 
-// ── Rad 10-18: Drikke ─────────────────────────────────────────────────────
-const drikkeRader = [
-  { label: "Brennevin:", v: bucketValue("Brennevin") },
-  { label: "Øl (fatøl + flaske/boks):", v: bucketValue("Øl") },
-  { label: "Øl (egenprodusert til servering):", v: 0 },
-  { label: "Øl (egenprodusert i produksjon):", v: 0 },
-  { label: "Mineralvann:", v: bucketValue("Mineralvann") },
-  { label: "Vin + Cider:", v: bucketValue("Vin") + bucketValue("Cider") },
-  { label: "Kaffe/te:", v: bucketValue("Kaffe/te") },
-  { label: "Tobakk:", v: 0 },
-];
-drikkeRader.forEach(({ label, v }, i) => {
-  const r = 10 + i;
-  lbl(wsFront, r, 2, label);
-  val(wsFront, r, 3, Math.round(v * 100) / 100);
-});
+    const g9 = wsFront.getCell(9, 7);
+    g9.value = "Sum / Total";
+    g9.font = { size: 11 };
+    g9.alignment = { horizontal: "left", vertical: "middle" };
+    g9.border = border;
+    const h9 = wsFront.getCell(9, 8);
+    h9.value = { formula: "SUM(H5:H7)" };
+    h9.numFmt = "#,##0.00";
+    h9.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+    h9.alignment = { horizontal: "right", vertical: "middle" };
+    h9.border = border;
+    h9.font = { size: 11 };
 
-// ── Rad 18: Total varebeholdning ──────────────────────────────────────────
-const r18 = 18;
-lbl(wsFront, r18, 2, "Total varebeholdning mat og drikke:", "FFFFFFFF", true);
-const totalVbCell = wsFront.getCell(r18, 3);
-totalVbCell.value = { formula: `SUM(C10:C17)+C9` };
-totalVbCell.numFmt = "#,##0.00";
-totalVbCell.font = { bold: true };
-totalVbCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-totalVbCell.alignment = { horizontal: "right" };
+    // ── Rad 10–17: Drikke ─────────────────────────────────────────────────────
+    const drikkeRader = [
+      { label: "Brennevin:", v: bucketValue("Brennevin") },
+      { label: "Øl (fatøl + flaske/boks):", v: bucketValue("Øl") },
+      { label: "Øl (egenprodusert til servering):", v: 0 },
+      { label: "Øl (egenprodusert i produksjon):", v: 0 },
+      { label: "Mineralvann:", v: bucketValue("Mineralvann") },
+      { label: "Vin + Cider:", v: bucketValue("Vin") + bucketValue("Cider") },
+      { label: "Kaffe/te:", v: bucketValue("Kaffe/te") },
+      { label: "Tobakk:", v: 0 },
+    ];
+    drikkeRader.forEach(({ label, v }, i) => {
+      const r = 10 + i;
+      fLbl(wsFront, r, 2, label);
+      mergeF(wsFront, r, 3, r, 4);
+      fVal(wsFront, r, 3, Math.round(v * 100) / 100);
+    });
 
-// ── Rad 21: Brekkasje header ──────────────────────────────────────────────
-wsFront.getRow(21).height = 22;
-merge(wsFront, 21, 2, 21, 4);
-hdr(wsFront, 21, 2, "BREKKASJE / KJØKKENREKVISISJON", blue, true, true);
+    // ── Rad 18: Total varebeholdning ──────────────────────────────────────────
+    fLbl(wsFront, 18, 2, "Total varebeholdning mat og drikke:", true);
+    mergeF(wsFront, 18, 3, 18, 4);
+    const c18 = wsFront.getCell(18, 3);
+    c18.value = { formula: "SUM(C10:C17)+C9" };
+    c18.numFmt = "#,##0.00";
+    c18.alignment = { horizontal: "right", vertical: "middle" };
+    c18.border = border;
+    c18.font = { bold: true };
 
-// ── Rad 23-24: Brekkasje kolonneheader ───────────────────────────────────
-lbl(wsFront, 23, 2, "Varekategori:", "FFFFFFFF", true);
-hdr(wsFront, 23, 3, "Brekkasje:", blue, true, true);
-hdr(wsFront, 23, 4, "Kjøkkenrekvisisjon: (Bar til kjøkken)", green, true, true);
-lbl(wsFront, 24, 3, "Beløp:", "FFFFFFFF", true);
-lbl(wsFront, 24, 4, "Beløp:", "FFFFFFFF", true);
+    // ── Rad 21–22: Brekkasje header (merget B21:D22) ─────────────────────────
+    wsFront.getRow(21).height = 15.75;
+    mergeF(wsFront, 21, 2, 22, 4); // B21:D22
+    fHdr(wsFront, 21, 2, "BREKKASJE / KJØKKENREKVISISJON", blue, true);
 
-// ── Rad 25-31: Brekkasje rader ────────────────────────────────────────────
-const matWasteTotal = matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0);
-const brekkasjeRader = [
-  { label: "Mat:", bv: Math.round(matWasteTotal * 100) / 100 },
-  { label: "Vin + Cider:", bv: Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100 },
-  { label: "Brennevin:", bv: Math.round(bucketWasteValue("Brennevin") * 100) / 100 },
-  { label: "Øl:", bv: Math.round(bucketWasteValue("Øl") * 100) / 100 },
-  { label: "Mineralvann:", bv: Math.round(bucketWasteValue("Mineralvann") * 100) / 100 },
-  { label: "Kaffe/te:", bv: Math.round(bucketWasteValue("Kaffe/te") * 100) / 100 },
-  { label: "Tobakk:", bv: 0 },
-];
-brekkasjeRader.forEach(({ label, bv }, i) => {
-  const r = 25 + i;
-  lbl(wsFront, r, 2, label);
-  val(wsFront, r, 3, bv, blue);
-  val(wsFront, r, 4, 0, green);
-});
+    // ── Rad 23–24: Kolonneheaders brekkasje ──────────────────────────────────
+    wsFront.getRow(23).height = 30.75;
+    fLbl(wsFront, 23, 2, "Varekategori:", true);
+    fHdr(wsFront, 23, 3, "Brekkasje:", blue, false);
+    fHdr(wsFront, 23, 4, "Kjøkkenrekvisisjon: (Bar til kjøkken)", green, false);
+    wsFront.getRow(24).height = 15.75;
+    fHdr(wsFront, 24, 3, "Beløp:", blue, false);
+    fHdr(wsFront, 24, 4, "Beløp:", green, false);
 
-// ── Rad 32: Total brekkasje ───────────────────────────────────────────────
-lbl(wsFront, 32, 2, "Total:", "FFFFFFFF", true);
-const totBrekCell = wsFront.getCell(32, 3);
-totBrekCell.value = { formula: "SUM(C25:C31)" };
-totBrekCell.numFmt = "#,##0.00";
-totBrekCell.font = { bold: true };
-totBrekCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
-totBrekCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-totBrekCell.alignment = { horizontal: "right" };
-const totKjokCell = wsFront.getCell(32, 4);
-totKjokCell.value = { formula: "SUM(D25:D31)" };
-totKjokCell.numFmt = "#,##0.00";
-totKjokCell.font = { bold: true };
-totKjokCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } };
-totKjokCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-totKjokCell.alignment = { horizontal: "right" };
+    // ── Rad 25–31: Brekkasje rader ────────────────────────────────────────────
+    const matWasteTotal = matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0);
+    const brekkasjeRader = [
+      { label: "Mat:", bv: Math.round(matWasteTotal * 100) / 100 },
+      { label: "Vin + Cider:", bv: Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100 },
+      { label: "Brennevin:", bv: Math.round(bucketWasteValue("Brennevin") * 100) / 100 },
+      { label: "Øl:", bv: Math.round(bucketWasteValue("Øl") * 100) / 100 },
+      { label: "Mineralvann:", bv: Math.round(bucketWasteValue("Mineralvann") * 100) / 100 },
+      { label: "Kaffe/te:", bv: Math.round(bucketWasteValue("Kaffe/te") * 100) / 100 },
+      { label: "Tobakk:", bv: 0 },
+    ];
+    brekkasjeRader.forEach(({ label, bv }, i) => {
+      const r = 25 + i;
+      fLbl(wsFront, r, 2, label);
+      fVal(wsFront, r, 3, bv, blue);
+      fVal(wsFront, r, 4, 0, green);
+    });
 
-// ── Rad 35: Kommentar ─────────────────────────────────────────────────────
-lbl(wsFront, 35, 2, "Kommentar:", "FFFFFFFF", false);
+    // ── Rad 32: Total brekkasje ───────────────────────────────────────────────
+    fLbl(wsFront, 32, 2, "Total:", true);
+    const c32 = wsFront.getCell(32, 3);
+    c32.value = { formula: "SUM(C25:C31)" };
+    c32.numFmt = "#,##0.00";
+    c32.font = { bold: true };
+    c32.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+    c32.alignment = { horizontal: "right", vertical: "middle" };
+    c32.border = border;
+    const d32 = wsFront.getCell(32, 4);
+    d32.value = { formula: "SUM(D25:D31)" };
+    d32.numFmt = "#,##0.00";
+    d32.font = { bold: true };
+    d32.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } };
+    d32.alignment = { horizontal: "right", vertical: "middle" };
+    d32.border = border;
 
-// Flytt Forside-arket til posisjon 0 (første ark)
-const allSheets = (wb as any)._worksheets.filter(Boolean);
-const frontIdx = allSheets.findIndex((s: any) => s.name === "Forside");
-if (frontIdx > 0) {
-  const [front] = allSheets.splice(frontIdx, 1);
-  allSheets.unshift(front);
-  (wb as any)._worksheets = [undefined, ...allSheets];
-  allSheets.forEach((s: any, i: number) => { s.orderNo = i + 1; });
-}
+    // ── Rad 35: Kommentar ─────────────────────────────────────────────────────
+    wsFront.getRow(35).height = 15.75;
+    fLbl(wsFront, 35, 2, "Kommentar:");
 
-const buffer = await wb.xlsx.writeBuffer();
-const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-const url = URL.createObjectURL(blob);
-const a = document.createElement("a");
-a.href = url;
-a.download = `varetelling-${inventoryMonth}.xlsx`;
-a.click();
-URL.revokeObjectURL(url);
+    // Flytt Forside-arket til første posisjon
+    const allSheets = (wb as any)._worksheets.filter(Boolean);
+    const frontIdx = allSheets.findIndex((s: any) => s.name === "Forside");
+    if (frontIdx > 0) {
+      const [front] = allSheets.splice(frontIdx, 1);
+      allSheets.unshift(front);
+      (wb as any)._worksheets = [undefined, ...allSheets];
+      allSheets.forEach((s: any, i: number) => { s.orderNo = i + 1; });
+    }
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `varetelling-${inventoryMonth}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
   // ── Mobilkort: råvare ─────────────────────────────────────────────────────
 
