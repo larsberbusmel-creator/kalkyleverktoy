@@ -5024,8 +5024,8 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     return { monthKey, total: statsBuckets.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0), wasteTotal: Object.values(monthData.waste || {}).reduce((s, v) => s + Number(v || 0), 0) };
   }).slice(-12);
   const maxInventoryValue = Math.max(1, ...inventoryHistory.map((h) => h.total));
-
-  async function exportInventoryXlsx() {
+  
+async function exportInventoryXlsx() {
     const ExcelJS = await import("exceljs");
     const wb = new ExcelJS.Workbook();
     const sheetNames: Record<string, string> = { "Kaffe/te": "Kaffe-te", "Kjøkken, egenprodusert": "Kjøkken-egenprod", "Bakeri, egenprodusert": "Bakeri-egenprod" };
@@ -5109,45 +5109,217 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     wsWaste.addRow([]);
     const totalWasteRow = wsWaste.addRow(["TOTAL SVINN", "", totalWasteValue()]);
     totalWasteRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF607D8B" } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === 3) cell.numFmt = "#,##0.00"; });
-    // ── Forside ───────────────────────────────────────────────────────────────
+  
+
+    // ── Forside – bygges direkte i ExcelJS ───────────────────────────────────
 const [yr, mo] = inventoryMonth.split("-");
 const monthNames: Record<string, string> = {
   "01": "Januar", "02": "Februar", "03": "Mars", "04": "April",
   "05": "Mai", "06": "Juni", "07": "Juli", "08": "August",
   "09": "September", "10": "Oktober", "11": "November", "12": "Desember",
 };
+const månedLabel = `${monthNames[mo] || mo} ${yr}`;
 
+const wsFront = wb.addWorksheet("Forside");
+
+// Kolonnebredder
+wsFront.columns = [
+  { width: 3 },  // A
+  { width: 32 }, // B – varekategori
+  { width: 16 }, // C – sum
+  { width: 3 },  // D
+  { width: 3 },  // E
+  { width: 3 },  // F
+  { width: 40 }, // G – kontant
+  { width: 18 }, // H – beløp
+];
+
+const blue   = "BDD7EE";
+const green  = "E2EFDA";
+const black  = "000000";
+const white  = "FFFFFFFF";
+const darkBg = "1F3864";
+
+function hdr(ws: any, row: number, col: number, val: string, bg: string, bold = true, center = true) {
+  const cell = ws.getCell(row, col);
+  cell.value = val;
+  cell.font = { bold, color: { argb: bg === darkBg ? white : "FF" + black }, size: 10 };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg } };
+  cell.alignment = { horizontal: center ? "center" : "left", vertical: "middle", wrapText: true };
+  cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+}
+
+function val(ws: any, row: number, col: number, value: number | string, bg = "FFFFFFFF", numFmt = "#,##0.00") {
+  const cell = ws.getCell(row, col);
+  cell.value = value;
+  if (typeof value === "number") cell.numFmt = numFmt;
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg.replace("#", "") } };
+  cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+  cell.alignment = { horizontal: "right", vertical: "middle" };
+}
+
+function lbl(ws: any, row: number, col: number, text: string, bg = "FFFFFFFF", bold = false) {
+  const cell = ws.getCell(row, col);
+  cell.value = text;
+  cell.font = { bold, size: 10 };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg.replace("#", "") } };
+  cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+  cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+}
+
+function merge(ws: any, r1: number, c1: number, r2: number, c2: number) {
+  ws.mergeCells(r1, c1, r2, c2);
+}
+
+// ── Rad 1: Firmanavn ──────────────────────────────────────────────────────
+merge(wsFront, 1, 2, 1, 3);
+hdr(wsFront, 1, 2, "Guttan på Torget AS", blue, true, true);
+merge(wsFront, 1, 7, 1, 7);
+lbl(wsFront, 1, 7, "Kontantbeholdning / Cash", "FFFFFFFF", false);
+hdr(wsFront, 1, 8, "(selskap/company)", blue, false, true);
+
+// ── Rad 2: Dato ───────────────────────────────────────────────────────────
+hdr(wsFront, 2, 8, "(dato/date)", blue, false, true);
+
+// ── Rad 3: Varebeholdning PR ──────────────────────────────────────────────
+wsFront.getRow(3).height = 20;
+hdr(wsFront, 3, 2, "VAREBEHOLDNING PR:", blue, true, false);
+hdr(wsFront, 3, 3, månedLabel, blue, true, true);
+
+// ── Rad 4: Kontantbeholdning in-house ─────────────────────────────────────
+merge(wsFront, 4, 7, 4, 7);
+lbl(wsFront, 4, 7, "Kontantbeholdning in-house (inkl. vekselkasser)/cash in house (incl. cash till)", "FFFFFFFF");
+val(wsFront, 4, 8, "", green);
+
+// ── Rad 5: Varekategori / Sum header ──────────────────────────────────────
+wsFront.getRow(5).height = 28;
+hdr(wsFront, 5, 2, "Varekategori:", blue, true, false);
+hdr(wsFront, 5, 3, "Sum:", blue, true, true);
+merge(wsFront, 5, 7, 5, 7);
+lbl(wsFront, 5, 7, "Levert Loomis siste mnd/ Delivered to Loomis last month", "FFFFFFFF");
+val(wsFront, 5, 8, "", green);
+
+// ── Rad 6: Mat kjøkken ────────────────────────────────────────────────────
 const matBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Frukt og grønt", "Krydder", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
 const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
 
-// Legg forside-ark FØRST i wb (samme workbook som resten)
-const forsideResponse = await fetch("/Varetelling_forside.xlsx");
-if (forsideResponse.ok) {
-  const forsideBuffer = await forsideResponse.arrayBuffer();
-  const forsideWb = new ExcelJS.Workbook();
-  await forsideWb.xlsx.load(forsideBuffer);
-  const forsideWs = forsideWb.worksheets[0];
+wsFront.getRow(6).height = 28;
+lbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):");
+val(wsFront, 6, 3, Math.round(matTotal * 100) / 100);
+merge(wsFront, 6, 7, 7, 7);
+lbl(wsFront, 6, 7, "Poser til Loomis, ikke levert / Bags for Loomis in the safe but not delivered", "FFFFFFFF");
+val(wsFront, 6, 8, "", green);
 
-  // Fyll inn verdier
-  forsideWs.getCell("C4").value = `${monthNames[mo] || mo} ${yr}`;
-  forsideWs.getCell("C6").value = Math.round(matTotal * 100) / 100;
-  forsideWs.getCell("C10").value = Math.round(bucketValue("Brennevin") * 100) / 100;
-  forsideWs.getCell("C11").value = Math.round(bucketValue("Øl") * 100) / 100;
-  forsideWs.getCell("C14").value = Math.round(bucketValue("Mineralvann") * 100) / 100;
-  forsideWs.getCell("C15").value = Math.round((bucketValue("Vin") + bucketValue("Cider")) * 100) / 100;
-  forsideWs.getCell("C16").value = Math.round(bucketValue("Kaffe/te") * 100) / 100;
-  forsideWs.getCell("C25").value = Math.round(matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0) * 100) / 100;
-  forsideWs.getCell("C26").value = Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100;
-  forsideWs.getCell("C27").value = Math.round(bucketWasteValue("Brennevin") * 100) / 100;
-  forsideWs.getCell("C28").value = Math.round(bucketWasteValue("Øl") * 100) / 100;
-  forsideWs.getCell("C29").value = Math.round(bucketWasteValue("Mineralvann") * 100) / 100;
-  forsideWs.getCell("C30").value = Math.round(bucketWasteValue("Kaffe/te") * 100) / 100;
+// ── Rad 7: Mat eksternt lager ─────────────────────────────────────────────
+wsFront.getRow(7).height = 28;
+lbl(wsFront, 7, 2, "Mat (Evt. eksternt lager):");
+val(wsFront, 7, 3, 0);
 
-  // Flytt forsidearket inn i wb som første ark
-  forsideWs.name = "Forside";
-  (wb as any)._worksheets.unshift(undefined); // shift index
-  (wb as any)._worksheets[1] = forsideWs;
-  (forsideWs as any)._workbook = wb;
+// ── Rad 8: Mat bar ────────────────────────────────────────────────────────
+lbl(wsFront, 8, 2, "Mat (Telt på bar-telleliste):");
+val(wsFront, 8, 3, 0);
+
+// ── Rad 9: Total Mat ──────────────────────────────────────────────────────
+lbl(wsFront, 9, 2, "Total Mat:", "FFFFFFFF", true);
+const totalMatCell = wsFront.getCell(9, 3);
+totalMatCell.value = { formula: `SUM(C6:C8)` };
+totalMatCell.numFmt = "#,##0.00";
+totalMatCell.font = { bold: true };
+totalMatCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+totalMatCell.alignment = { horizontal: "right" };
+lbl(wsFront, 9, 7, "Sum / Total", "FFFFFFFF", true);
+const sumTotalCell = wsFront.getCell(9, 8);
+sumTotalCell.value = { formula: `SUM(H4:H6)` };
+sumTotalCell.numFmt = "#,##0.00";
+sumTotalCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+sumTotalCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+sumTotalCell.alignment = { horizontal: "right" };
+
+// ── Rad 10-18: Drikke ─────────────────────────────────────────────────────
+const drikkeRader = [
+  { label: "Brennevin:", v: bucketValue("Brennevin") },
+  { label: "Øl (fatøl + flaske/boks):", v: bucketValue("Øl") },
+  { label: "Øl (egenprodusert til servering):", v: 0 },
+  { label: "Øl (egenprodusert i produksjon):", v: 0 },
+  { label: "Mineralvann:", v: bucketValue("Mineralvann") },
+  { label: "Vin + Cider:", v: bucketValue("Vin") + bucketValue("Cider") },
+  { label: "Kaffe/te:", v: bucketValue("Kaffe/te") },
+  { label: "Tobakk:", v: 0 },
+];
+drikkeRader.forEach(({ label, v }, i) => {
+  const r = 10 + i;
+  lbl(wsFront, r, 2, label);
+  val(wsFront, r, 3, Math.round(v * 100) / 100);
+});
+
+// ── Rad 18: Total varebeholdning ──────────────────────────────────────────
+const r18 = 18;
+lbl(wsFront, r18, 2, "Total varebeholdning mat og drikke:", "FFFFFFFF", true);
+const totalVbCell = wsFront.getCell(r18, 3);
+totalVbCell.value = { formula: `SUM(C10:C17)+C9` };
+totalVbCell.numFmt = "#,##0.00";
+totalVbCell.font = { bold: true };
+totalVbCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+totalVbCell.alignment = { horizontal: "right" };
+
+// ── Rad 21: Brekkasje header ──────────────────────────────────────────────
+wsFront.getRow(21).height = 22;
+merge(wsFront, 21, 2, 21, 4);
+hdr(wsFront, 21, 2, "BREKKASJE / KJØKKENREKVISISJON", blue, true, true);
+
+// ── Rad 23-24: Brekkasje kolonneheader ───────────────────────────────────
+lbl(wsFront, 23, 2, "Varekategori:", "FFFFFFFF", true);
+hdr(wsFront, 23, 3, "Brekkasje:", blue, true, true);
+hdr(wsFront, 23, 4, "Kjøkkenrekvisisjon: (Bar til kjøkken)", green, true, true);
+lbl(wsFront, 24, 3, "Beløp:", "FFFFFFFF", true);
+lbl(wsFront, 24, 4, "Beløp:", "FFFFFFFF", true);
+
+// ── Rad 25-31: Brekkasje rader ────────────────────────────────────────────
+const matWasteTotal = matBuckets.reduce((sum, b) => sum + bucketWasteValue(b), 0);
+const brekkasjeRader = [
+  { label: "Mat:", bv: Math.round(matWasteTotal * 100) / 100 },
+  { label: "Vin + Cider:", bv: Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100 },
+  { label: "Brennevin:", bv: Math.round(bucketWasteValue("Brennevin") * 100) / 100 },
+  { label: "Øl:", bv: Math.round(bucketWasteValue("Øl") * 100) / 100 },
+  { label: "Mineralvann:", bv: Math.round(bucketWasteValue("Mineralvann") * 100) / 100 },
+  { label: "Kaffe/te:", bv: Math.round(bucketWasteValue("Kaffe/te") * 100) / 100 },
+  { label: "Tobakk:", bv: 0 },
+];
+brekkasjeRader.forEach(({ label, bv }, i) => {
+  const r = 25 + i;
+  lbl(wsFront, r, 2, label);
+  val(wsFront, r, 3, bv, blue);
+  val(wsFront, r, 4, 0, green);
+});
+
+// ── Rad 32: Total brekkasje ───────────────────────────────────────────────
+lbl(wsFront, 32, 2, "Total:", "FFFFFFFF", true);
+const totBrekCell = wsFront.getCell(32, 3);
+totBrekCell.value = { formula: "SUM(C25:C31)" };
+totBrekCell.numFmt = "#,##0.00";
+totBrekCell.font = { bold: true };
+totBrekCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } };
+totBrekCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+totBrekCell.alignment = { horizontal: "right" };
+const totKjokCell = wsFront.getCell(32, 4);
+totKjokCell.value = { formula: "SUM(D25:D31)" };
+totKjokCell.numFmt = "#,##0.00";
+totKjokCell.font = { bold: true };
+totKjokCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } };
+totKjokCell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
+totKjokCell.alignment = { horizontal: "right" };
+
+// ── Rad 35: Kommentar ─────────────────────────────────────────────────────
+lbl(wsFront, 35, 2, "Kommentar:", "FFFFFFFF", false);
+
+// Flytt Forside-arket til posisjon 0 (første ark)
+const allSheets = (wb as any)._worksheets.filter(Boolean);
+const frontIdx = allSheets.findIndex((s: any) => s.name === "Forside");
+if (frontIdx > 0) {
+  const [front] = allSheets.splice(frontIdx, 1);
+  allSheets.unshift(front);
+  (wb as any)._worksheets = [undefined, ...allSheets];
+  allSheets.forEach((s: any, i: number) => { s.orderNo = i + 1; });
 }
 
 const buffer = await wb.xlsx.writeBuffer();
