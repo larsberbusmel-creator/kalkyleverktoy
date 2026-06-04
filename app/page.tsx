@@ -4960,9 +4960,13 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   }
 
   function materialInventoryValue(m: Material) {
-    const c = counts[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
-    return c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit);
-  }
+  const c = counts[m.id] as any || {};
+  const packages = Number(c.packages || 0);
+  const loose = Number(c.loose || 0);
+  const packagePrice = c.packagePrice ?? m.packagePrice;
+  const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+  return packages * packagePrice + loose * pricePerUnit;
+}
 
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
     const item = counts[`product_${productId}`] as any;
@@ -5221,7 +5225,10 @@ async function exportInventoryXlsx() {
 
     // ── Rad 6–8: Mat ─────────────────────────────────────────────────────────
 const drinkCategories = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
-const matBuckets = data.materialCategories.filter((c: string) => !drinkCategories.includes(c));    const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
+const matBuckets = data.materialCategories.filter((c: string) => 
+  !drinkCategories.includes(c) && c !== "Mat"
+);    
+const matTotal = matBuckets.reduce((sum, b) => sum + bucketValue(b), 0);
 
     wsFront.getRow(6).height = 24.75;
     fLbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):");
