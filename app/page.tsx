@@ -4870,8 +4870,8 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   });
 }
   const categoryLocations: Record<string, string[]> = {
-    "Mat": ["Kjøkken", "Lager"],
-    "Mel og frø":             ["Kjøkken", "Lager"],
+"Diverse mat": ["Kjøkken", "Lager"],    
+"Mel og frø":             ["Kjøkken", "Lager"],
     "Meieri":                 ["Kjølerom", "Kafé"],
     "Kjøtt":                  ["Kjølerom", "Fryser kjeller"],
     "Fisk":                   ["Kjølerom", "Fryser kjeller"],
@@ -4891,7 +4891,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
   const egenprodusertCategories = ["Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
   const drinkBuckets = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
-const matSubBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Mat", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder"];  
+const matSubBuckets = ["Mel og frø", "Meieri", "Kjøtt", "Fisk", "Diverse mat", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder"];
 const accountingBuckets = [...matSubBuckets, "Deli", ...drinkBuckets];
   const internalBuckets = ["Alle", "Mat", ...matSubBuckets, "Deli", ...drinkBuckets];
   const statsBuckets = ["Mat", ...matSubBuckets, "Deli", ...drinkBuckets];
