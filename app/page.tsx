@@ -5707,10 +5707,9 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   );
 }
 function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
-  const [savedOffers, setSavedOffers] = useState<RentalOffer[]>(
-    (data as any).rentalOffers || []
-  );
   const [productSearch, setProductSearch] = useState("");
+  const [showIncluded, setShowIncluded] = useState(true);
+  const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
 
   const rental = data.rental;
   function setRental(next: RentalOffer) { updateData({ rental: next }); }
@@ -5719,10 +5718,8 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
   const addonTotal = addonLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
   const waiterAfterMidnightHours = Number(rental.waiterAfterMidnightHours || 0);
   const food = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0);
-  const waiters = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
-    + rental.waiterHours * data.settings.waiterHourlyRate
-    + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
-  const total = rental.venuePrice + food + waiters + addonTotal;
+  const waiterCost = rental.waiterHours * data.settings.waiterHourlyRate + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
+  const total = rental.venuePrice + food + waiterCost + addonTotal;
 
   const quantityAddons = ["Tøyservietter", "Vinpakke 3 glass", "Alkoholfri drikkepakke 3 glass"];
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
@@ -5765,9 +5762,7 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
       ? existing.map((o) => o.id === offer.id ? offer : o)
       : [offer, ...existing];
     updateData({ rentalOffers: next } as any);
-    setSavedOffers(next);
 
-    // Legg til i kalender som ordre
     if (offer.date) {
       const rentalOrder = {
         id: `rental-order-${offer.id}`,
@@ -5805,20 +5800,27 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
       updateData({ orders: nextOrders });
     }
 
+    setEditingOfferId(offer.id!);
     alert("Tilbud lagret!");
   }
 
   function loadOffer(offer: RentalOffer) {
     setRental(offer);
+    setEditingOfferId(offer.id || null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEdit() {
+    setRental({ ...initialData.rental });
+    setEditingOfferId(null);
   }
 
   function deleteOffer(id: string) {
     if (!confirm("Slette dette tilbudet?")) return;
     const next = ((data as any).rentalOffers || []).filter((o: RentalOffer) => o.id !== id);
     updateData({ rentalOffers: next } as any);
-    setSavedOffers(next);
-    // Fjern tilhørende kalenderordre
     updateData({ orders: data.orders.filter((o) => o.id !== `rental-order-${id}`) });
+    if (editingOfferId === id) cancelEdit();
   }
 
   function printOffer() {
@@ -5835,8 +5837,12 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
     ).join("");
 
     const waiterRow = (rental.waiterHours > 0 || waiterAfterMidnightHours > 0) ? `
-      <tr><td>Servitører (${rental.waiters} pers, ${rental.waiterHours}t + ${waiterAfterMidnightHours}t etter midnatt)</td><td></td><td></td><td style="text-align:right"><b>${currency(waiters - food)}</b></td></tr>
+      <tr><td>Servitører (${rental.waiters} pers, ${rental.waiterHours}t + ${waiterAfterMidnightHours}t etter midnatt)</td><td></td><td></td><td style="text-align:right"><b>${currency(waiterCost)}</b></td></tr>
     ` : "";
+
+    const venueRow = rental.venuePrice > 0
+      ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
+      : "";
 
     const w = window.open("", "_blank");
     if (!w) return;
@@ -5846,7 +5852,6 @@ body{font-family:Arial,sans-serif;color:#111827;padding:32px;line-height:1.5}
 .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
 .logo{height:90px;width:auto;object-fit:contain}
 .header-right{text-align:right;font-size:13px;color:#374151}
-h1{font-size:22px;margin:0 0 6px}
 h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
 th{background:#f3f4f6;text-align:left;padding:8px;border-bottom:2px solid #e5e7eb}
@@ -5860,7 +5865,6 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 @media print{button{display:none}body{padding:0}}
 </style></head><body>
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
-
 <div class="header">
   <img src="/logo.png" class="logo" />
   <div class="header-right">
@@ -5869,19 +5873,17 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
     <span>Utstedt: ${formatDateNo(new Date().toISOString().slice(0, 10))}</span>
   </div>
 </div>
-
 <div class="info-box">
   <p><b>Kunde:</b> ${escapeHtml(rental.customer)}</p>
   <p><b>Lokale:</b> ${escapeHtml(venueName)}</p>
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
   ${rental.note ? `<p><b>Merknad:</b> ${escapeHtml(rental.note)}</p>` : ""}
 </div>
-
 <h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
   <tbody>
-    <tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>
+    ${venueRow}
     ${productRows}
     ${waiterRow}
     ${addonRows}
@@ -5890,9 +5892,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
     <tr class="total-row"><td colspan="3">Total inkl. mva</td><td style="text-align:right">${currency(total)}</td></tr>
   </tfoot>
 </table>
-
-<p class="included">${escapeHtml(includedText)}</p>
-
+${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
 <div class="footer">
   Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no
 </div>
@@ -5911,7 +5911,19 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
     <section>
       <div className="grid two">
         <div className="card">
-          <h2>Leie av lokale</h2>
+          <div className="between">
+            <h2>Leie av lokale</h2>
+            {editingOfferId && (
+              <button className="btn" onClick={cancelEdit}>+ Nytt tilbud</button>
+            )}
+          </div>
+
+          {editingOfferId && (
+            <div style={{ background: "#fef9c3", border: "1px solid #fbbf24", borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 700 }}>✏️ Redigerer: {rental.customer}</span>
+              <button className="btn" onClick={cancelEdit}>Avbryt redigering</button>
+            </div>
+          )}
 
           <div className="form-grid two">
             <label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
@@ -6012,26 +6024,34 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 
         <div className="card">
           <h2>Tilbud</h2>
+
           <div className="soft-box">
-            <h3>Prisen inkluderer</h3>
-            <p>{includedText}</p>
+            <label className="check">
+              <input type="checkbox" checked={showIncluded} onChange={(e) => setShowIncluded(e.target.checked)} />
+              Vis "Prisen inkluderer" i tilbud
+            </label>
+            {showIncluded && <p style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>{includedText}</p>}
           </div>
-          <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>
+
+          {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
           <p>Mat/produkter: <b>{currency(food)}</b></p>
-          <p>Servitører: <b>{currency(waiters - food)}</b></p>
+          <p>Servitører: <b>{currency(waiterCost)}</b></p>
           <p>Tillegg: <b>{currency(addonTotal)}</b></p>
+
           {addonLines.length > 0 && (
             <table>
               <thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead>
               <tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody>
             </table>
           )}
+
           <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
 
           <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-            <button className="btn active" onClick={saveOffer}>Lagre tilbud{rental.date ? " og legg i kalender" : ""}</button>
+            <button className="btn active" onClick={saveOffer}>
+              {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
+            </button>
             <button className="btn" onClick={printOffer}>Last ned / print tilbud</button>
-            {rental.id && <button className="btn" onClick={() => setRental({ ...data.rental, id: undefined, customer: "", date: "", note: "" })}>Nytt tilbud</button>}
           </div>
         </div>
       </div>
@@ -6041,15 +6061,17 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
         <h2>Lagrede tilbud</h2>
         {offers.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud lagret ennå.</p>}
         {offers.map((offer) => {
+          const offerWaiterCost = (offer.waiterHours || 0) * data.settings.waiterHourlyRate + (offer.waiterAfterMidnightHours || 0) * data.settings.waiterAfterMidnightHourlyRate;
           const offerTotal = offer.venuePrice
             + offer.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
-            + (offer.waiterHours || 0) * data.settings.waiterHourlyRate
-            + (offer.waiterAfterMidnightHours || 0) * data.settings.waiterAfterMidnightHourlyRate
+            + offerWaiterCost
             + (offer.extraLines || []).reduce((sum, l) => sum + Number(l.amount || 0), 0);
+          const isEditing = editingOfferId === offer.id;
           return (
-            <div key={offer.id} className="editable-row">
+            <div key={offer.id} className="editable-row" style={{ background: isEditing ? "#fef9c3" : undefined, borderRadius: isEditing ? 10 : undefined, padding: isEditing ? "8px 12px" : undefined }}>
               <div>
                 <b>{offer.customer}</b>
+                {isEditing && <span style={{ marginLeft: 8, fontSize: 12, background: "#fbbf24", color: "white", borderRadius: 6, padding: "2px 8px" }}>Redigeres nå</span>}
                 {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
                 <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
                 <br />
@@ -6057,7 +6079,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
                 {offer.note && <><br /><small style={{ color: "#64748b" }}>{offer.note}</small></>}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn" onClick={() => loadOffer(offer)}>Last inn</button>
+                {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
                 <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
               </div>
             </div>
