@@ -500,75 +500,79 @@ export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [data, setData] = useState<AppData>(initialData);
+  const isSavingRef = React.useRef(false);
 
   useEffect(() => {
-  async function loadData() {
-    const { data: authData } = await supabase.auth.getSession();
-    if (!authData.session) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const { data: row, error } = await supabase
-      .from("app_data")
-      .select("data")
-      .eq("id", "main")
-      .single();
-
-    if (error) {
-      console.error("Supabase load error:", error);
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try { setData(migrateData(JSON.parse(saved))); } catch { setData(initialData); }
+    async function loadData() {
+      const { data: authData } = await supabase.auth.getSession();
+      if (!authData.session) {
+        window.location.href = "/login";
+        return;
       }
-      setIsLoaded(true);
-      return;
-    }
 
-    if (row?.data) setData(migrateData(row.data));
-    setIsLoaded(true);
-  }
+      const { data: row, error } = await supabase
+        .from("app_data")
+        .select("data")
+        .eq("id", "main")
+        .single();
 
-  loadData();
-
-  const channel = supabase
-    .channel("app_data_changes")
-    .on(
-      "postgres_changes",
-      { event: "UPDATE", schema: "public", table: "app_data", filter: "id=eq.main" },
-      (payload) => {
-        if (payload.new?.data) {
-          setData(migrateData(payload.new.data));
+      if (error) {
+        console.error("Supabase load error:", error);
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          try { setData(migrateData(JSON.parse(saved))); } catch { setData(initialData); }
         }
+        setIsLoaded(true);
+        return;
       }
-    )
-    .subscribe();
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, []);
+      if (row?.data) setData(migrateData(row.data));
+      setIsLoaded(true);
+    }
+
+    loadData();
+
+    const channel = supabase
+      .channel("app_data_changes")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "app_data", filter: "id=eq.main" },
+        (payload) => {
+          if (isSavingRef.current) return;
+          if (payload.new?.data) {
+            setData(migrateData(payload.new.data));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
 
   function updateData(partial: Partial<AppData>) {
-  setData((prev) => {
-    const next = { ...prev, ...partial };
+    setData((prev) => {
+      const next = { ...prev, ...partial };
 
-    supabase
-      .from("app_data")
-      .upsert({
-        id: "main",
-        data: next,
-        updated_at: new Date().toISOString(),
-      })
-      .then(({ error }) => {
-        if (error) console.error("Supabase save error:", error);
-      });
+      isSavingRef.current = true;
+      supabase
+        .from("app_data")
+        .upsert({
+          id: "main",
+          data: next,
+          updated_at: new Date().toISOString(),
+        })
+        .then(({ error }) => {
+          if (error) console.error("Supabase save error:", error);
+          setTimeout(() => { isSavingRef.current = false; }, 2000);
+        });
 
-    return next;
-  });
-}
+      return next;
+    });
+  }
 
   function exportData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
