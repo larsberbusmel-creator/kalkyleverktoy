@@ -6107,106 +6107,258 @@ function SettingsTab({
   const [newVenue, setNewVenue] = useState({ name: "", price: "0" });
   const [newPackaging, setNewPackaging] = useState({ name: "", price: "0" });
   const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0" });
-  const s = data.settings;
-  const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) => <div className="settings-section"><button className="settings-toggle" onClick={() => setOpen(open === id ? "" : id)}>{title}<span>{open === id ? "−" : "+"}</span></button>{open === id && <div className="settings-content">{children}</div>}</div>;
 
-return (
-  <section className="card">
-    <h2>Innstillinger</h2>
+  // Lokal state for settings-tall
+  const [localSettings, setLocalSettings] = useState(data.settings);
+  React.useEffect(() => { setLocalSettings(data.settings); }, [data.settings]);
 
-    <Section id="personell" title="Personell">
-      <div className="form-grid">
-        <label>MVA mat<input type="number" value={s.foodVat} onChange={(e) => updateData({ settings: { ...s, foodVat: Number(e.target.value) } })} /></label>
-        <label>Kostnad kokker/time<input type="number" value={s.chefHourlyRate} onChange={(e) => updateData({ settings: { ...s, chefHourlyRate: Number(e.target.value) } })} /></label>
-        <label>Grunntid kokker/min<input type="number" value={s.chefBaseMinutes} onChange={(e) => updateData({ settings: { ...s, chefBaseMinutes: Number(e.target.value) } })} /></label>
-        <label>Tillegg min pr 10 pers<input type="number" value={s.chefExtraMinutesPer10} onChange={(e) => updateData({ settings: { ...s, chefExtraMinutesPer10: Number(e.target.value) } })} /></label>
-        <label>2 kokker over antall<input type="number" value={s.twoChefsOverGuestCount} onChange={(e) => updateData({ settings: { ...s, twoChefsOverGuestCount: Number(e.target.value) } })} /></label>
-        <label>Servitør/time<input type="number" value={s.waiterHourlyRate} onChange={(e) => updateData({ settings: { ...s, waiterHourlyRate: Number(e.target.value) } })} /></label>
-        <label>Servitør etter midnatt<input type="number" value={s.waiterAfterMidnightHourlyRate} onChange={(e) => updateData({ settings: { ...s, waiterAfterMidnightHourlyRate: Number(e.target.value) } })} /></label>
+  // Lokal state for lister som redigeres inline
+  const [localVenues, setLocalVenues] = useState(data.venues);
+  React.useEffect(() => { setLocalVenues(data.venues); }, [data.venues]);
+
+  const [localPackaging, setLocalPackaging] = useState(data.packaging);
+  React.useEffect(() => { setLocalPackaging(data.packaging); }, [data.packaging]);
+
+  const [localRentalAddons, setLocalRentalAddons] = useState(data.rentalAddons);
+  React.useEffect(() => { setLocalRentalAddons(data.rentalAddons); }, [data.rentalAddons]);
+
+  const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) =>
+    <div className="settings-section">
+      <button className="settings-toggle" onClick={() => setOpen(open === id ? "" : id)}>
+        {title}<span>{open === id ? "−" : "+"}</span>
+      </button>
+      {open === id && <div className="settings-content">{children}</div>}
+    </div>;
+
+  return (
+    <section className="card">
+      <h2>Innstillinger</h2>
+
+      <Section id="personell" title="Personell">
+        <div className="form-grid">
+          <label>MVA mat<input type="number" value={localSettings.foodVat}
+            onChange={(e) => setLocalSettings({ ...localSettings, foodVat: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+          <label>Kostnad kokker/time<input type="number" value={localSettings.chefHourlyRate}
+            onChange={(e) => setLocalSettings({ ...localSettings, chefHourlyRate: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+          <label>Grunntid kokker/min<input type="number" value={localSettings.chefBaseMinutes}
+            onChange={(e) => setLocalSettings({ ...localSettings, chefBaseMinutes: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+          <label>Tillegg min pr 10 pers<input type="number" value={localSettings.chefExtraMinutesPer10}
+            onChange={(e) => setLocalSettings({ ...localSettings, chefExtraMinutesPer10: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+          <label>2 kokker over antall<input type="number" value={localSettings.twoChefsOverGuestCount}
+            onChange={(e) => setLocalSettings({ ...localSettings, twoChefsOverGuestCount: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+          <label>Servitør/time<input type="number" value={localSettings.waiterHourlyRate}
+            onChange={(e) => setLocalSettings({ ...localSettings, waiterHourlyRate: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+          <label>Servitør etter midnatt<input type="number" value={localSettings.waiterAfterMidnightHourlyRate}
+            onChange={(e) => setLocalSettings({ ...localSettings, waiterAfterMidnightHourlyRate: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+        </div>
+      </Section>
+
+      <Section id="retailMargins" title="Standard marginer for videresalg">
+        <div className="form-grid">
+          {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].map((cat) => (
+            <label key={cat}>{cat}
+              <input
+                type="number"
+                value={localSettings.retailMargins?.[cat] ?? 50}
+                onChange={(e) => setLocalSettings({
+                  ...localSettings,
+                  retailMargins: { ...(localSettings.retailMargins || {}), [cat]: Number(e.target.value) }
+                })}
+                onBlur={() => updateData({ settings: localSettings })}
+              />
+            </label>
+          ))}
+        </div>
+      </Section>
+
+      <Section id="venues" title="Leie av lokaler, priser">
+        <div>
+          {localVenues.map((v, i) => (
+            <div key={v.id} className="editable-row">
+              <input
+                value={v.name}
+                onChange={(e) => setLocalVenues(localVenues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                onBlur={() => updateData({ venues: localVenues })}
+              />
+              <input
+                type="number"
+                value={v.price}
+                onChange={(e) => setLocalVenues(localVenues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
+                onBlur={() => updateData({ venues: localVenues })}
+              />
+              <button className="link danger" onClick={() => {
+                const next = localVenues.filter((x) => x.id !== v.id);
+                setLocalVenues(next);
+                updateData({ venues: next });
+              }}>Slett</button>
+            </div>
+          ))}
+        </div>
+        <div className="form-grid three">
+          <input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} />
+          <input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} />
+          <button className="btn active" onClick={() => {
+            if (!newVenue.name.trim()) return;
+            const next = [...localVenues, { id: `${idFromName(newVenue.name)}-${Date.now()}`, name: newVenue.name.trim(), price: Number(newVenue.price) || 0 }];
+            setLocalVenues(next);
+            updateData({ venues: next });
+            setNewVenue({ name: "", price: "0" });
+          }}>Legg til</button>
+        </div>
+      </Section>
+
+      <Section id="rentalAddons" title="Leie av lokale, tillegg">
+        <div>
+          {localRentalAddons.map((addon, i) => (
+            <div key={addon.id} className="editable-row">
+              <input
+                value={addon.name}
+                onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                onBlur={() => updateData({ rentalAddons: localRentalAddons })}
+              />
+              <input
+                type="number"
+                value={addon.price}
+                onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
+                onBlur={() => updateData({ rentalAddons: localRentalAddons })}
+              />
+              <button className="link danger" onClick={() => {
+                const next = localRentalAddons.filter((x) => x.id !== addon.id);
+                setLocalRentalAddons(next);
+                updateData({ rentalAddons: next });
+              }}>Slett</button>
+            </div>
+          ))}
+        </div>
+        <div className="form-grid three">
+          <input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} />
+          <input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} />
+          <button className="btn active" onClick={() => {
+            if (!newRentalAddon.name.trim()) return;
+            const next = [...localRentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0 }];
+            setLocalRentalAddons(next);
+            updateData({ rentalAddons: next });
+            setNewRentalAddon({ name: "", price: "0" });
+          }}>Legg til</button>
+        </div>
+      </Section>
+
+      <Section id="materialCats" title="Kategorier for råvarer">
+        <CategoryEditor
+          values={data.materialCategories}
+          newValue={newMaterialCategory}
+          setNewValue={setNewMaterialCategory}
+          onSave={(next) => updateData({ materialCategories: next })}
+        />
+      </Section>
+
+      <Section id="productCats" title="Kategorier for produkter/menyer">
+        <h3>Produktkategorier</h3>
+        <CategoryEditor
+          values={data.productCategories}
+          newValue={newProductCategory}
+          setNewValue={setNewProductCategory}
+          onSave={(next) => updateData({ productCategories: next })}
+        />
+        <h3>Menykategorier</h3>
+        <CategoryEditor
+          values={data.menuCategories}
+          newValue={newMenuCategory}
+          setNewValue={setNewMenuCategory}
+          onSave={(next) => updateData({ menuCategories: next })}
+        />
+      </Section>
+
+      <Section id="packaging" title="Priser på emballasje">
+        <div>
+          {localPackaging.map((p, i) => (
+            <div key={p.id} className="editable-row">
+              <input
+                value={p.name}
+                onChange={(e) => setLocalPackaging(localPackaging.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                onBlur={() => updateData({ packaging: localPackaging })}
+              />
+              <input
+                type="number"
+                value={p.price}
+                onChange={(e) => setLocalPackaging(localPackaging.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
+                onBlur={() => updateData({ packaging: localPackaging })}
+              />
+              <button className="link danger" onClick={() => {
+                const next = localPackaging.filter((x) => x.id !== p.id);
+                setLocalPackaging(next);
+                updateData({ packaging: next });
+              }}>Slett</button>
+            </div>
+          ))}
+        </div>
+        <div className="form-grid three">
+          <input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} />
+          <input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} />
+          <button className="btn active" onClick={() => {
+            if (!newPackaging.name.trim()) return;
+            const next = [...localPackaging, { id: `${idFromName(newPackaging.name)}-${Date.now()}`, name: newPackaging.name.trim(), price: Number(newPackaging.price) || 0 }];
+            setLocalPackaging(next);
+            updateData({ packaging: next });
+            setNewPackaging({ name: "", price: "0" });
+          }}>Legg til</button>
+        </div>
+      </Section>
+
+      <h3>Database</h3>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button className="btn active" onClick={exportData}>Eksporter database</button>
+        <label className="btn">
+          Importer database
+          <input type="file" accept="application/json" hidden onChange={(e) => importData(e.target.files?.[0] || null)} />
+        </label>
       </div>
-    </Section>
-
-    <Section id="retailMargins" title="Standard marginer for videresalg">
-      <div className="form-grid">
-        {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].map((cat) => (
-          <label key={cat}>
-            {cat}
-            <input
-              type="number"
-              value={s.retailMargins?.[cat] ?? 50}
-              onChange={(e) =>
-                updateData({
-                  settings: {
-                    ...s,
-                    retailMargins: {
-                      ...(s.retailMargins || {}),
-                      [cat]: Number(e.target.value),
-                    },
-                  },
-                })
-              }
-            />
-          </label>
-        ))}
-      </div>
-    </Section>
-
-    <Section id="venues" title="Leie av lokaler, priser">
-      <div>{data.venues.map((v, i) => <div key={v.id} className="editable-row"><input value={v.name} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={v.price} onChange={(e) => updateData({ venues: data.venues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ venues: data.venues.filter((x) => x.id !== v.id) })}>Slett</button></div>)}</div>
-      <div className="form-grid three"><input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} /><input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newVenue.name.trim()) return; updateData({ venues: [...data.venues, { id: `${idFromName(newVenue.name)}-${Date.now()}`, name: newVenue.name.trim(), price: Number(newVenue.price) || 0 }] }); setNewVenue({ name: "", price: "0" }); }}>Legg til</button></div>
-    </Section>
-
-    <Section id="rentalAddons" title="Leie av lokale, tillegg">
-      <div>{data.rentalAddons.map((addon, i) => <div key={addon.id} className="editable-row"><input value={addon.name} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={addon.price} onChange={(e) => updateData({ rentalAddons: data.rentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ rentalAddons: data.rentalAddons.filter((x) => x.id !== addon.id) })}>Slett</button></div>)}</div>
-      <div className="form-grid three"><input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} /><input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newRentalAddon.name.trim()) return; updateData({ rentalAddons: [...data.rentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0 }] }); setNewRentalAddon({ name: "", price: "0" }); }}>Legg til</button></div>
-    </Section>
-
-    <Section id="materialCats" title="Kategorier for råvarer">
-      <CategoryEditor values={data.materialCategories} newValue={newMaterialCategory} setNewValue={setNewMaterialCategory} onSave={(next) => updateData({ materialCategories: next })} />
-    </Section>
-
-    <Section id="productCats" title="Kategorier for produkter/menyer">
-      <h3>Produktkategorier</h3>
-      <CategoryEditor values={data.productCategories} newValue={newProductCategory} setNewValue={setNewProductCategory} onSave={(next) => updateData({ productCategories: next })} />
-      <h3>Menykategorier</h3>
-      <CategoryEditor values={data.menuCategories} newValue={newMenuCategory} setNewValue={setNewMenuCategory} onSave={(next) => updateData({ menuCategories: next })} />
-    </Section>
-
-    <Section id="packaging" title="Priser på emballasje">
-      <div>{data.packaging.map((p, i) => <div key={p.id} className="editable-row"><input value={p.name} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x) })} /><input type="number" value={p.price} onChange={(e) => updateData({ packaging: data.packaging.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x) })} /><button className="link danger" onClick={() => updateData({ packaging: data.packaging.filter((x) => x.id !== p.id) })}>Slett</button></div>)}</div>
-      <div className="form-grid three"><input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} /><input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} /><button className="btn active" onClick={() => { if (!newPackaging.name.trim()) return; updateData({ packaging: [...data.packaging, { id: `${idFromName(newPackaging.name)}-${Date.now()}`, name: newPackaging.name.trim(), price: Number(newPackaging.price) || 0 }] }); setNewPackaging({ name: "", price: "0" }); }}>Legg til</button></div>
-    </Section>
-
-    <h3>Database</h3>
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-      <button className="btn active" onClick={exportData}>Eksporter database</button>
-      <label className="btn">
-        Importer database
-        <input type="file" accept="application/json" hidden onChange={(e) => importData(e.target.files?.[0] || null)} />
-      </label>
-    </div>
-
-    <p style={{ fontSize: 12, color: "#64748b" }}>
-      Tips: Ta backup før du importerer ny fil.
-    </p>
+      <p style={{ fontSize: 12, color: "#64748b" }}>Tips: Ta backup før du importerer ny fil.</p>
     </section>
-);
+  );
 }
 
 function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void }) {
-  return <>
-    <div>{values.map((v, i) => <div key={`${v}-${i}`} className="editable-row"><input value={v} onChange={(e) => onSave(values.map((x, ix) => ix === i ? e.target.value : x))} /><button className="link danger" onClick={() => onSave(values.filter((_, ix) => ix !== i))}>Slett</button></div>)}</div>
-    <div className="form-grid three"><input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Ny kategori" /><button className="btn active" onClick={() => { if (!newValue.trim()) return; onSave([...values, newValue.trim()]); setNewValue(""); }}>Legg til</button></div>
-  </>;
-}
+  const [localValues, setLocalValues] = useState(values);
+  React.useEffect(() => { setLocalValues(values); }, [values]);
 
-function EditableList<T extends { id: string }>({ items, label, onDelete }: { items: T[]; label: (item: T) => string; onDelete: (id: string) => void }) {
-  return <div>{items.map((item) => <div key={item.id} className="editable-row"><span>{label(item)}</span><button className="link danger" onClick={() => onDelete(item.id)}>Slett</button></div>)}</div>;
-}
-
-function Metric({ label, value, dark = false, tone }: { label: string; value: string; dark?: boolean; tone?: "good" | "warn" | "bad" }) {
-  const toneClass = tone ? ` ${tone}` : "";
-  return <div className={dark ? "metric dark" : `metric${toneClass}`}><small>{label}</small><b>{value}</b></div>;
+  return (
+    <>
+      <div>
+        {localValues.map((v, i) => (
+          <div key={`${v}-${i}`} className="editable-row">
+            <input
+              value={v}
+              onChange={(e) => setLocalValues(localValues.map((x, ix) => ix === i ? e.target.value : x))}
+              onBlur={() => onSave(localValues)}
+            />
+            <button className="link danger" onClick={() => {
+              const next = localValues.filter((_, ix) => ix !== i);
+              setLocalValues(next);
+              onSave(next);
+            }}>Slett</button>
+          </div>
+        ))}
+      </div>
+      <div className="form-grid three">
+        <input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Ny kategori" />
+        <button className="btn active" onClick={() => {
+          if (!newValue.trim()) return;
+          const next = [...localValues, newValue.trim()];
+          setLocalValues(next);
+          onSave(next);
+          setNewValue("");
+        }}>Legg til</button>
+      </div>
+    </>
+  );
 }
 
 function GlobalStyles() {
