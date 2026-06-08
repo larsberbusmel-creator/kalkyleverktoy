@@ -6108,19 +6108,10 @@ function SettingsTab({
   const [newPackaging, setNewPackaging] = useState({ name: "", price: "0" });
   const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0" });
 
-  // Lokal state for settings-tall
   const [localSettings, setLocalSettings] = useState(data.settings);
-  React.useEffect(() => { setLocalSettings(data.settings); }, [data.settings]);
-
-  // Lokal state for lister som redigeres inline
   const [localVenues, setLocalVenues] = useState(data.venues);
-  React.useEffect(() => { setLocalVenues(data.venues); }, [data.venues]);
-
   const [localPackaging, setLocalPackaging] = useState(data.packaging);
-  React.useEffect(() => { setLocalPackaging(data.packaging); }, [data.packaging]);
-
   const [localRentalAddons, setLocalRentalAddons] = useState(data.rentalAddons);
-  React.useEffect(() => { setLocalRentalAddons(data.rentalAddons); }, [data.rentalAddons]);
 
   const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) =>
     <div className="settings-section">
@@ -6327,7 +6318,6 @@ function SettingsTab({
 
 function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void }) {
   const [localValues, setLocalValues] = useState(values);
-  React.useEffect(() => { setLocalValues(values); }, [values]);
 
   return (
     <>
