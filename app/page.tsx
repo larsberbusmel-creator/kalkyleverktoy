@@ -6051,11 +6051,12 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
           <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
 
           <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-            <button className="btn active" onClick={saveOffer}>
-              {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
-            </button>
-            <button className="btn" onClick={printOffer}>Last ned / print tilbud</button>
-          </div>
+  <button className="btn active" onClick={saveOffer}>
+    {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
+  </button>
+  <button className="btn" onClick={printOffer}>Last ned / print tilbud</button>
+  <button className="btn" onClick={cancelEdit}>Avbryt</button>
+</div>
         </div>
       </div>
 
