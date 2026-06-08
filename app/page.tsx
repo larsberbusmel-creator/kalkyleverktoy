@@ -5827,29 +5827,45 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
   }
 
   function printOffer() {
-    const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
-    const productRows = rental.productLines.map((l) => {
-      const p = data.products.find((x) => x.id === l.productId);
-      if (!p) return "";
-      const lineTotal = p.customerPrice * l.guests;
-      return `<tr><td>${escapeHtml(p.name)}</td><td style="text-align:right">${l.guests}</td><td style="text-align:right">${currency(p.customerPrice)}</td><td style="text-align:right"><b>${currency(lineTotal)}</b></td></tr>`;
-    }).join("");
+  const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
 
-    const addonRows = addonLines.map((line) =>
-      `<tr><td>${escapeHtml(line.text)}${line.quantity ? ` × ${line.quantity}` : ""}</td><td></td><td style="text-align:right">${line.quantity ? currency(line.unitPrice || 0) : ""}</td><td style="text-align:right"><b>${currency(line.amount)}</b></td></tr>`
-    ).join("");
+  const productRows = rental.productLines.map((l) => {
+    const p = data.products.find((x) => x.id === l.productId);
+    if (!p) return "";
+    const lineTotal = p.customerPrice * l.guests;
+    return `<tr><td>${escapeHtml(p.name)}</td><td style="text-align:right">${l.guests}</td><td style="text-align:right">${currency(p.customerPrice)}</td><td style="text-align:right"><b>${currency(lineTotal)}</b></td></tr>`;
+  }).join("");
 
-    const waiterRow = (rental.waiterHours > 0 || waiterAfterMidnightHours > 0) ? `
-      <tr><td>Servitører (${rental.waiters} pers, ${rental.waiterHours}t + ${waiterAfterMidnightHours}t etter midnatt)</td><td></td><td></td><td style="text-align:right"><b>${currency(waiterCost)}</b></td></tr>
-    ` : "";
+  const addonRows = addonLines.map((line) =>
+    `<tr><td>${escapeHtml(line.text)}${line.quantity ? ` × ${line.quantity}` : ""}</td><td></td><td style="text-align:right">${line.quantity ? currency(line.unitPrice || 0) : ""}</td><td style="text-align:right"><b>${currency(line.amount)}</b></td></tr>`
+  ).join("");
 
-    const venueRow = rental.venuePrice > 0
-      ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
-      : "";
+  const waiterRow = (rental.waiterHours > 0 || waiterAfterMidnightHours > 0) ? `
+    <tr>
+      <td>
+        Servitører (${rental.waiters} pers)<br>
+        <small style="color:#64748b">
+          ${rental.waiterHours > 0 ? `${rental.waiterHours}t × ${currency(data.settings.waiterHourlyRate)}/t` : ""}
+          ${rental.waiterHours > 0 && waiterAfterMidnightHours > 0 ? " + " : ""}
+          ${waiterAfterMidnightHours > 0 ? `${waiterAfterMidnightHours}t etter midnatt × ${currency(data.settings.waiterAfterMidnightHourlyRate)}/t` : ""}
+        </small>
+      </td>
+      <td></td><td></td>
+      <td style="text-align:right"><b>${currency(waiterCost)}</b></td>
+    </tr>
+  ` : "";
 
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
+  const venueRow = rental.venuePrice > 0
+    ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
+    : "";
+
+  const noteHtml = rental.note
+    ? `<div style="white-space:pre-wrap;line-height:1.6">${rental.note}</div>`
+    : "";
+
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
 @page{size:A4;margin:14mm}
 body{font-family:Arial,sans-serif;color:#111827;padding:32px;line-height:1.5}
 .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
@@ -5864,8 +5880,13 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .info-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px}
 .info-box p{margin:4px 0}
 .included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
+.disclaimer{font-size:10px;color:#94a3b8;margin-top:8px;text-align:center}
 .footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
-@media print{button{display:none}body{padding:0}}
+@media print{
+  button{display:none}
+  body{padding:0}
+  @page{margin:14mm}
+}
 </style></head><body>
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
 <div class="header">
@@ -5880,7 +5901,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   <p><b>Kunde:</b> ${escapeHtml(rental.customer)}</p>
   <p><b>Lokale:</b> ${escapeHtml(venueName)}</p>
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
-  ${rental.note ? `<p><b>Merknad:</b> ${escapeHtml(rental.note)}</p>` : ""}
+  ${rental.note ? `<p><b>Merknad:</b></p>${noteHtml}` : ""}
 </div>
 <h2>Spesifikasjon</h2>
 <table>
@@ -5896,13 +5917,14 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   </tfoot>
 </table>
 ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
+<p class="disclaimer">Skrivefeil kan forekomme.</p>
 <div class="footer">
   Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no
 </div>
 </body></html>`);
-    w.document.close();
-    w.focus();
-  }
+  w.document.close();
+  w.focus();
+}
 
   const filteredProducts = data.products.filter((p) =>
     productSearch === "" || p.name.toLowerCase().includes(productSearch.toLowerCase())
@@ -6014,15 +6036,21 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
             })}
           </div>
 
-          <label style={{ marginTop: 12, display: "block" }}>
-            Notater / merknader
-            <textarea
-              className="textarea"
-              value={rental.note || ""}
-              onChange={(e) => setRental({ ...rental, note: e.target.value })}
-              placeholder="Spesielle ønsker, allergier, praktisk info osv."
-            />
-          </label>
+          <div style={{ marginTop: 12 }}>
+  <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
+  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+    <button type="button" className="btn" style={{ fontWeight: 900 }} onClick={() => document.execCommand("bold")}>B</button>
+    <button type="button" className="btn" style={{ fontStyle: "italic" }} onClick={() => document.execCommand("italic")}>I</button>
+    <button type="button" className="btn" style={{ textDecoration: "underline" }} onClick={() => document.execCommand("underline")}>U</button>
+  </div>
+  <div
+    contentEditable
+    suppressContentEditableWarning
+    onInput={(e) => setRental({ ...rental, note: (e.target as HTMLDivElement).innerHTML })}
+    dangerouslySetInnerHTML={{ __html: rental.note || "" }}
+    style={{ minHeight: 90, border: "1px solid #cbd5e1", borderRadius: 10, padding: "9px 10px", background: "white", lineHeight: 1.6 }}
+  />
+</div>
         </div>
 
         <div className="card">
