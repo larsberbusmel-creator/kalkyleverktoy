@@ -134,9 +134,14 @@ type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPr
 type RentalProductLine = { productId: string; guests: number };
 
 type RentalOffer = {
+  id?: string;
   customer: string;
+  date?: string;
+  note?: string;
   venue: string;
   venuePrice: number;
+  venueExternal?: boolean;
+  venueExternalName?: string;
   waiters: number;
   waiterHours: number;
   waiterAfterMidnightHours: number;
@@ -242,6 +247,7 @@ type AppData = {
   materialCategories: string[];
   inventoryCounts?: Record<string, InventoryMonthData>;
   calendarNotes: CalendarNote[];
+  rentalOffers?: RentalOffer[];
 
   bakeryProductionTemplateLines: BakeryProductionTemplateLine[];
   storkjokkenCustomers: StorkjokkenCustomer[];
@@ -410,7 +416,8 @@ settings: {
   storkjokkenSpecialPrices: [],
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
-  seenOrderIds: []
+  seenOrderIds: [],
+  rentalOffers: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -486,6 +493,7 @@ bakeryProductionDays:
     )
     .map((o: any) => o.id);
 })(),
+rentalOffers: (raw as any).rentalOffers || [],
   };
 }
 
@@ -874,6 +882,9 @@ function CalendarDashboard({
   function dayOrders(date: string) {
     return data.orders.filter((o) => o.date === date && !o.deletedAt).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }
+  function isRentalOrder(order: Order) {
+  return order.recurringNote?.startsWith("Leieavtale:");
+}
   function dayNotes(date: string) { return (data.calendarNotes || []).filter((n) => n.date === date); }
   function hasProduction(date: string) { return Boolean(data.bakeryProductionDays?.[date]); }
 
@@ -944,8 +955,8 @@ function CalendarDashboard({
                   const isPast = date < todayDate;
                   const holidayName = norwegianHolidayName(date);
                   const unseenWebshop = hasUnseenWebshopOrder(date);
-                  const dayBackground = isToday ? "#dcfce7" : holidayName || isSunday ? "#fee2e2" : isPast ? "#f5efe3" : inMonth ? "white" : "#f1f5f9";
-                  return (
+const hasRental = orders.some((o) => isRentalOrder(o));
+const dayBackground = isToday ? "#dcfce7" : holidayName || isSunday ? "#fee2e2" : hasRental ? "#fef9c3" : isPast ? "#f5efe3" : inMonth ? "white" : "#f1f5f9";                  return (
                     <button key={date} onClick={() => handleDayClick(date)}
                       style={{ minHeight: 110, textAlign: "left", padding: 10, borderRadius: 14, border: isToday ? "2px solid #166534" : unseenWebshop ? "2px solid #f59e0b" : holidayName ? "2px solid #dc2626" : "1px solid #dbe4ef", background: dayBackground, opacity: inMonth ? 1 : 0.55, cursor: "pointer", position: "relative" }}>
                       <b>{Number(date.slice(8, 10))}</b>
@@ -980,10 +991,12 @@ function CalendarDashboard({
                   const unseenWebshop = hasUnseenWebshopOrder(date);
                   const hasContent = orders.length > 0 || notes.length > 0 || production;
 
-                  const bg = isToday ? "#dcfce7"
-                    : holidayName || isSunday ? "#fee2e2"
-                    : isPast && inMonth ? "#f5efe3"
-                    : "white";
+                  const hasRental = orders.some((o) => isRentalOrder(o));
+const bg = isToday ? "#dcfce7"
+  : holidayName || isSunday ? "#fee2e2"
+  : hasRental ? "#fef9c3"
+  : isPast && inMonth ? "#f5efe3"
+  : "white";
 
                   const borderColor = isToday ? "#166534"
                     : unseenWebshop ? "#f59e0b"
@@ -5693,36 +5706,29 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     </section>
   );
 }
-
 function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
+  const [savedOffers, setSavedOffers] = useState<RentalOffer[]>(
+    (data as any).rentalOffers || []
+  );
+  const [productSearch, setProductSearch] = useState("");
+
   const rental = data.rental;
   function setRental(next: RentalOffer) { updateData({ rental: next }); }
 
   const addonLines = rental.extraLines || [];
   const addonTotal = addonLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
- const waiterAfterMidnightHours = Number(rental.waiterAfterMidnightHours || 0);
+  const waiterAfterMidnightHours = Number(rental.waiterAfterMidnightHours || 0);
   const food = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0);
-  const waiters = rental.productLines.reduce(
-  (sum, l) =>
-    sum +
-    (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) *
-      l.guests,
-  0
-)
-+ rental.waiterHours * data.settings.waiterHourlyRate
-+ waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
+  const waiters = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
+    + rental.waiterHours * data.settings.waiterHourlyRate
+    + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
   const total = rental.venuePrice + food + waiters + addonTotal;
 
   const quantityAddons = ["Tøyservietter", "Vinpakke 3 glass", "Alkoholfri drikkepakke 3 glass"];
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
 
-  function addonUsesQuantity(addonName: string) {
-    return quantityAddons.includes(addonName);
-  }
-
-  function isAddonSelected(addon: RentalAddon) {
-    return addonLines.some((line) => line.text === addon.name);
-  }
+  function addonUsesQuantity(addonName: string) { return quantityAddons.includes(addonName); }
+  function isAddonSelected(addon: RentalAddon) { return addonLines.some((line) => line.text === addon.name); }
 
   function toggleAddon(addon: RentalAddon) {
     if (isAddonSelected(addon)) {
@@ -5748,7 +5754,318 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
     setRental({ ...rental, extraLines: addonLines.map((line) => line.text === addonName ? { ...line, amount, unitPrice: addonUsesQuantity(line.text) ? Number(line.unitPrice ?? amount) : undefined } : line) });
   }
 
-  return <section className="grid two"><div className="card"><h2>Leie av lokale</h2><label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kunde" /></label><label>Lokale<select value={rental.venue} onChange={(e) => { const v = data.venues.find((x) => x.name === e.target.value)!; setRental({ ...rental, venue: v.name, venuePrice: v.price }); }}>{data.venues.map((v) => <option key={v.id}>{v.name}</option>)}</select></label><label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label><h3>Produkter/menyer</h3>{rental.productLines.map((l, i) => <div className="form-grid three" key={i}><label>Produkt<select value={l.productId} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, productId: e.target.value } : x) })}><option value="">Velg produkt</option>{data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Antall gjester / porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label><button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button></div>)}<button className="btn" onClick={() => setRental({ ...rental, productLines: [...rental.productLines, { productId: "", guests: 0 }] })}>+ Produkt</button><h3>Servitører</h3><div className="form-grid three"><label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label><label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label><label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label></div><h3>Tillegg</h3><div className="soft-box">{data.rentalAddons.map((addon) => { const selected = isAddonSelected(addon); const line = addonLines.find((x) => x.text === addon.name); const usesQty = addonUsesQuantity(addon.name); return <div key={addon.id} className="editable-row"><label className="check"><input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} /> {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : ""}</label>{selected && usesQty && <label>Antall<input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} /></label>}{selected && !usesQty && <label>Pris<input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} /></label>}{selected && usesQty && <b>{currency(line?.amount || 0)}</b>}</div>; })}</div></div><div className="card"><h2>Tilbud</h2><div className="soft-box"><h3>Prisen inkluderer</h3><p>{includedText}</p></div><p>Leie {rental.venue}: <b>{currency(rental.venuePrice)}</b></p><p>Mat/produkter: <b>{currency(food)}</b></p><p>Servitører: <b>{currency(waiters)}</b></p><p>Tillegg: <b>{currency(addonTotal)}</b></p>{addonLines.length > 0 && <table><thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead><tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody></table>}<h2>Total: {currency(total)}</h2></div></section>;
+  function saveOffer() {
+    if (!rental.customer.trim()) return alert("Legg inn kundenavn.");
+    const offer: RentalOffer = {
+      ...rental,
+      id: rental.id || `rental-${Date.now()}`,
+    };
+    const existing = ((data as any).rentalOffers || []) as RentalOffer[];
+    const next = existing.find((o) => o.id === offer.id)
+      ? existing.map((o) => o.id === offer.id ? offer : o)
+      : [offer, ...existing];
+    updateData({ rentalOffers: next } as any);
+    setSavedOffers(next);
+
+    // Legg til i kalender som ordre
+    if (offer.date) {
+      const rentalOrder = {
+        id: `rental-order-${offer.id}`,
+        orderNumber: offer.id,
+        type: "catering" as const,
+        customerType: "bedrift" as const,
+        customer: offer.customer,
+        companyName: offer.customer,
+        orgNumber: "",
+        companyAddress: "",
+        phone: "",
+        deliveryAddress: rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue,
+        date: offer.date,
+        time: "",
+        note: offer.note || "",
+        paymentInfo: "",
+        guests: rental.productLines.reduce((sum, l) => sum + l.guests, 0),
+        productId: rental.productLines[0]?.productId || "",
+        orderLines: rental.productLines.filter((l) => l.productId).map((l) => ({ productId: l.productId, quantity: l.guests })),
+        discountPercent: 0,
+        isRecurring: false,
+        recurringDays: [],
+        recurringNote: `Leieavtale: ${rental.venueExternal ? (rental.venueExternalName || "Eksternt") : rental.venue}`,
+        allergens: {},
+        dietVegan: "0",
+        dietVegetarian: "0",
+        dietPregnant: "0",
+        dietOther: "",
+      };
+      const orders = data.orders || [];
+      const existingOrderIdx = orders.findIndex((o) => o.id === rentalOrder.id);
+      const nextOrders = existingOrderIdx >= 0
+        ? orders.map((o, i) => i === existingOrderIdx ? rentalOrder : o)
+        : [rentalOrder, ...orders];
+      updateData({ orders: nextOrders });
+    }
+
+    alert("Tilbud lagret!");
+  }
+
+  function loadOffer(offer: RentalOffer) {
+    setRental(offer);
+  }
+
+  function deleteOffer(id: string) {
+    if (!confirm("Slette dette tilbudet?")) return;
+    const next = ((data as any).rentalOffers || []).filter((o: RentalOffer) => o.id !== id);
+    updateData({ rentalOffers: next } as any);
+    setSavedOffers(next);
+    // Fjern tilhørende kalenderordre
+    updateData({ orders: data.orders.filter((o) => o.id !== `rental-order-${id}`) });
+  }
+
+  function printOffer() {
+    const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
+    const productRows = rental.productLines.map((l) => {
+      const p = data.products.find((x) => x.id === l.productId);
+      if (!p) return "";
+      const lineTotal = p.customerPrice * l.guests;
+      return `<tr><td>${escapeHtml(p.name)}</td><td style="text-align:right">${l.guests}</td><td style="text-align:right">${currency(p.customerPrice)}</td><td style="text-align:right"><b>${currency(lineTotal)}</b></td></tr>`;
+    }).join("");
+
+    const addonRows = addonLines.map((line) =>
+      `<tr><td>${escapeHtml(line.text)}${line.quantity ? ` × ${line.quantity}` : ""}</td><td></td><td style="text-align:right">${line.quantity ? currency(line.unitPrice || 0) : ""}</td><td style="text-align:right"><b>${currency(line.amount)}</b></td></tr>`
+    ).join("");
+
+    const waiterRow = (rental.waiterHours > 0 || waiterAfterMidnightHours > 0) ? `
+      <tr><td>Servitører (${rental.waiters} pers, ${rental.waiterHours}t + ${waiterAfterMidnightHours}t etter midnatt)</td><td></td><td></td><td style="text-align:right"><b>${currency(waiters - food)}</b></td></tr>
+    ` : "";
+
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
+@page{size:A4;margin:14mm}
+body{font-family:Arial,sans-serif;color:#111827;padding:32px;line-height:1.5}
+.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
+.logo{height:90px;width:auto;object-fit:contain}
+.header-right{text-align:right;font-size:13px;color:#374151}
+h1{font-size:22px;margin:0 0 6px}
+h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+th{background:#f3f4f6;text-align:left;padding:8px;border-bottom:2px solid #e5e7eb}
+td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.total-row{font-size:17px;font-weight:900;background:#f8fafc}
+.total-row td{padding:12px 8px}
+.info-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px}
+.info-box p{margin:4px 0}
+.included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
+.footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
+@media print{button{display:none}body{padding:0}}
+</style></head><body>
+<button onclick="window.print()">Skriv ut / Lagre som PDF</button>
+
+<div class="header">
+  <img src="/logo.png" class="logo" />
+  <div class="header-right">
+    <b style="font-size:16px">TILBUD</b><br>
+    ${rental.date ? `<span>Dato for arrangement: ${formatDateNo(rental.date)}</span><br>` : ""}
+    <span>Utstedt: ${formatDateNo(new Date().toISOString().slice(0, 10))}</span>
+  </div>
+</div>
+
+<div class="info-box">
+  <p><b>Kunde:</b> ${escapeHtml(rental.customer)}</p>
+  <p><b>Lokale:</b> ${escapeHtml(venueName)}</p>
+  ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
+  ${rental.note ? `<p><b>Merknad:</b> ${escapeHtml(rental.note)}</p>` : ""}
+</div>
+
+<h2>Spesifikasjon</h2>
+<table>
+  <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
+  <tbody>
+    <tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>
+    ${productRows}
+    ${waiterRow}
+    ${addonRows}
+  </tbody>
+  <tfoot>
+    <tr class="total-row"><td colspan="3">Total inkl. mva</td><td style="text-align:right">${currency(total)}</td></tr>
+  </tfoot>
+</table>
+
+<p class="included">${escapeHtml(includedText)}</p>
+
+<div class="footer">
+  Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no
+</div>
+</body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
+  const filteredProducts = data.products.filter((p) =>
+    productSearch === "" || p.name.toLowerCase().includes(productSearch.toLowerCase())
+  ).slice(0, 10);
+
+  const offers = ((data as any).rentalOffers || []) as RentalOffer[];
+
+  return (
+    <section>
+      <div className="grid two">
+        <div className="card">
+          <h2>Leie av lokale</h2>
+
+          <div className="form-grid two">
+            <label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
+            <label>Dato for arrangement<input type="date" value={rental.date || ""} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
+          </div>
+
+          <label>Lokale
+            <select value={rental.venueExternal ? "__extern__" : rental.venue} onChange={(e) => {
+              if (e.target.value === "__extern__") {
+                setRental({ ...rental, venueExternal: true, venue: "", venuePrice: 0 });
+              } else {
+                const v = data.venues.find((x) => x.name === e.target.value)!;
+                setRental({ ...rental, venueExternal: false, venueExternalName: "", venue: v.name, venuePrice: v.price });
+              }
+            }}>
+              {data.venues.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+              <option value="__extern__">Eksternt lokale</option>
+            </select>
+          </label>
+
+          {rental.venueExternal ? (
+            <div className="form-grid two">
+              <label>Navn på eksternt lokale<input value={rental.venueExternalName || ""} onChange={(e) => setRental({ ...rental, venueExternalName: e.target.value })} placeholder="F.eks. Svømmehallen" /></label>
+              <label>Pris (0 hvis kunden leier selv)<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) || 0 })} /></label>
+            </div>
+          ) : (
+            <label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label>
+          )}
+
+          <h3>Produkter/menyer</h3>
+          <div className="soft-box">
+            <input
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              placeholder="Søk produkt eller meny..."
+              style={{ marginBottom: 8 }}
+            />
+            {productSearch && (
+              <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
+                {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
+                {filteredProducts.map((p) => (
+                  <button key={p.id} style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: 0, borderBottom: "1px solid #f1f5f9", background: "white", cursor: "pointer" }}
+                    onClick={() => {
+                      setRental({ ...rental, productLines: [...rental.productLines, { productId: p.id, guests: 1 }] });
+                      setProductSearch("");
+                    }}>
+                    <b>{p.name}</b> <span style={{ color: "#64748b", fontSize: 13 }}>· {currency(p.customerPrice)}/pers</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {rental.productLines.map((l, i) => {
+              const p = data.products.find((x) => x.id === l.productId);
+              return (
+                <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
+                  <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
+                  <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
+                  <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
+                </div>
+              );
+            })}
+          </div>
+
+          <h3>Servitører</h3>
+          <div className="form-grid three">
+            <label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label>
+            <label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
+            <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
+          </div>
+
+          <h3>Tillegg</h3>
+          <div className="soft-box">
+            {data.rentalAddons.map((addon) => {
+              const selected = isAddonSelected(addon);
+              const line = addonLines.find((x) => x.text === addon.name);
+              const usesQty = addonUsesQuantity(addon.name);
+              return (
+                <div key={addon.id} className="editable-row">
+                  <label className="check"><input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} /> {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : ""}</label>
+                  {selected && usesQty && <label>Antall<input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} /></label>}
+                  {selected && !usesQty && <label>Pris<input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} /></label>}
+                  {selected && usesQty && <b>{currency(line?.amount || 0)}</b>}
+                </div>
+              );
+            })}
+          </div>
+
+          <label style={{ marginTop: 12, display: "block" }}>
+            Notater / merknader
+            <textarea
+              className="textarea"
+              value={rental.note || ""}
+              onChange={(e) => setRental({ ...rental, note: e.target.value })}
+              placeholder="Spesielle ønsker, allergier, praktisk info osv."
+            />
+          </label>
+        </div>
+
+        <div className="card">
+          <h2>Tilbud</h2>
+          <div className="soft-box">
+            <h3>Prisen inkluderer</h3>
+            <p>{includedText}</p>
+          </div>
+          <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>
+          <p>Mat/produkter: <b>{currency(food)}</b></p>
+          <p>Servitører: <b>{currency(waiters - food)}</b></p>
+          <p>Tillegg: <b>{currency(addonTotal)}</b></p>
+          {addonLines.length > 0 && (
+            <table>
+              <thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead>
+              <tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody>
+            </table>
+          )}
+          <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+            <button className="btn active" onClick={saveOffer}>Lagre tilbud{rental.date ? " og legg i kalender" : ""}</button>
+            <button className="btn" onClick={printOffer}>Last ned / print tilbud</button>
+            {rental.id && <button className="btn" onClick={() => setRental({ ...data.rental, id: undefined, customer: "", date: "", note: "" })}>Nytt tilbud</button>}
+          </div>
+        </div>
+      </div>
+
+      {/* Lagrede tilbud */}
+      <div className="card" style={{ marginTop: 18 }}>
+        <h2>Lagrede tilbud</h2>
+        {offers.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud lagret ennå.</p>}
+        {offers.map((offer) => {
+          const offerTotal = offer.venuePrice
+            + offer.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
+            + (offer.waiterHours || 0) * data.settings.waiterHourlyRate
+            + (offer.waiterAfterMidnightHours || 0) * data.settings.waiterAfterMidnightHourlyRate
+            + (offer.extraLines || []).reduce((sum, l) => sum + Number(l.amount || 0), 0);
+          return (
+            <div key={offer.id} className="editable-row">
+              <div>
+                <b>{offer.customer}</b>
+                {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
+                <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
+                <br />
+                <small style={{ color: "#64748b" }}>Total: {currency(offerTotal)}</small>
+                {offer.note && <><br /><small style={{ color: "#64748b" }}>{offer.note}</small></>}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={() => loadOffer(offer)}>Last inn</button>
+                <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function SettingsTab({
