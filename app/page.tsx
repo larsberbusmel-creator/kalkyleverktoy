@@ -5859,11 +5859,7 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
     ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
     : "";
 
-  const noteHtml = rental.note
-    ? `<div style="white-space:pre-wrap;line-height:1.6">${rental.note}</div>`
-    : "";
-
-  const w = window.open("", "_blank");
+    const w = window.open("", "_blank");
   if (!w) return;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
 @page{size:A4;margin:14mm}
@@ -5901,8 +5897,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   <p><b>Kunde:</b> ${escapeHtml(rental.customer)}</p>
   <p><b>Lokale:</b> ${escapeHtml(venueName)}</p>
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
-  ${rental.note ? `<p><b>Merknad:</b></p>${noteHtml}` : ""}
-</div>
+${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note)}</p>` : ""}</div>
 <h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
@@ -6037,18 +6032,13 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
           </div>
 
           <div style={{ marginTop: 12 }}>
+  <div style={{ marginTop: 12 }}>
   <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
-  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-    <button type="button" className="btn" style={{ fontWeight: 900 }} onClick={() => document.execCommand("bold")}>B</button>
-    <button type="button" className="btn" style={{ fontStyle: "italic" }} onClick={() => document.execCommand("italic")}>I</button>
-    <button type="button" className="btn" style={{ textDecoration: "underline" }} onClick={() => document.execCommand("underline")}>U</button>
-  </div>
-  <div
-    contentEditable
-    suppressContentEditableWarning
-    onInput={(e) => setRental({ ...rental, note: (e.target as HTMLDivElement).innerHTML })}
-    dangerouslySetInnerHTML={{ __html: rental.note || "" }}
-    style={{ minHeight: 90, border: "1px solid #cbd5e1", borderRadius: 10, padding: "9px 10px", background: "white", lineHeight: 1.6 }}
+  <textarea
+    className="textarea"
+    value={rental.note || ""}
+    onChange={(e) => setRental({ ...rental, note: e.target.value })}
+    placeholder="Spesielle ønsker, allergier, praktisk info osv."
   />
 </div>
         </div>
@@ -6108,7 +6098,7 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
                 <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
                 <br />
                 <small style={{ color: "#64748b" }}>Total: {currency(offerTotal)}</small>
-                {offer.note && <><br /><small style={{ color: "#64748b" }}>{offer.note}</small></>}
+              {offer.note && <><br /><small style={{ color: "#64748b" }}>{offer.note.replace(/<[^>]*>/g, "").slice(0, 80)}{offer.note.length > 80 ? "..." : ""}</small></>}              
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
