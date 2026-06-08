@@ -6361,6 +6361,15 @@ function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: str
   );
 }
 
+function EditableList<T extends { id: string }>({ items, label, onDelete }: { items: T[]; label: (item: T) => string; onDelete: (id: string) => void }) {
+  return <div>{items.map((item) => <div key={item.id} className="editable-row"><span>{label(item)}</span><button className="link danger" onClick={() => onDelete(item.id)}>Slett</button></div>)}</div>;
+}
+
+function Metric({ label, value, dark = false, tone }: { label: string; value: string; dark?: boolean; tone?: "good" | "warn" | "bad" }) {
+  const toneClass = tone ? ` ${tone}` : "";
+  return <div className={dark ? "metric dark" : `metric${toneClass}`}><small>{label}</small><b>{value}</b></div>;
+}
+
 function GlobalStyles() {
   return (
     <style jsx global>{`
