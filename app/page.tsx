@@ -45,6 +45,7 @@ type RecipeLine = {
   itemType: "material" | "recipe";
   itemId: string;
   amount: number;
+  wastePercent?: number;
 };
 
 type Recipe = {
@@ -589,15 +590,17 @@ export default function Page() {
 
   function recipeCost(recipe: Recipe, visited: string[] = []): number {
     if (visited.includes(recipe.id)) return 0;
-    return recipe.lines.reduce((sum, line) => {
-      if (line.itemType === "recipe") {
-        const r = data.recipes.find((x) => x.id === line.itemId);
-        if (!r) return sum;
-        return sum + recipeUnitCost(r, [...visited, recipe.id]) * line.amount;
-      }
-      const m = data.materials.find((x) => x.id === line.itemId);
-      return sum + (m?.pricePerUnit || 0) * line.amount;
-    }, 0);
+      return recipe.lines.reduce((sum, line) => {
+    const waste = Math.min(Number(line.wastePercent || 0), 95) / 100;
+    const adjustedAmount = waste > 0 ? line.amount / (1 - waste) : line.amount;
+    if (line.itemType === "recipe") {
+      const r = data.recipes.find((x) => x.id === line.itemId);
+      if (!r) return sum;
+      return sum + recipeUnitCost(r, [...visited, recipe.id]) * adjustedAmount;
+    }
+    const m = data.materials.find((x) => x.id === line.itemId);
+    return sum + (m?.pricePerUnit || 0) * adjustedAmount;
+  }, 0);
   }
 
   function recipeTotalAmount(recipe: Recipe) {
@@ -1437,7 +1440,7 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
   const [draftLines, setDraftLines] = useState<RecipeLine[]>([]);
-  const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0" });
+  const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0", wastePercent: "" });
   const [lineSearch, setLineSearch] = useState("");
   const [recipeSearch, setRecipeSearch] = useState("");
 
@@ -1460,7 +1463,7 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
     setMode("new");
     setForm({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" });
     setDraftLines([]);
-    setLine({ itemType: "material", itemId: "", amount: "0" });
+    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "" });
     setLineSearch("");
   }
 
@@ -1469,7 +1472,7 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
     setMode("edit");
     setForm({ productNumber: r.productNumber || "", name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit });
     setDraftLines(r.lines.map((l) => ({ ...l })));
-    setLine({ itemType: "material", itemId: "", amount: "0" });
+    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "" });
     setLineSearch("");
   }
 
@@ -1510,32 +1513,33 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
   }
 
   function lineCost(l: RecipeLine) {
+    const waste = Math.min(Number(l.wastePercent || 0), 95) / 100;
+    const adjustedAmount = waste > 0 ? l.amount / (1 - waste) : l.amount;
     if (l.itemType === "material") {
       const m = data.materials.find((x) => x.id === l.itemId);
-      return l.amount * (m?.pricePerUnit || 0);
+      return adjustedAmount * (m?.pricePerUnit || 0);
     }
     const r = data.recipes.find((x) => x.id === l.itemId);
-    return l.amount * (r ? recipeUnitCost(r) : 0);
+    return adjustedAmount * (r ? recipeUnitCost(r) : 0);
   }
 
-function addLine() {
-  if (!line.itemId) return;
-  if (line.itemType === "recipe" && line.itemId === selected?.id) {
-    return alert("En grunnoppskrift kan ikke inneholde seg selv.");
+  function addLine() {
+    if (!line.itemId) return;
+    if (line.itemType === "recipe" && line.itemId === selected?.id) {
+      return alert("En grunnoppskrift kan ikke inneholde seg selv.");
+    }
+    setDraftLines((prev) => [
+      ...prev,
+      {
+        itemType: line.itemType,
+        itemId: line.itemId,
+        amount: Number(line.amount) || 0,
+        wastePercent: Number(line.wastePercent) || 0,
+      },
+    ]);
+    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "" });
+    setLineSearch("");
   }
-
-  setDraftLines((prev) => [
-    ...prev,
-    {
-      itemType: line.itemType,
-      itemId: line.itemId,
-      amount: Number(line.amount) || 0,
-    },
-  ]);
-
-  setLine({ itemType: "material", itemId: "", amount: "0" });
-  setLineSearch("");
-}
 
   function updateDraftLine(index: number, partial: Partial<RecipeLine>) {
     setDraftLines((prev) => prev.map((l, i) => i === index ? { ...l, ...partial } : l));
@@ -1544,7 +1548,8 @@ function addLine() {
   function printRecipe(recipe: Recipe) {
     const rows = recipe.lines.map((l) => {
       const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
-      return `<tr><td>${l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>${name}</td><td>${num(l.amount, 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
+      const waste = l.wastePercent ? ` (${l.wastePercent}% svinn)` : "";
+      return `<tr><td>${l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>${name}${waste}</td><td>${num(l.amount, 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
     }).join("");
     const allergens = recipeAllergens(recipe).join(", ") || "Ingen registrert";
     const w = window.open("", "_blank");
@@ -1554,153 +1559,216 @@ function addLine() {
     w.focus();
   }
 
- if (mode !== "view") {
-  return (
-    <section className="card product-editor-page">
-      <div className="between">
-        <h1>{mode === "edit" ? "Rediger grunnoppskrift" : "Ny grunnoppskrift"}</h1>
-        <div>
-          <button className="btn active" onClick={saveRecipe}>
-            {mode === "edit" ? "Lagre endringer" : "Lagre grunnoppskrift"}
-          </button>
-          <button className="btn" onClick={cancelEdit}>
-            Avbryt
-          </button>
+  if (mode !== "view") {
+    return (
+      <section className="card product-editor-page">
+        <div className="between">
+          <h1>{mode === "edit" ? "Rediger grunnoppskrift" : "Ny grunnoppskrift"}</h1>
+          <div>
+            <button className="btn active" onClick={saveRecipe}>
+              {mode === "edit" ? "Lagre endringer" : "Lagre grunnoppskrift"}
+            </button>
+            <button className="btn" onClick={cancelEdit}>Avbryt</button>
+          </div>
         </div>
-      </div>
-
-      <div className="form-grid four">
-        <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
-        <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /></label>
-        <label>Kategori<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Kategori" /></label>
-      </div>
-
-      {activeRecipe && (
-        <div className="metric-row">
-          <Metric label="Total kost eks. mva" value={currency(recipeCost(activeRecipe))} dark />
-          <Metric label="Totalvekt / yield" value={`${num(recipeTotalAmount(activeRecipe), 3)} ${form.yieldUnit}`} />
-          <Metric label={`Pris per ${form.yieldUnit}`} value={currency(recipeUnitCost(activeRecipe))} dark />
-          <Metric label="Allergener" value={recipeAllergens(activeRecipe).join(", ") || "Ingen"} />
-        </div>
-      )}
-
-      <div className="soft-box">
-        <h2>Ingredienser</h2>
 
         <div className="form-grid four">
-          <select
-            value={line.itemType}
-            onChange={(e) => {
-              setLine({ ...line, itemType: e.target.value as RecipeLine["itemType"], itemId: "" });
-              setLineSearch("");
-            }}
-          >
-            <option value="material">Råvare</option>
-            <option value="recipe">Annen grunnoppskrift</option>
-          </select>
-
-          <div className="search-picker">
-            <input
-              value={lineSearch || lineItemName(line.itemType, line.itemId)}
-              onChange={(e) => {
-                setLineSearch(e.target.value);
-                setLine({ ...line, itemId: "" });
-              }}
-              placeholder="Søk og velg"
-            />
-
-            {lineSearch && (
-              <div className="search-dropdown inline">
-                {lineOptions(line.itemType, lineSearch).map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="search-result"
-                    onClick={() => {
-                      setLine({ ...line, itemId: item.id });
-                      setLineSearch("");
-                    }}
-                  >
-                    <b>{item.name}</b>
-                    <small>{item.subtitle}</small>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <input
-            type="number"
-            value={line.amount}
-            onChange={(e) => setLine({ ...line, amount: e.target.value })}
-            placeholder="Mengde"
-          />
-
-          <button className="btn" onClick={addLine}>
-            Legg til
-          </button>
+          <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
+          <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /></label>
+          <label>Kategori<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Kategori" /></label>
         </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Navn</th>
-              <th>Mengde</th>
-              <th>Kost</th>
-              <th></th>
-            </tr>
-          </thead>
+        {activeRecipe && (
+          <div className="metric-row">
+            <Metric label="Total kost eks. mva" value={currency(recipeCost(activeRecipe))} dark />
+            <Metric label="Totalvekt / yield" value={`${num(recipeTotalAmount(activeRecipe), 3)} ${form.yieldUnit}`} />
+            <Metric label={`Pris per ${form.yieldUnit}`} value={currency(recipeUnitCost(activeRecipe))} dark />
+            <Metric label="Allergener" value={recipeAllergens(activeRecipe).join(", ") || "Ingen"} />
+          </div>
+        )}
 
-          <tbody>
-            {draftLines.map((l, i) => (
-              <tr key={i}>
-                <td>
-                  <select
-                    value={l.itemType}
-                    onChange={(e) => updateDraftLine(i, { itemType: e.target.value as RecipeLine["itemType"], itemId: "" })}
-                  >
-                    <option value="material">Råvare</option>
-                    <option value="recipe">Grunnoppskrift</option>
-                  </select>
-                </td>
+        <div className="soft-box">
+          <h2>Ingredienser</h2>
 
-                <td>
-                  <select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
-                    <option value="">Velg</option>
-                    {l.itemType === "material"
-                      ? data.materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)
-                      : data.recipes.filter((r) => r.id !== selected?.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
-                </td>
+          <div className="form-grid five">
+            <select
+              value={line.itemType}
+              onChange={(e) => {
+                setLine({ ...line, itemType: e.target.value as RecipeLine["itemType"], itemId: "" });
+                setLineSearch("");
+              }}
+            >
+              <option value="material">Råvare</option>
+              <option value="recipe">Annen grunnoppskrift</option>
+            </select>
 
-                <td>
-                  <input
-                    type="number"
-                    value={l.amount}
-                    onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })}
-                  />
-                </td>
+            <div className="search-picker">
+              <input
+                value={lineSearch || lineItemName(line.itemType, line.itemId)}
+                onChange={(e) => {
+                  setLineSearch(e.target.value);
+                  setLine({ ...line, itemId: "" });
+                }}
+                placeholder="Søk og velg"
+              />
+              {lineSearch && (
+                <div className="search-dropdown inline">
+                  {lineOptions(line.itemType, lineSearch).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="search-result"
+                      onClick={() => {
+                        setLine({ ...line, itemId: item.id });
+                        setLineSearch("");
+                      }}
+                    >
+                      <b>{item.name}</b>
+                      <small>{item.subtitle}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                <td>{currency(lineCost(l))}</td>
+            <input
+              type="number"
+              value={line.amount}
+              onChange={(e) => setLine({ ...line, amount: e.target.value })}
+              placeholder="Mengde"
+            />
 
-                <td>
-                  <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>
-                    Slett
-                  </button>
-                </td>
+            <input
+              type="number"
+              value={line.wastePercent}
+              onChange={(e) => setLine({ ...line, wastePercent: e.target.value })}
+              placeholder="Svinn %"
+            />
+
+            <button className="btn" onClick={addLine}>Legg til</button>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Navn</th>
+                <th>Mengde</th>
+                <th>Svinn %</th>
+                <th>Kost</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {draftLines.map((l, i) => (
+                <tr key={i}>
+                  <td>
+                    <select
+                      value={l.itemType}
+                      onChange={(e) => updateDraftLine(i, { itemType: e.target.value as RecipeLine["itemType"], itemId: "" })}
+                    >
+                      <option value="material">Råvare</option>
+                      <option value="recipe">Grunnoppskrift</option>
+                    </select>
+                  </td>
+                  <td>
+                    <select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
+                      <option value="">Velg</option>
+                      {l.itemType === "material"
+                        ? data.materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)
+                        : data.recipes.filter((r) => r.id !== selected?.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      value={l.amount}
+                      onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      value={l.wastePercent || ""}
+                      onChange={(e) => updateDraftLine(i, { wastePercent: Number(e.target.value) || 0 })}
+                      placeholder="%"
+                    />
+                  </td>
+                  <td>{currency(lineCost(l))}</td>
+                  <td>
+                    <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>
+                      Slett
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="grid two">
+      <div className="card">
+        <div className="between">
+          <h2>Grunnoppskrifter</h2>
+          <button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button>
+        </div>
+        <input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />
+        {filteredRecipes.map((r) => (
+          <div key={r.id} className={selectedId === r.id ? "list active-list" : "list"}>
+            <button className="plain" onClick={() => setSelectedId(r.id)}>
+              <b>{r.name}</b><br />
+              <small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small>
+            </button>
+            <button className="link" onClick={() => editRecipe(r)}>Rediger</button>
+            <button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button>
+          </div>
+        ))}
+      </div>
+      <div className="card">
+        {!selected ? <p>Velg eller opprett en grunnoppskrift.</p> : (
+          <>
+            <div className="between">
+              <div>
+                <h2>{selected.name}</h2>
+                <p>{selected.category} · totalvekt {num(recipeTotalAmount(selected), 3)} {selected.yieldUnit}</p>
+              </div>
+              <div>
+                <button className="btn" onClick={() => editRecipe(selected)}>Rediger</button>
+                <button className="btn" onClick={() => printRecipe(selected)}>Print</button>
+              </div>
+            </div>
+            <div className="metric-row">
+              <Metric label="Total kost eks. mva" value={currency(recipeCost(selected))} dark />
+              <Metric label="Totalvekt / yield" value={`${num(recipeTotalAmount(selected), 3)} ${selected.yieldUnit}`} />
+              <Metric label={`Pris per ${selected.yieldUnit}`} value={currency(recipeUnitCost(selected))} dark />
+              <Metric label="Allergener" value={recipeAllergens(selected).join(", ") || "Ingen"} />
+            </div>
+            <h3>Ingredienser</h3>
+            <table>
+              <thead>
+                <tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Svinn %</th><th>Kost</th></tr>
+              </thead>
+              <tbody>
+                {selected.lines.map((l, i) => (
+                  <tr key={i}>
+                    <td>{l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td>
+                    <td>{lineItemName(l.itemType, l.itemId)}</td>
+                    <td>{num(l.amount)}</td>
+                    <td>{l.wastePercent ? `${l.wastePercent} %` : "-"}</td>
+                    <td>{currency(lineCost(l))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
       </div>
     </section>
   );
-}
-
-  return ( 
-  <section className="grid two"><div className="card"><div className="between"><h2>Grunnoppskrifter</h2><button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button></div><input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />{filteredRecipes.map((r) => <div key={r.id} className={selectedId === r.id ? "list active-list" : "list"}><button className="plain" onClick={() => setSelectedId(r.id)}><b>{r.name}</b><br /><small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small></button><button className="link" onClick={() => editRecipe(r)}>Rediger</button><button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button></div>)}</div><div className="card">{!selected ? <p>Velg eller opprett en grunnoppskrift.</p> : <><div className="between"><div><h2>{selected.name}</h2><p>{selected.category} · totalvekt {num(recipeTotalAmount(selected), 3)} {selected.yieldUnit}</p></div><div><button className="btn" onClick={() => editRecipe(selected)}>Rediger</button><button className="btn" onClick={() => printRecipe(selected)}>Print</button></div></div><div className="metric-row"><Metric label="Total kost eks. mva" value={currency(recipeCost(selected))} dark /><Metric label="Totalvekt / yield" value={`${num(recipeTotalAmount(selected), 3)} ${selected.yieldUnit}`} /><Metric label={`Pris per ${selected.yieldUnit}`} value={currency(recipeUnitCost(selected))} dark /><Metric label="Allergener" value={recipeAllergens(selected).join(", ") || "Ingen"} /></div><h3>Ingredienser</h3><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>{selected.lines.map((l, i) => <tr key={i}><td>{l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>{lineItemName(l.itemType, l.itemId)}</td><td>{num(l.amount)}</td><td>{currency(lineCost(l))}</td></tr>)}</tbody></table></>}</div></section>
-);
 }
 
 function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
