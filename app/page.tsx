@@ -6089,7 +6089,7 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
   );
 }
 
-function SettingsTab({
+const SettingsTab = React.memo(function SettingsTab({
   data,
   updateData,
   exportData,
@@ -6314,7 +6314,7 @@ function SettingsTab({
       <p style={{ fontSize: 12, color: "#64748b" }}>Tips: Ta backup før du importerer ny fil.</p>
     </section>
   );
-}
+});
 
 function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void }) {
   const [localValues, setLocalValues] = useState(values);
