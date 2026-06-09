@@ -5716,6 +5716,7 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
   const [showNewOffer, setShowNewOffer] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [offerSearch, setOfferSearch] = useState("");
+  const [showTerms, setShowTerms] = useState(false);
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
     ((data as any).deletedRentalOffers || []) as RentalOffer[]
   );
@@ -5732,6 +5733,27 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
 
   const quantityAddons = ["Tøyservietter", "Vinpakke 3 glass", "Alkoholfri drikkepakke 3 glass"];
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
+  const termsText = `Bodøgaard – kunst & kultur er et privat kulturhus og visningssted for kunst og kulturarv. Stedet viser verker fra Bodøgaardsamlingen, som innehar Nord-Norges største private samling av kunst og kulturgjenstander, i tillegg til temporære utstillinger gjennom året fra nasjonale og internasjonale kunstnere. Bodøgaard har også konserter og andre kulturarrangementer, samt aktiviteter gjennom grafikkverkstedet Den Frie Presse.
+
+Bodøgaard gir de som ønsker det muligheten til å leie enkeltrom eller hele anlegget til spesielle anledninger som jubileer, dåp, konfirmasjon, bryllup, minnestund, kurs/konferanse og andre selskaper.
+
+Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
+
+- All kommunikasjon vedrørende utleie av lokalene og serveringstilbudet skjer via Brødrene Berbusmel på tlf. 413 73 000 eller e-post brodrene@berbusmel.no. Gjeldende priser ligger til enhver tid tilgjengelig på www.berbusmel.no/bodgaard
+
+- All mat og drikke må bestilles gjennom Brødrene Berbusmel.
+
+- Anlegget har skjenkebevilling. Minst en servitør er derfor til enhver tid til stede, og det er ikke anledning til å ha medbrakt alkohol.
+
+- Siste servering av alkoholholdig drikke skjer kl. 01:30, og gjestene må forlate lokalet senest kl. 02:00 – med mindre noe annet er avtalt.
+
+- Bodøgaard ligger i et tettbygd strøk, og støy etter kl. 00:00 må begrenses. Dette er leietaker ansvarlig for.
+
+- Kunsten som henger på veggene eller står utstilt i lokalene er en del av det faste inventaret og kan ikke fjernes eller endres. Kunst som står montert på gulv og er i veien for rigging til arrangementer skal ikke flyttes uten tillatelse fra huseier. Kunsten er forsikret gjennom Bodøgaard – kunst & kultur.
+
+- Omvisning i utstillingene/samlingene kan bestilles på forhånd.
+
+- Gratis parkering for alle gjester.`;
 
   function addonUsesQuantity(addonName: string) { return quantityAddons.includes(addonName); }
   function isAddonSelected(addon: RentalAddon) { return addonLines.some((line) => line.text === addon.name); }
@@ -5885,8 +5907,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
 .disclaimer{font-size:10px;color:#94a3b8;margin-top:8px;text-align:center}
 .footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
-@media print{button{display:none}body{padding:0}}
-</style></head><body>
+@media print{button{display:none}body{padding:0}.page-break{page-break-before:always}}</style></head><body>
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
 <div class="header">
   <img src="/logo.png" class="logo" />
@@ -5902,7 +5923,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
   ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note)}</p>` : ""}
 </div>
-<h2>Spesifikasjon</h2>
+<div class="page-break"></div><h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
   <tbody>${venueRow}${productRows}${waiterRow}${addonRows}</tbody>
@@ -5910,7 +5931,9 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 </table>
 ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
 <p class="disclaimer">Skrivefeil kan forekomme.</p>
-<div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
+${showTerms ? `<div class="page-break"></div>
+<h2 style="border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:16px">Vilkår for leie av Bodøgaard</h2>
+<p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}<div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
 </body></html>`);
     w.document.close();
     w.focus();
@@ -6080,6 +6103,10 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
               </label>
               {showIncluded && <p style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>{includedText}</p>}
             </div>
+            <label className="check" style={{ marginTop: 8, display: "block" }}>
+  <input type="checkbox" checked={showTerms} onChange={(e) => setShowTerms(e.target.checked)} />
+  Vilkår for leie Bodøgaard
+</label>
             {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
             <p>Mat/produkter: <b>{currency(food)}</b></p>
             <p>Servitører: <b>{currency(waiterCost)}</b></p>
