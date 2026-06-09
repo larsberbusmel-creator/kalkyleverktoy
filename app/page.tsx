@@ -171,7 +171,7 @@ type InventoryMonthData = {
   kassasvinn?: number;
 };
 
-type RentalAddon = { id: string; name: string; price: number };
+type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean };
 
 type ProductListKind = "bakst" | "catering" | "storkjokken";
 
@@ -553,26 +553,24 @@ export default function Page() {
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
 
-  function updateData(partial: Partial<AppData>) {
-    setData((prev) => {
-      const next = { ...prev, ...partial };
-
-      isSavingRef.current = true;
-      supabase
-        .from("app_data")
-        .upsert({
-          id: "main",
-          data: next,
-          updated_at: new Date().toISOString(),
-        })
-        .then(({ error }) => {
-          if (error) console.error("Supabase save error:", error);
-          setTimeout(() => { isSavingRef.current = false; }, 2000);
-        });
-
-      return next;
-    });
-  }
+  const updateData = React.useCallback((partial: Partial<AppData>) => {
+  setData((prev) => {
+    const next = { ...prev, ...partial };
+    isSavingRef.current = true;
+    supabase
+      .from("app_data")
+      .upsert({
+        id: "main",
+        data: next,
+        updated_at: new Date().toISOString(),
+      })
+      .then(({ error }) => {
+        if (error) console.error("Supabase save error:", error);
+        setTimeout(() => { isSavingRef.current = false; }, 2000);
+      });
+    return next;
+  });
+}, []);
 
   function exportData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
@@ -5820,7 +5818,6 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
   const waiterCost = rental.waiterHours * data.settings.waiterHourlyRate + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
   const total = rental.venuePrice + food + waiterCost + addonTotal;
 
-  const quantityAddons = ["Tøyservietter", "Vinpakke 3 glass", "Alkoholfri drikkepakke 3 glass"];
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
   const termsText = `Bodøgaard – kunst & kultur er et privat kulturhus og visningssted for kunst og kulturarv. Stedet viser verker fra Bodøgaardsamlingen, som innehar Nord-Norges største private samling av kunst og kulturgjenstander, i tillegg til temporære utstillinger gjennom året fra nasjonale og internasjonale kunstnere. Bodøgaard har også konserter og andre kulturarrangementer, samt aktiviteter gjennom grafikkverkstedet Den Frie Presse.
 
@@ -5844,7 +5841,11 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
 
 - Gratis parkering for alle gjester.`;
 
-  function addonUsesQuantity(addonName: string) { return quantityAddons.includes(addonName); }
+  // Bruker perUnit fra addon-innstillinger i stedet for hardkodet liste
+  function addonUsesQuantity(addonName: string) {
+    return !!data.rentalAddons.find((a) => a.name === addonName)?.perUnit;
+  }
+
   function isAddonSelected(addon: RentalAddon) { return addonLines.some((line) => line.text === addon.name); }
 
   function toggleAddon(addon: RentalAddon) {
@@ -5907,8 +5908,8 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     }
 
     setEditingOfferId(null);
-setShowNewOffer(false);
-alert("Tilbud lagret!");
+    setShowNewOffer(false);
+    alert("Tilbud lagret!");
   }
 
   function loadOffer(offer: RentalOffer) {
@@ -6010,7 +6011,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   <p><b>Kunde:</b> ${escapeHtml(rental.customer)}</p>
   <p><b>Lokale:</b> ${escapeHtml(venueName)}</p>
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
-${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim())}</p>` : ""}
+  ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim())}</p>` : ""}
 </div>
 <div class="page-break"></div><h2>Spesifikasjon</h2>
 <table>
@@ -6022,7 +6023,8 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
 <p class="disclaimer">Skrivefeil kan forekomme.</p>
 ${showTerms ? `<div class="page-break"></div>
 <h2 style="border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:16px">Vilkår for leie av Bodøgaard</h2>
-<p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}<div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
+<p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}
+<div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
 </body></html>`);
     w.document.close();
     w.focus();
@@ -6042,7 +6044,6 @@ ${showTerms ? `<div class="page-break"></div>
 
   return (
     <section>
-      {/* Toppknapper */}
       <div className="card">
         <div className="between">
           <h2>Leie av lokale</h2>
@@ -6050,15 +6051,11 @@ ${showTerms ? `<div class="page-break"></div>
             <button className={showTrash ? "btn active" : "btn"} onClick={() => setShowTrash(!showTrash)}>
               🗑 Papirkurv {deletedOffers.length > 0 && `(${deletedOffers.length})`}
             </button>
-            <button className="btn active" onClick={() => {
-              cancelEdit();
-              setShowNewOffer(true);
-            }}>Nytt tilbud</button>
+            <button className="btn active" onClick={() => { cancelEdit(); setShowNewOffer(true); }}>Nytt tilbud</button>
           </div>
         </div>
       </div>
 
-      {/* Papirkurv */}
       {showTrash && (
         <div className="card">
           <h3>🗑 Papirkurv</h3>
@@ -6079,7 +6076,6 @@ ${showTerms ? `<div class="page-break"></div>
         </div>
       )}
 
-      {/* Skjema – vises kun når showNewOffer er true */}
       {showNewOffer && (
         <div className="grid two">
           <div className="card">
@@ -6163,9 +6159,20 @@ ${showTerms ? `<div class="page-break"></div>
                 const usesQty = addonUsesQuantity(addon.name);
                 return (
                   <div key={addon.id} className="editable-row">
-                    <label className="check"><input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} /> {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : ""}</label>
-                    {selected && usesQty && <label>Antall<input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} /></label>}
-                    {selected && !usesQty && <label>Pris<input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} /></label>}
+                    <label className="check">
+                      <input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} />
+                      {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : " (fast beløp)"}
+                    </label>
+                    {selected && usesQty && (
+                      <label>Antall
+                        <input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} />
+                      </label>
+                    )}
+                    {selected && !usesQty && (
+                      <label>Beløp
+                        <input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} />
+                      </label>
+                    )}
                     {selected && usesQty && <b>{currency(line?.amount || 0)}</b>}
                   </div>
                 );
@@ -6191,11 +6198,11 @@ ${showTerms ? `<div class="page-break"></div>
                 Vis "Prisen inkluderer" i tilbud
               </label>
               {showIncluded && <p style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>{includedText}</p>}
+              <label className="check" style={{ marginTop: 8 }}>
+                <input type="checkbox" checked={showTerms} onChange={(e) => setShowTerms(e.target.checked)} />
+                Vilkår for leie Bodøgaard
+              </label>
             </div>
-            <label className="check" style={{ marginTop: 8, display: "block" }}>
-  <input type="checkbox" checked={showTerms} onChange={(e) => setShowTerms(e.target.checked)} />
-  Vilkår for leie Bodøgaard
-</label>
             {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
             <p>Mat/produkter: <b>{currency(food)}</b></p>
             <p>Servitører: <b>{currency(waiterCost)}</b></p>
@@ -6218,7 +6225,6 @@ ${showTerms ? `<div class="page-break"></div>
         </div>
       )}
 
-      {/* Lagrede tilbud */}
       <div className="card" style={{ marginTop: 18 }}>
         <div className="between" style={{ marginBottom: 12 }}>
           <h2>Lagrede tilbud</h2>
@@ -6276,7 +6282,7 @@ const SettingsTab = React.memo(function SettingsTab({
   const [newMenuCategory, setNewMenuCategory] = useState("");
   const [newVenue, setNewVenue] = useState({ name: "", price: "0" });
   const [newPackaging, setNewPackaging] = useState({ name: "", price: "0" });
-  const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0" });
+const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", perUnit: false });
 
   const [localSettings, setLocalSettings] = useState(data.settings);
   const [localVenues, setLocalVenues] = useState(data.venues);
@@ -6390,6 +6396,18 @@ const SettingsTab = React.memo(function SettingsTab({
                 onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
                 onBlur={() => updateData({ rentalAddons: localRentalAddons })}
               />
+              <label className="check" style={{ whiteSpace: "nowrap" }}>
+  <input
+    type="checkbox"
+    checked={!!addon.perUnit}
+    onChange={(e) => {
+      const next = localRentalAddons.map((x, ix) => ix === i ? { ...x, perUnit: e.target.checked } : x);
+      setLocalRentalAddons(next);
+      updateData({ rentalAddons: next });
+    }}
+  />
+  pr stk
+</label>
               <button className="link danger" onClick={() => {
                 const next = localRentalAddons.filter((x) => x.id !== addon.id);
                 setLocalRentalAddons(next);
@@ -6398,17 +6416,21 @@ const SettingsTab = React.memo(function SettingsTab({
             </div>
           ))}
         </div>
-        <div className="form-grid three">
-          <input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} />
-          <input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} />
-          <button className="btn active" onClick={() => {
-            if (!newRentalAddon.name.trim()) return;
-            const next = [...localRentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0 }];
-            setLocalRentalAddons(next);
-            updateData({ rentalAddons: next });
-            setNewRentalAddon({ name: "", price: "0" });
-          }}>Legg til</button>
-        </div>
+        <div className="form-grid four">
+  <input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} />
+  <input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} />
+  <label className="check">
+    <input type="checkbox" checked={newRentalAddon.perUnit} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, perUnit: e.target.checked })} />
+    pr stk
+  </label>
+  <button className="btn active" onClick={() => {
+    if (!newRentalAddon.name.trim()) return;
+    const next = [...localRentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0, perUnit: newRentalAddon.perUnit }];
+    setLocalRentalAddons(next);
+    updateData({ rentalAddons: next });
+    setNewRentalAddon({ name: "", price: "0", perUnit: false });
+  }}>Legg til</button>
+</div>
       </Section>
 
       <Section id="materialCats" title="Kategorier for råvarer">
