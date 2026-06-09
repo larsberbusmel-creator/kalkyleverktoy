@@ -707,92 +707,161 @@ function productCost(product: Product, visited: string[] = []) {
 
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
-  return (
-    <main style={{ minHeight: "100vh", background: "#f8fafc", padding: 24, color: "#0f172a" }}>
-      <div style={{ maxWidth: 1250, margin: "0 auto" }}>
-        <header className="card">
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-    
-    {/* VENSTRE */}
-    <div>
-      <img
-        src="/logo.png"
-        alt="Logo"
-        style={{
-          height: 140,
-          width: "auto",
-          objectFit: "contain",
-        }}
-      />
+  const tabConfig: { key: Tab; label: string; icon: string }[] = [
+  { key: "dashboard",  label: "Startside",         icon: "📅" },
+  { key: "materials",  label: "Råvarer",            icon: "🥕" },
+  { key: "recipes",    label: "Grunnoppskrifter",   icon: "📖" },
+  { key: "products",   label: "Produkter",          icon: "🍽" },
+  { key: "orders",     label: "Ordre",              icon: "📋" },
+  { key: "production", label: "Produksjon",         icon: "🥖" },
+  { key: "inventory",  label: "Varetelling",        icon: "📦" },
+  { key: "rental",     label: "Leie av lokale",     icon: "🏠" },
+  { key: "settings",   label: "Innstillinger",      icon: "⚙️" },
+];
+
+return (
+  <main style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
+    <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", gap: 0 }}>
+
+      {/* ── VENSTRE SIDEBAR (desktop) ── */}
+      <aside className="sidebar">
+        <div style={{ padding: "20px 14px 12px" }}>
+          <img src="/logo.png" alt="Logo" style={{ width: "100%", maxWidth: 140, height: "auto", objectFit: "contain", display: "block", margin: "0 auto 20px" }} />
+        </div>
+        <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 8px" }}>
+          {tabConfig.map(({ key, label, icon }) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={tab === key ? "sidebar-btn active" : "sidebar-btn"}
+            >
+              <span className="sidebar-icon">{icon}</span>
+              <span className="sidebar-label">{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div style={{ marginTop: "auto", padding: "16px 8px" }}>
+          <button
+            className="sidebar-btn logout"
+            onClick={async () => { await supabase.auth.signOut(); window.location.href = "/login"; }}
+          >
+            <span className="sidebar-icon">🚪</span>
+            <span className="sidebar-label">Logg ut</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* ── MOBILTOPP ── */}
+      <div className="mobile-topbar">
+        <img src="/logo.png" alt="Logo" style={{ height: 44, width: "auto", objectFit: "contain" }} />
+        <select
+          value={tab}
+          onChange={(e) => setTab(e.target.value as Tab)}
+          style={{ flex: 1, marginLeft: 10, fontSize: 15, padding: "8px 10px", borderRadius: 10, border: "1px solid #cbd5e1" }}
+        >
+          {tabConfig.map(({ key, label, icon }) => (
+            <option key={key} value={key}>{icon} {label}</option>
+          ))}
+        </select>
+        <button
+          style={{ marginLeft: 8, padding: "8px 12px", borderRadius: 10, border: "1px solid #fca5a5", background: "#fef2f2", cursor: "pointer", fontSize: 14 }}
+          onClick={async () => { await supabase.auth.signOut(); window.location.href = "/login"; }}
+        >
+          🚪
+        </button>
+      </div>
+
+      {/* ── INNHOLD ── */}
+      <div className="main-content">
+        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
+        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} />}
+        {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
+        {tab === "products"   && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} />}
+        {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} />}
+        {tab === "rental"     && <RentalTab data={data} updateData={updateData} />}
+        {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} />}
+
+        <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
+          <img src="/mise-logo.png" alt="Misemetrics" style={{ width: 140, height: "auto" }} />
+        </footer>
+      </div>
     </div>
 
-    {/* HØYRE */}
-   <button
-  className="btn logout"
-  onClick={async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  }}
->
-  Logg ut
-</button>
+    <GlobalStyles />
 
-  </div>
-</header>
+    <style jsx global>{`
+      /* ── SIDEBAR ── */
+      .sidebar {
+        width: 200px;
+        min-width: 200px;
+        background: white;
+        border-right: 1px solid #e2e8f0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+      }
+      .sidebar-btn {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+        font-size: 14px;
+        font-weight: 500;
+        color: #374151;
+        transition: background 0.15s;
+      }
+      .sidebar-btn:hover { background: #f1f5f9; }
+      .sidebar-btn.active { background: #0f172a; color: white; }
+      .sidebar-btn.logout { color: #b91c1c; }
+      .sidebar-btn.logout:hover { background: #fef2f2; }
+      .sidebar-icon { font-size: 18px; flex-shrink: 0; width: 24px; text-align: center; }
+      .sidebar-label { font-size: 13px; }
 
-        <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "18px 0" }}>
-          {[["dashboard", "Startside"], ["materials", "Råvarer"], ["recipes", "Grunnoppskrifter"], ["products", "Produkter"], ["orders", "Ordre"], ["production", "Produksjon"], ["inventory", "Varetelling"], ["rental", "Leie av lokale"], ["settings", "Innstillinger"]].map(([key, label]) => <button key={key} className={tab === key ? "btn active" : "btn"} onClick={() => setTab(key as Tab)}>{label}</button>)}
-        </nav>
+      /* ── MAIN CONTENT ── */
+      .main-content {
+        flex: 1;
+        min-width: 0;
+        padding: 20px 20px 0;
+      }
 
-        {tab === "dashboard" && (
-  <CalendarDashboard
-    data={data}
-    updateData={updateData}
-    setTab={setTab}
-  />
-)}
-        {tab === "materials" && <MaterialsTab data={data} updateData={updateData} />}
-        {tab === "recipes" && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
-        {tab === "products" && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
-        {tab === "orders" && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
-        {tab === "production" && (
-  <ProductionTab
-    data={data}
-    updateData={updateData}
-  />
-)}
-        {tab === "inventory" && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} />}
-        {tab === "rental" && <RentalTab data={data} updateData={updateData} />}
-        {tab === "settings" && (
-  <SettingsTab
-    data={data}
-    updateData={updateData}
-    exportData={exportData}
-    importData={importData}
-  />
-)}
-      </div>
-      <footer
-  style={{
-    display: "flex",
-    justifyContent: "center",
-    marginTop: 40,
-    paddingBottom: 20,
-    opacity: 0.85,
-  }}
->
-  <img
-    src="/mise-logo.png"
-    alt="Misemetrics"
-    style={{
-      width: 140,
-      height: "auto",
-    }}
-  />
-</footer>
-      <GlobalStyles />
-    </main>
-  );
+      /* ── MOBILTOPP ── */
+      .mobile-topbar {
+        display: none;
+      }
+
+      @media (max-width: 768px) {
+        .sidebar { display: none; }
+        .mobile-topbar {
+          display: flex;
+          align-items: center;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+          background: white;
+          border-bottom: 1px solid #e2e8f0;
+          padding: 8px 12px;
+          width: 100%;
+        }
+        .main-content {
+          padding: 10px 10px 0;
+          width: 100%;
+        }
+      }
+    `}</style>
+  </main>
+);
 }
 
 // ============================================================
