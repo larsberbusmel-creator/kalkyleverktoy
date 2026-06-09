@@ -5795,9 +5795,9 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
       updateData({ orders: nextOrders });
     }
 
-    setEditingOfferId(offer.id!);
-    setShowNewOffer(false);
-    alert("Tilbud lagret!");
+    setEditingOfferId(null);
+setShowNewOffer(false);
+alert("Tilbud lagret!");
   }
 
   function loadOffer(offer: RentalOffer) {
