@@ -5713,6 +5713,12 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
+  const [showNewOffer, setShowNewOffer] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
+  const [offerSearch, setOfferSearch] = useState("");
+  const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
+    ((data as any).deletedRentalOffers || []) as RentalOffer[]
+  );
 
   const rental = data.rental;
   function setRental(next: RentalOffer) { updateData({ rental: next }); }
@@ -5756,10 +5762,7 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
 
   function saveOffer() {
     if (!rental.customer.trim()) return alert("Legg inn kundenavn.");
-    const offer: RentalOffer = {
-      ...rental,
-      id: rental.id || `rental-${Date.now()}`,
-    };
+    const offer: RentalOffer = { ...rental, id: rental.id || `rental-${Date.now()}` };
     const existing = ((data as any).rentalOffers || []) as RentalOffer[];
     const next = existing.find((o) => o.id === offer.id)
       ? existing.map((o) => o.id === offer.id ? offer : o)
@@ -5774,26 +5777,15 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
         customerType: "bedrift" as const,
         customer: offer.customer,
         companyName: offer.customer,
-        orgNumber: "",
-        companyAddress: "",
-        phone: "",
+        orgNumber: "", companyAddress: "", phone: "",
         deliveryAddress: rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue,
-        date: offer.date,
-        time: "",
-        note: offer.note || "",
-        paymentInfo: "",
+        date: offer.date, time: "", note: offer.note || "", paymentInfo: "",
         guests: rental.productLines.reduce((sum, l) => sum + l.guests, 0),
         productId: rental.productLines[0]?.productId || "",
         orderLines: rental.productLines.filter((l) => l.productId).map((l) => ({ productId: l.productId, quantity: l.guests })),
-        discountPercent: 0,
-        isRecurring: false,
-        recurringDays: [],
+        discountPercent: 0, isRecurring: false, recurringDays: [],
         recurringNote: `Leieavtale: ${rental.venueExternal ? (rental.venueExternalName || "Eksternt") : rental.venue}`,
-        allergens: {},
-        dietVegan: "0",
-        dietVegetarian: "0",
-        dietPregnant: "0",
-        dietOther: "",
+        allergens: {}, dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
       };
       const orders = data.orders || [];
       const existingOrderIdx = orders.findIndex((o) => o.id === rentalOrder.id);
@@ -5804,64 +5796,79 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
     }
 
     setEditingOfferId(offer.id!);
+    setShowNewOffer(false);
     alert("Tilbud lagret!");
   }
 
   function loadOffer(offer: RentalOffer) {
     setRental(offer);
     setEditingOfferId(offer.id || null);
+    setShowNewOffer(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function cancelEdit() {
     setRental({ ...initialData.rental });
     setEditingOfferId(null);
+    setShowNewOffer(false);
   }
 
   function deleteOffer(id: string) {
-    if (!confirm("Slette dette tilbudet?")) return;
-    const next = ((data as any).rentalOffers || []).filter((o: RentalOffer) => o.id !== id);
+    if (!confirm("Flytte tilbudet til papirkurv?")) return;
+    const existing = ((data as any).rentalOffers || []) as RentalOffer[];
+    const offer = existing.find((o) => o.id === id);
+    if (offer) {
+      const nextDeleted = [offer, ...deletedOffers];
+      setDeletedOffers(nextDeleted);
+      updateData({ deletedRentalOffers: nextDeleted } as any);
+    }
+    const next = existing.filter((o) => o.id !== id);
     updateData({ rentalOffers: next } as any);
     updateData({ orders: data.orders.filter((o) => o.id !== `rental-order-${id}`) });
     if (editingOfferId === id) cancelEdit();
   }
 
+  function restoreOffer(id: string) {
+    const offer = deletedOffers.find((o) => o.id === id);
+    if (!offer) return;
+    const nextDeleted = deletedOffers.filter((o) => o.id !== id);
+    setDeletedOffers(nextDeleted);
+    updateData({ deletedRentalOffers: nextDeleted } as any);
+    const existing = ((data as any).rentalOffers || []) as RentalOffer[];
+    updateData({ rentalOffers: [offer, ...existing] } as any);
+  }
+
+  function permanentDeleteOffer(id: string) {
+    if (!confirm("Slette permanent?")) return;
+    const nextDeleted = deletedOffers.filter((o) => o.id !== id);
+    setDeletedOffers(nextDeleted);
+    updateData({ deletedRentalOffers: nextDeleted } as any);
+  }
+
   function printOffer() {
-  const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
-
-  const productRows = rental.productLines.map((l) => {
-    const p = data.products.find((x) => x.id === l.productId);
-    if (!p) return "";
-    const lineTotal = p.customerPrice * l.guests;
-    return `<tr><td>${escapeHtml(p.name)}</td><td style="text-align:right">${l.guests}</td><td style="text-align:right">${currency(p.customerPrice)}</td><td style="text-align:right"><b>${currency(lineTotal)}</b></td></tr>`;
-  }).join("");
-
-  const addonRows = addonLines.map((line) =>
-    `<tr><td>${escapeHtml(line.text)}${line.quantity ? ` × ${line.quantity}` : ""}</td><td></td><td style="text-align:right">${line.quantity ? currency(line.unitPrice || 0) : ""}</td><td style="text-align:right"><b>${currency(line.amount)}</b></td></tr>`
-  ).join("");
-
-  const waiterRow = (rental.waiterHours > 0 || waiterAfterMidnightHours > 0) ? `
-    <tr>
-      <td>
-        Servitører (${rental.waiters} pers)<br>
-        <small style="color:#64748b">
-          ${rental.waiterHours > 0 ? `${rental.waiterHours}t × ${currency(data.settings.waiterHourlyRate)}/t` : ""}
-          ${rental.waiterHours > 0 && waiterAfterMidnightHours > 0 ? " + " : ""}
-          ${waiterAfterMidnightHours > 0 ? `${waiterAfterMidnightHours}t etter midnatt × ${currency(data.settings.waiterAfterMidnightHourlyRate)}/t` : ""}
-        </small>
-      </td>
-      <td></td><td></td>
-      <td style="text-align:right"><b>${currency(waiterCost)}</b></td>
-    </tr>
-  ` : "";
-
-  const venueRow = rental.venuePrice > 0
-    ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
-    : "";
-
+    const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
+    const productRows = rental.productLines.map((l) => {
+      const p = data.products.find((x) => x.id === l.productId);
+      if (!p) return "";
+      const lineTotal = p.customerPrice * l.guests;
+      return `<tr><td>${escapeHtml(p.name)}</td><td style="text-align:right">${l.guests}</td><td style="text-align:right">${currency(p.customerPrice)}</td><td style="text-align:right"><b>${currency(lineTotal)}</b></td></tr>`;
+    }).join("");
+    const addonRows = addonLines.map((line) =>
+      `<tr><td>${escapeHtml(line.text)}${line.quantity ? ` × ${line.quantity}` : ""}</td><td></td><td style="text-align:right">${line.quantity ? currency(line.unitPrice || 0) : ""}</td><td style="text-align:right"><b>${currency(line.amount)}</b></td></tr>`
+    ).join("");
+    const waiterRow = (rental.waiterHours > 0 || waiterAfterMidnightHours > 0) ? `
+      <tr><td>Servitører (${rental.waiters} pers)<br><small style="color:#64748b">
+        ${rental.waiterHours > 0 ? `${rental.waiterHours}t × ${currency(data.settings.waiterHourlyRate)}/t` : ""}
+        ${rental.waiterHours > 0 && waiterAfterMidnightHours > 0 ? " + " : ""}
+        ${waiterAfterMidnightHours > 0 ? `${waiterAfterMidnightHours}t etter midnatt × ${currency(data.settings.waiterAfterMidnightHourlyRate)}/t` : ""}
+      </small></td><td></td><td></td><td style="text-align:right"><b>${currency(waiterCost)}</b></td></tr>
+    ` : "";
+    const venueRow = rental.venuePrice > 0
+      ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
+      : "";
     const w = window.open("", "_blank");
-  if (!w) return;
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
 @page{size:A4;margin:14mm}
 body{font-family:Arial,sans-serif;color:#111827;padding:32px;line-height:1.5}
 .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
@@ -5878,11 +5885,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
 .disclaimer{font-size:10px;color:#94a3b8;margin-top:8px;text-align:center}
 .footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
-@media print{
-  button{display:none}
-  body{padding:0}
-  @page{margin:14mm}
-}
+@media print{button{display:none}body{padding:0}}
 </style></head><body>
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
 <div class="header">
@@ -5897,191 +5900,220 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   <p><b>Kunde:</b> ${escapeHtml(rental.customer)}</p>
   <p><b>Lokale:</b> ${escapeHtml(venueName)}</p>
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
-${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note)}</p>` : ""}</div>
+  ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note)}</p>` : ""}
+</div>
 <h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
-  <tbody>
-    ${venueRow}
-    ${productRows}
-    ${waiterRow}
-    ${addonRows}
-  </tbody>
-  <tfoot>
-    <tr class="total-row"><td colspan="3">Total inkl. mva</td><td style="text-align:right">${currency(total)}</td></tr>
-  </tfoot>
+  <tbody>${venueRow}${productRows}${waiterRow}${addonRows}</tbody>
+  <tfoot><tr class="total-row"><td colspan="3">Total inkl. mva</td><td style="text-align:right">${currency(total)}</td></tr></tfoot>
 </table>
 ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
 <p class="disclaimer">Skrivefeil kan forekomme.</p>
-<div class="footer">
-  Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no
-</div>
+<div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
 </body></html>`);
-  w.document.close();
-  w.focus();
-}
+    w.document.close();
+    w.focus();
+  }
 
   const filteredProducts = data.products.filter((p) =>
     productSearch === "" || p.name.toLowerCase().includes(productSearch.toLowerCase())
   ).slice(0, 10);
 
-  const offers = ((data as any).rentalOffers || []) as RentalOffer[];
+  const offers = (((data as any).rentalOffers || []) as RentalOffer[])
+    .filter((o) => offerSearch === "" ||
+      o.customer.toLowerCase().includes(offerSearch.toLowerCase()) ||
+      (o.venue || "").toLowerCase().includes(offerSearch.toLowerCase()) ||
+      (o.venueExternalName || "").toLowerCase().includes(offerSearch.toLowerCase())
+    )
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
   return (
     <section>
-      <div className="grid two">
-        <div className="card">
-          <div className="between">
-            <h2>Leie av lokale</h2>
-            {editingOfferId && (
-              <button className="btn" onClick={cancelEdit}>+ Nytt tilbud</button>
-            )}
+      {/* Toppknapper */}
+      <div className="card">
+        <div className="between">
+          <h2>Leie av lokale</h2>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className={showTrash ? "btn active" : "btn"} onClick={() => setShowTrash(!showTrash)}>
+              🗑 Papirkurv {deletedOffers.length > 0 && `(${deletedOffers.length})`}
+            </button>
+            <button className="btn active" onClick={() => {
+              cancelEdit();
+              setShowNewOffer(true);
+            }}>Nytt tilbud</button>
           </div>
-
-          {editingOfferId && (
-            <div style={{ background: "#fef9c3", border: "1px solid #fbbf24", borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 700 }}>✏️ Redigerer: {rental.customer}</span>
-              <button className="btn" onClick={cancelEdit}>Avbryt redigering</button>
-            </div>
-          )}
-
-          <div className="form-grid two">
-            <label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
-            <label>Dato for arrangement<input type="date" value={rental.date || ""} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
-          </div>
-
-          <label>Lokale
-            <select value={rental.venueExternal ? "__extern__" : rental.venue} onChange={(e) => {
-              if (e.target.value === "__extern__") {
-                setRental({ ...rental, venueExternal: true, venue: "", venuePrice: 0 });
-              } else {
-                const v = data.venues.find((x) => x.name === e.target.value)!;
-                setRental({ ...rental, venueExternal: false, venueExternalName: "", venue: v.name, venuePrice: v.price });
-              }
-            }}>
-              {data.venues.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
-              <option value="__extern__">Eksternt lokale</option>
-            </select>
-          </label>
-
-          {rental.venueExternal ? (
-            <div className="form-grid two">
-              <label>Navn på eksternt lokale<input value={rental.venueExternalName || ""} onChange={(e) => setRental({ ...rental, venueExternalName: e.target.value })} placeholder="F.eks. Svømmehallen" /></label>
-              <label>Pris (0 hvis kunden leier selv)<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) || 0 })} /></label>
-            </div>
-          ) : (
-            <label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label>
-          )}
-
-          <h3>Produkter/menyer</h3>
-          <div className="soft-box">
-            <input
-              value={productSearch}
-              onChange={(e) => setProductSearch(e.target.value)}
-              placeholder="Søk produkt eller meny..."
-              style={{ marginBottom: 8 }}
-            />
-            {productSearch && (
-              <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
-                {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
-                {filteredProducts.map((p) => (
-                  <button key={p.id} style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: 0, borderBottom: "1px solid #f1f5f9", background: "white", cursor: "pointer" }}
-                    onClick={() => {
-                      setRental({ ...rental, productLines: [...rental.productLines, { productId: p.id, guests: 1 }] });
-                      setProductSearch("");
-                    }}>
-                    <b>{p.name}</b> <span style={{ color: "#64748b", fontSize: 13 }}>· {currency(p.customerPrice)}/pers</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {rental.productLines.map((l, i) => {
-              const p = data.products.find((x) => x.id === l.productId);
-              return (
-                <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
-                  <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
-                  <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
-                  <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
-                </div>
-              );
-            })}
-          </div>
-
-          <h3>Servitører</h3>
-          <div className="form-grid three">
-            <label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label>
-            <label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
-            <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
-          </div>
-
-          <h3>Tillegg</h3>
-          <div className="soft-box">
-            {data.rentalAddons.map((addon) => {
-              const selected = isAddonSelected(addon);
-              const line = addonLines.find((x) => x.text === addon.name);
-              const usesQty = addonUsesQuantity(addon.name);
-              return (
-                <div key={addon.id} className="editable-row">
-                  <label className="check"><input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} /> {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : ""}</label>
-                  {selected && usesQty && <label>Antall<input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} /></label>}
-                  {selected && !usesQty && <label>Pris<input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} /></label>}
-                  {selected && usesQty && <b>{currency(line?.amount || 0)}</b>}
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-  <div style={{ marginTop: 12 }}>
-  <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
-  <textarea
-    className="textarea"
-    value={rental.note || ""}
-    onChange={(e) => setRental({ ...rental, note: e.target.value })}
-    placeholder="Spesielle ønsker, allergier, praktisk info osv."
-  />
-</div>
-        </div>
-
-        <div className="card">
-          <h2>Tilbud</h2>
-
-          <div className="soft-box">
-            <label className="check">
-              <input type="checkbox" checked={showIncluded} onChange={(e) => setShowIncluded(e.target.checked)} />
-              Vis "Prisen inkluderer" i tilbud
-            </label>
-            {showIncluded && <p style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>{includedText}</p>}
-          </div>
-
-          {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
-          <p>Mat/produkter: <b>{currency(food)}</b></p>
-          <p>Servitører: <b>{currency(waiterCost)}</b></p>
-          <p>Tillegg: <b>{currency(addonTotal)}</b></p>
-
-          {addonLines.length > 0 && (
-            <table>
-              <thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead>
-              <tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody>
-            </table>
-          )}
-
-          <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
-
-          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-  <button className="btn active" onClick={saveOffer}>
-    {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
-  </button>
-  <button className="btn" onClick={printOffer}>Last ned / print tilbud</button>
-  <button className="btn" onClick={cancelEdit}>Avbryt</button>
-</div>
         </div>
       </div>
 
+      {/* Papirkurv */}
+      {showTrash && (
+        <div className="card">
+          <h3>🗑 Papirkurv</h3>
+          {deletedOffers.length === 0 && <p style={{ color: "#64748b" }}>Papirkurven er tom.</p>}
+          {deletedOffers.map((offer) => (
+            <div key={offer.id} className="editable-row">
+              <div>
+                <b>{offer.customer}</b>
+                {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
+                <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={() => restoreOffer(offer.id!)}>Gjenopprett</button>
+                <button className="btn danger" onClick={() => permanentDeleteOffer(offer.id!)}>Slett permanent</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Skjema – vises kun når showNewOffer er true */}
+      {showNewOffer && (
+        <div className="grid two">
+          <div className="card">
+            <div className="between">
+              <h2>{editingOfferId ? "Rediger tilbud" : "Nytt tilbud"}</h2>
+              <button className="btn" onClick={cancelEdit}>Avbryt</button>
+            </div>
+
+            {editingOfferId && (
+              <div style={{ background: "#fef9c3", border: "1px solid #fbbf24", borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 700 }}>✏️ Redigerer: {rental.customer}</span>
+              </div>
+            )}
+
+            <div className="form-grid two">
+              <label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
+              <label>Dato for arrangement<input type="date" value={rental.date || ""} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
+            </div>
+
+            <label>Lokale
+              <select value={rental.venueExternal ? "__extern__" : rental.venue} onChange={(e) => {
+                if (e.target.value === "__extern__") {
+                  setRental({ ...rental, venueExternal: true, venue: "", venuePrice: 0 });
+                } else {
+                  const v = data.venues.find((x) => x.name === e.target.value)!;
+                  setRental({ ...rental, venueExternal: false, venueExternalName: "", venue: v.name, venuePrice: v.price });
+                }
+              }}>
+                {data.venues.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+                <option value="__extern__">Eksternt lokale</option>
+              </select>
+            </label>
+
+            {rental.venueExternal ? (
+              <div className="form-grid two">
+                <label>Navn på eksternt lokale<input value={rental.venueExternalName || ""} onChange={(e) => setRental({ ...rental, venueExternalName: e.target.value })} placeholder="F.eks. Svømmehallen" /></label>
+                <label>Pris (0 hvis kunden leier selv)<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) || 0 })} /></label>
+              </div>
+            ) : (
+              <label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label>
+            )}
+
+            <h3>Produkter/menyer</h3>
+            <div className="soft-box">
+              <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk produkt eller meny..." style={{ marginBottom: 8 }} />
+              {productSearch && (
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
+                  {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
+                  {filteredProducts.map((p) => (
+                    <button key={p.id} style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: 0, borderBottom: "1px solid #f1f5f9", background: "white", cursor: "pointer" }}
+                      onClick={() => { setRental({ ...rental, productLines: [...rental.productLines, { productId: p.id, guests: 1 }] }); setProductSearch(""); }}>
+                      <b>{p.name}</b> <span style={{ color: "#64748b", fontSize: 13 }}>· {currency(p.customerPrice)}/pers</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {rental.productLines.map((l, i) => {
+                const p = data.products.find((x) => x.id === l.productId);
+                return (
+                  <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
+                    <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
+                    <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
+                    <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <h3>Servitører</h3>
+            <div className="form-grid three">
+              <label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label>
+              <label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
+              <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
+            </div>
+
+            <h3>Tillegg</h3>
+            <div className="soft-box">
+              {data.rentalAddons.map((addon) => {
+                const selected = isAddonSelected(addon);
+                const line = addonLines.find((x) => x.text === addon.name);
+                const usesQty = addonUsesQuantity(addon.name);
+                return (
+                  <div key={addon.id} className="editable-row">
+                    <label className="check"><input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} /> {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : ""}</label>
+                    {selected && usesQty && <label>Antall<input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} /></label>}
+                    {selected && !usesQty && <label>Pris<input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} /></label>}
+                    {selected && usesQty && <b>{currency(line?.amount || 0)}</b>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
+              <textarea
+                className="textarea"
+                value={rental.note || ""}
+                onChange={(e) => setRental({ ...rental, note: e.target.value })}
+                placeholder="Spesielle ønsker, allergier, praktisk info osv."
+              />
+            </div>
+          </div>
+
+          <div className="card">
+            <h2>Tilbud</h2>
+            <div className="soft-box">
+              <label className="check">
+                <input type="checkbox" checked={showIncluded} onChange={(e) => setShowIncluded(e.target.checked)} />
+                Vis "Prisen inkluderer" i tilbud
+              </label>
+              {showIncluded && <p style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>{includedText}</p>}
+            </div>
+            {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
+            <p>Mat/produkter: <b>{currency(food)}</b></p>
+            <p>Servitører: <b>{currency(waiterCost)}</b></p>
+            <p>Tillegg: <b>{currency(addonTotal)}</b></p>
+            {addonLines.length > 0 && (
+              <table>
+                <thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead>
+                <tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody>
+              </table>
+            )}
+            <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
+            <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+              <button className="btn active" onClick={saveOffer}>
+                {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
+              </button>
+              <button className="btn" onClick={printOffer}>Last ned / print tilbud</button>
+              <button className="btn" onClick={cancelEdit}>Avbryt</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Lagrede tilbud */}
       <div className="card" style={{ marginTop: 18 }}>
-        <h2>Lagrede tilbud</h2>
-        {offers.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud lagret ennå.</p>}
+        <div className="between" style={{ marginBottom: 12 }}>
+          <h2>Lagrede tilbud</h2>
+          <input
+            value={offerSearch}
+            onChange={(e) => setOfferSearch(e.target.value)}
+            placeholder="Søk på kunde eller lokale..."
+            style={{ maxWidth: 260 }}
+          />
+        </div>
+        {offers.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud funnet.</p>}
         {offers.map((offer) => {
           const offerWaiterCost = (offer.waiterHours || 0) * data.settings.waiterHourlyRate + (offer.waiterAfterMidnightHours || 0) * data.settings.waiterAfterMidnightHourlyRate;
           const offerTotal = offer.venuePrice
@@ -6098,7 +6130,6 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
                 <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
                 <br />
                 <small style={{ color: "#64748b" }}>Total: {currency(offerTotal)}</small>
-              {offer.note && <><br /><small style={{ color: "#64748b" }}>{offer.note.replace(/<[^>]*>/g, "").slice(0, 80)}{offer.note.length > 80 ? "..." : ""}</small></>}              
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
