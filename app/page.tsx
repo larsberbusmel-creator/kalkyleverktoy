@@ -5891,7 +5891,7 @@ alert("Tilbud lagret!");
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
-@page{size:A4;margin:14mm}
+@page{size:A4;margin:14mm;margin-top:14mm}html{-webkit-print-color-adjust:exact}
 body{font-family:Arial,sans-serif;color:#111827;padding:32px;line-height:1.5}
 .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
 .logo{height:90px;width:auto;object-fit:contain}
@@ -5907,7 +5907,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
 .disclaimer{font-size:10px;color:#94a3b8;margin-top:8px;text-align:center}
 .footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
-@media print{button{display:none}body{padding:0}.page-break{page-break-before:always}}</style></head><body>
+@media print{button{display:none}body{padding:0}.page-break{page-break-before:always}}*{-webkit-print-color-adjust:exact}</style></head><body>
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
 <div class="header">
   <img src="/logo.png" class="logo" />
@@ -5921,7 +5921,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   <p><b>Kunde:</b> ${escapeHtml(rental.customer)}</p>
   <p><b>Lokale:</b> ${escapeHtml(venueName)}</p>
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
-  ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note)}</p>` : ""}
+${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim())}</p>` : ""}
 </div>
 <div class="page-break"></div><h2>Spesifikasjon</h2>
 <table>
