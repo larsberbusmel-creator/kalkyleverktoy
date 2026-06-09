@@ -841,24 +841,44 @@ return (
         display: none;
       }
 
-      @media (max-width: 768px) {
-        .sidebar { display: none; }
-        .mobile-topbar {
-          display: flex;
-          align-items: center;
-          position: sticky;
-          top: 0;
-          z-index: 100;
-          background: white;
-          border-bottom: 1px solid #e2e8f0;
-          padding: 8px 12px;
-          width: 100%;
-        }
-        .main-content {
-          padding: 10px 10px 0;
-          width: 100%;
-        }
-      }
+     @media (max-width: 768px) {
+  .sidebar { display: none; }
+  
+  /* Flytt topbar ut av flex-containeren visuelt */
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: white;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 8px 12px;
+    width: 100%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  
+  /* Skyv innhold ned slik at det ikke skjules bak topbar */
+  .main-content {
+    padding: 70px 10px 0;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Hindre horisontal scrolling */
+  body, main {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+  
+  /* Flex-container skal ikke scrolle horisontalt */
+  div[style*="display: flex"] {
+    max-width: 100vw;
+  }
+}
     `}</style>
   </main>
 );
