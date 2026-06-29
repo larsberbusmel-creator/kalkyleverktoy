@@ -1926,12 +1926,14 @@ const [line, setLine] = useState<{
   amount: string;
   unit: ProductLine["unit"];
   wastePercent: string;
+  groupLabel: string;
 }>({
   itemType: "material",
   itemId: "",
   amount: "0",
   unit: "kg",
   wastePercent: "",
+  groupLabel: "",
 });
 const [lineSearch, setLineSearch] = useState("");
   const [packLine, setPackLine] = useState({ packagingId: "", quantity: "1" });
@@ -2180,6 +2182,7 @@ function addLine() {
       amount: Number(line.amount) || 0,
       unit: line.unit,
       wastePercent: Number(line.wastePercent || 0),
+      groupLabel: line.groupLabel.trim() || undefined,
     },
   ]);
 
@@ -2189,6 +2192,7 @@ function addLine() {
     amount: "0",
     unit: "kg",
     wastePercent: "0",
+    groupLabel: line.groupLabel,
   });
 
   setLineSearch("");
@@ -2941,16 +2945,66 @@ th{background:#f3f4f6}
   onChange={(e) => setLine({ ...line, wastePercent: e.target.value })}
   placeholder="Svinn %"
 />
-            <select value={line.unit} onChange={(e) => setLine({ ...line, unit: e.target.value as ProductLine["unit"] })}>
+           <select value={line.unit} onChange={(e) => setLine({ ...line, unit: e.target.value as ProductLine["unit"] })}>
               <option value="kg">kg</option>
               <option value="liter">liter</option>
               <option value="stk">stk</option>
               <option value="porsjoner">porsjoner</option>
             </select>
+            <input
+              value={line.groupLabel}
+              onChange={(e) => setLine({ ...line, groupLabel: e.target.value })}
+              placeholder="Gruppe i produksjon (valgfritt), f.eks. Albondigas"
+            />
             <button className="btn" onClick={addLine}>Legg til</button>
           </div>
+          <p style={{ color: "#64748b", fontSize: 13, marginTop: -6 }}>
+            Bruk samme gruppenavn på flere linjer (f.eks. "Albondigas") for å samle dem under en egen overskrift i produksjonsgrunnlaget. Stå tomt for vanlig flat liste.
+          </p>
 
-          <table>
+         <table>
+            <thead>
+  <tr>
+    <th>Type</th>
+    <th>Navn</th>
+    <th>Mengde</th>
+    <th>Svinn %</th>
+    <th>Enhet</th>
+    <th>Gruppe</th>
+    <th>Kost</th>
+    <th></th>
+  </tr>
+</thead>
+            <tbody>
+              {draftLines.map((l, i) => (
+                <tr key={i}>
+                  <td>
+                    <select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}>
+                      <option value="material">Råvare</option>
+                      <option value="recipe">Grunnoppskrift</option>
+                      <option value="product">Produkt</option>
+                    </select>
+                  </td>
+                  <td><input value={lineItemName(l.itemType, l.itemId)} readOnly /><small style={{ color: "#64748b" }}>Endre ved å slette/legge inn ny linje</small></td>
+                  <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
+                  <td>
+  <input
+    type="number"
+    value={(l as any).wastePercent || ""}
+    onChange={(e) =>
+      updateDraftLine(i, { wastePercent: Number(e.target.value) || 0 })
+    }
+    placeholder="%"
+  />
+</td>
+                  <td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
+                  <td><input value={l.groupLabel || ""} onChange={(e) => updateDraftLine(i, { groupLabel: e.target.value || undefined })} placeholder="-" style={{ minWidth: 100 }} /></td>
+                  <td>{currency(lineCost(l))}</td>
+                  <td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table><table>
             <thead>
   <tr>
     <th>Type</th>
