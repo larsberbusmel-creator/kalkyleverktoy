@@ -5499,7 +5499,21 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   function updateLocationCount(materialId: string, location: string, packages: number, loose: number) {
     const material = data.materials.find((m) => m.id === materialId);
     const existing = (counts[materialId] as any) || {};
-    const newLocations = { ...(existing.locations || {}), [location]: { packages, loose } };
+    const validLocations = categoryLocations[material?.category || ""] || [];
+
+    // Når brukeren bevisst lagrer en verdi for det FØRSTE gyldige stedet, rydder vi samtidig opp i
+    // eventuelle "foreldreløse" steder (f.eks. gammel "Lager"-data) fra samme objekt, slik at de ikke
+    // teller dobbelt og ikke lenger dukker opp som en del av den "lesbare" sammenslåingen senere.
+    const oldLocations = existing.locations || {};
+    const orphanedKeys = Object.keys(oldLocations).filter((loc) => !validLocations.includes(loc));
+    const isFirstValidLocation = validLocations[0] === location;
+
+    const newLocations: Record<string, { packages: number; loose: number }> = { ...oldLocations };
+    if (isFirstValidLocation && orphanedKeys.length > 0) {
+      orphanedKeys.forEach((loc) => delete newLocations[loc]);
+    }
+    newLocations[location] = { packages, loose };
+
     const totalPackages = Object.values(newLocations).reduce((s: number, l: any) => s + (l.packages || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
     updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: material?.packagePrice || 0, pricePerUnit: material?.pricePerUnit || 0, locations: newLocations } } } } });
