@@ -5304,6 +5304,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const [inventoryPage, setInventoryPage] = useState(1);
   const [showInventoryStats, setShowInventoryStats] = useState(false);
   const [expandedMobileId, setExpandedMobileId] = useState<string | null>(null);
+  const [showAllLocations, setShowAllLocations] = useState(false);
   const pageSize = 50;
 
   function toggleMobileCard(id: string) {
@@ -5854,7 +5855,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                 <div key={loc} style={{ marginTop: 14 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, color: "#475569", marginBottom: 8, padding: "4px 10px", background: "#f1f5f9", borderRadius: 8, display: "inline-block" }}>📍 {loc}</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <label style={{ fontSize: 13 }}>Pakker
+                    <label style={{ fontSize: 13 }}>Kasser
                       <input
                         type="number" inputMode="numeric" disabled={isLocked}
                         value={lv.packages}
@@ -6140,7 +6141,11 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
           } else {
             updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: false, items: counts } } });
           }
-        }}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>        <button className="btn active" onClick={exportInventoryXlsx}>Eksporter XLSX</button>
+        }}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>
+        <button className="btn active" onClick={exportInventoryXlsx}>Eksporter XLSX</button>
+        <button className={showAllLocations ? "btn active" : "btn"} onClick={() => setShowAllLocations(!showAllLocations)} style={{ marginLeft: "auto" }}>
+          {showAllLocations ? "Kompakt visning" : "Vis alle steder (PC)"}
+        </button>
       </div>
 
       <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} placeholder="Søk råvare eller produkt" style={{ fontSize: 16, padding: "12px 14px" }} />
@@ -6179,8 +6184,8 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         })}
       </div>
 
-      <div className="inventory-desktop-view">
-        {egenprodusertCategories.map((bucket) => {
+<div className={showAllLocations ? "inventory-desktop-view wide" : "inventory-desktop-view"}>
+          {egenprodusertCategories.map((bucket) => {
           if (inventoryCategoryFilter !== "Alle" && inventoryCategoryFilter !== "Mat" && inventoryCategoryFilter !== bucket) return null;
           const locations = categoryLocations[bucket] || ["Lager"];
           const bucketProducts = data.products.filter((p) => p.category === bucket).filter((p) => inventorySearch === "" || p.name.toLowerCase().includes(inventorySearch.toLowerCase()));
@@ -6227,7 +6232,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                 <table style={{ marginTop: 0 }}>
                   <thead>
                     <tr><th style={{ minWidth: 200 }}>Vare</th><th>Råvarekost pr pk</th><th>Pakning</th>{locations.map((loc) => <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>)}<th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn</th><th style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9" }}>Forrige mnd</th><th>Verdi</th></tr>
-                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-p`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Pakker</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>enheter</th><th style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #94a3b8", textAlign: "center", background: "#f1f5f9" }}>enheter</th><th></th></tr>
+                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-p`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Kasser</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>enheter</th><th style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #94a3b8", textAlign: "center", background: "#f1f5f9" }}>enheter</th><th></th></tr>
                   </thead>
                   <tbody>
                     {materials.map((m) => { const value = materialInventoryValue(m); const wasteAmt = getMaterialWaste(m.id); const prevTotal = getPrevMaterialTotal(m.id); return (
@@ -6255,7 +6260,9 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
       <style jsx global>{`
         .inventory-mobile-view { display: none; }
-        .inventory-desktop-view { display: block; }
+        .inventory-desktop-view { display: block; max-width: 100%; overflow-x: auto; }
+        .inventory-desktop-view:not(.wide) table { max-width: 900px; }
+        .inventory-desktop-view.wide table { min-width: max-content; }
         @media (max-width: 768px) {
           .inventory-mobile-view { display: block; }
           .inventory-desktop-view { display: none; }
