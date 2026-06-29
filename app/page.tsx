@@ -175,6 +175,7 @@ type ProfitabilityInput = {
 
 type InventoryMonthData = {
   locked?: boolean;
+  pricesFrozen?: boolean;
   waste?: Record<string, number>;
   items: Record<string, InventoryCount>;
   kassasvinn?: number;
@@ -5398,7 +5399,10 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   function updateMaterialWaste(materialId: string, wasteAmount: number) {
     const material = data.materials.find((m) => m.id === materialId);
     const existing = (counts[materialId] as any) || {};
-    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packagePrice: material?.packagePrice || existing.packagePrice || 0, pricePerUnit: material?.pricePerUnit || existing.pricePerUnit || 0, waste: wasteAmount } } } } });
+    const pricesAreFrozen = !!currentInventory.pricesFrozen;
+    const packagePrice = pricesAreFrozen ? existing.packagePrice : (material?.packagePrice || existing.packagePrice || 0);
+    const pricePerUnit = pricesAreFrozen ? existing.pricePerUnit : (material?.pricePerUnit || existing.pricePerUnit || 0);
+    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packagePrice, pricePerUnit, waste: wasteAmount } } } } });
   }
   function getProductWaste(productId: string): number { return (counts[`product_${productId}`] as any)?.waste || 0; }
   function updateProductWaste(product: Product, wasteAmount: number) {
@@ -5501,6 +5505,12 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     const existing = (counts[materialId] as any) || {};
     const validLocations = categoryLocations[material?.category || ""] || [];
 
+    // Hvis prisene allerede er frosset for denne måneden (lås har vært trykket minst én gang),
+    // skal IKKE prisen oppdateres til dagens pris selv om antall endres etter en opplåsing.
+    const pricesAreFrozen = !!currentInventory.pricesFrozen;
+    const frozenPackagePrice = pricesAreFrozen ? existing.packagePrice : (material?.packagePrice || 0);
+    const frozenPricePerUnit = pricesAreFrozen ? existing.pricePerUnit : (material?.pricePerUnit || 0);
+
     // Når brukeren bevisst lagrer en verdi for det FØRSTE gyldige stedet, rydder vi samtidig opp i
     // eventuelle "foreldreløse" steder (f.eks. gammel "Lager"-data) fra samme objekt, slik at de ikke
     // teller dobbelt og ikke lenger dukker opp som en del av den "lesbare" sammenslåingen senere.
@@ -5516,7 +5526,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
     const totalPackages = Object.values(newLocations).reduce((s: number, l: any) => s + (l.packages || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: material?.packagePrice || 0, pricePerUnit: material?.pricePerUnit || 0, locations: newLocations } } } } });
+    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: frozenPackagePrice, pricePerUnit: frozenPricePerUnit, locations: newLocations } } } } });
   }
 
   function materialInventoryValue(m: Material) {
@@ -5550,8 +5560,9 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [key]: { ...existing, packages: totalCases, loose: totalLoose, packagePrice: 0, pricePerUnit: 0, locations: newLocations } } } } });
   }
 
-  function productInventoryValue(product: Product, unitCost: number): number {
+  function productInventoryValue(product: Product, liveUnitCost: number): number {
     const c = counts[`product_${product.id}`] as any || { packages: 0, loose: 0 };
+    const unitCost = currentInventory.pricesFrozen && c.frozenUnitCost != null ? c.frozenUnitCost : liveUnitCost;
     return (c.packages * Number(product.unitsPerCase || 1) + c.loose) * unitCost;
   }
   function egenprodusertBucketValue(bucket: string): number { return data.products.filter((p) => p.category === bucket).reduce((sum, p) => sum + productInventoryValue(p, productUnitCost(p)), 0); }
@@ -5581,9 +5592,14 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const groupedMaterials = allMaterialCategories.reduce((acc, bucket) => { const items = visibleMaterials.filter((m) => m.category === bucket); if (items.length > 0) acc[bucket] = items; return acc; }, {} as Record<string, Material[]>);
 
   function valueForBucketInMonth(monthKey: string, bucket: string) {
+    const monthIsFrozen = countsByMonth[monthKey]?.pricesFrozen;
     if (egenprodusertCategories.includes(bucket)) {
       const items = countsByMonth[monthKey]?.items || {};
-      return data.products.filter((p) => p.category === bucket).reduce((sum, p) => { const c = items[`product_${p.id}`] as any || { packages: 0, loose: 0 }; return sum + (c.packages * Number(p.unitsPerCase || 1) + c.loose) * productUnitCost(p); }, 0);
+      return data.products.filter((p) => p.category === bucket).reduce((sum, p) => {
+        const c = items[`product_${p.id}`] as any || { packages: 0, loose: 0 };
+        const unitCost = monthIsFrozen && c.frozenUnitCost != null ? c.frozenUnitCost : productUnitCost(p);
+        return sum + (c.packages * Number(p.unitsPerCase || 1) + c.loose) * unitCost;
+      }, 0);
     }
     const items = countsByMonth[monthKey]?.items || {};
     return data.materials.reduce((sum, m) => { if (!belongsToBucket(m, bucket)) return sum; const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit }; return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit); }, 0);
@@ -6103,8 +6119,28 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
-        <button className="btn" onClick={() => updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: !isLocked, items: counts } } })}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>
-        <button className="btn active" onClick={exportInventoryXlsx}>Eksporter XLSX</button>
+<button className="btn" onClick={() => {
+          if (!isLocked) {
+            // Lås måned: frys alle gjeldende priser (live → snapshot) for både råvarer og egenproduserte produkter
+            const frozenItems: Record<string, any> = { ...counts };
+            data.materials.forEach((m) => {
+              const existing = frozenItems[m.id];
+              if (existing) {
+                frozenItems[m.id] = { ...existing, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
+              }
+            });
+            data.products.filter((p) => egenprodusertCategories.includes(p.category)).forEach((p) => {
+              const key = `product_${p.id}`;
+              const existing = frozenItems[key];
+              if (existing) {
+                frozenItems[key] = { ...existing, frozenUnitCost: productUnitCost(p) };
+              }
+            });
+            updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: true, pricesFrozen: true, items: frozenItems } } });
+          } else {
+            updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: false, items: counts } } });
+          }
+        }}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>        <button className="btn active" onClick={exportInventoryXlsx}>Eksporter XLSX</button>
       </div>
 
       <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} placeholder="Søk råvare eller produkt" style={{ fontSize: 16, padding: "12px 14px" }} />
