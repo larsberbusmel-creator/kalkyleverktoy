@@ -7,8 +7,10 @@ import { supabase } from "@/lib/supabase";
 type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
-type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert";
-type ProductSubType = "" | "brød" | "søtbakst" | "annet" | "hel" | "delt";
+type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert" | "selskapsmeny";
+
+type MenuCourseOption = { id: string; productId: string };
+type MenuCourse = { id: string; name: string; options: MenuCourseOption[] };type ProductSubType = "" | "brød" | "søtbakst" | "annet" | "hel" | "delt";
 
 type Material = {
   id: string;
@@ -95,10 +97,11 @@ type Product = {
   recipeYieldAmount?: number;
   unitWeightKg?: number;
   unitsPerCase?: number;
+  menuCourses?: MenuCourse[];
 };
 
-
-type OrderLine = { productId: string; quantity: number };
+type MenuCourseSelection = { courseId: string; productId: string; guestCount: number };
+type OrderLine = { productId: string; quantity: number; menuSelections?: MenuCourseSelection[] };
 
 type Order = {
    id: string;
@@ -164,11 +167,18 @@ type Settings = {
 
 type LocationCount = { packages: number; loose: number };
 type InventoryCount = { packages: number; loose: number; packagePrice: number; pricePerUnit: number; locations?: Record<string, LocationCount> };
+type ProfitabilityInput = {
+  matSalesNetto?: number;
+  deliSalesNetto?: number;
+  favnVarekostPct?: number;
+};
+
 type InventoryMonthData = {
   locked?: boolean;
   waste?: Record<string, number>;
   items: Record<string, InventoryCount>;
   kassasvinn?: number;
+  profitability?: ProfitabilityInput;
 };
 
 type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean };
@@ -262,7 +272,7 @@ const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
 const defaultAllergens = ["Gluten", "Hvete", "Rug", "Spelt", "Bygg", "Egg", "Melk", "Laktose", "Skalldyr", "Bløtdyr", "Selleri", "Lupin", "Sulfitt", "Nøtter", "Peanøtter", "Sesam", "Soya"];
 const defaultMaterialCategories = ["Mat", "Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
 const defaultMenuCategories = ["Catering", "Selskap", "Bryllup", "Konfirmasjon", "Firma"];
-const defaultProductCategories = ["Grunnoppskrift", "Brød", "Søtbakst", "Cateringmeny", "Påsmurt", "Egenprodusert", "Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
+const defaultProductCategories = ["Grunnoppskrift", "Brød", "Søtbakst", "Cateringmeny", "Påsmurt", "Egenprodusert", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Selskapsmeny"];
 const defaultRentalAddons: RentalAddon[] = [
   { id: "bar-oppsett", name: "Oppsett av bar", price: 5000 },
   { id: "toyservietter", name: "Tøyservietter", price: 35 },
@@ -1909,6 +1919,9 @@ const [line, setLine] = useState<{
 });
 const [lineSearch, setLineSearch] = useState("");
   const [packLine, setPackLine] = useState({ packagingId: "", quantity: "1" });
+  const [draftMenuCourses, setDraftMenuCourses] = useState<MenuCourse[]>([]);
+  const [newCourseName, setNewCourseName] = useState("");
+  const [courseOptionSearch, setCourseOptionSearch] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Alle");
   const [productPage, setProductPage] = useState(1);
@@ -1960,6 +1973,7 @@ productNumber: form.productNumber || getNextProductNumber(form.category),    nam
     recipeYieldAmount: calculatedRecipeYieldAmount(draftLines) || 1,
 unitWeightKg: Number(form.unitWeightKg) || 0,
   unitsPerCase: Number(form.unitsPerCase) || undefined,
+  menuCourses: form.type === "selskapsmeny" ? draftMenuCourses : undefined,
   };
 
   const activeProduct = mode === "view" ? selected : draftProduct;
@@ -1989,6 +2003,7 @@ unitWeightKg: "1",
   unitsPerCase: "",
 });    setDraftLines([]);
     setDraftPackaging([]);
+    setDraftMenuCourses([]);
     setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg", wastePercent: "" });
     setLineSearch("");
   }
@@ -2000,6 +2015,7 @@ unitWeightKg: "1",
       cateringmeny: { category: "Cateringmeny", yieldUnit: "porsjoner" },
       pasmuurt: { category: "Påsmurt", yieldUnit: "stk" },
       egenprodusert: { category: "Egenprodusert", yieldUnit: "stk" },
+      selskapsmeny: { category: "Selskapsmeny", yieldUnit: "porsjoner" },
     };
 setForm((f) => {
   const next = { ...f, type, subType: "", ...(map[type] as any) };
@@ -2057,6 +2073,7 @@ unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
     });
     setDraftLines(p.lines.map((l) => ({ ...l })));
     setDraftPackaging(p.packaging.map((x) => ({ ...x })));
+    setDraftMenuCourses((p.menuCourses || []).map((c) => ({ ...c, options: c.options.map((o) => ({ ...o })) })));
     setSelectedId(p.id);
     setMode("edit");
   }
@@ -2165,6 +2182,51 @@ function addLine() {
     if (!packLine.packagingId) return;
     setDraftPackaging((prev) => [...prev, { packagingId: packLine.packagingId, quantity: Number(packLine.quantity) || 0 }]);
     setPackLine({ packagingId: "", quantity: "1" });
+  }
+
+  // ── Selskapsmeny: kurs/rettkategorier ───────────────────────────────────
+  function addMenuCourse() {
+    if (!newCourseName.trim()) return;
+    setDraftMenuCourses((prev) => [...prev, { id: `course-${Date.now()}`, name: newCourseName.trim(), options: [] }]);
+    setNewCourseName("");
+  }
+
+  function removeMenuCourse(courseId: string) {
+    setDraftMenuCourses((prev) => prev.filter((c) => c.id !== courseId));
+  }
+
+  function addCourseOption(courseId: string, productId: string) {
+    if (!productId) return;
+    setDraftMenuCourses((prev) => prev.map((c) => {
+      if (c.id !== courseId) return c;
+      if (c.options.some((o) => o.productId === productId)) return c;
+      return { ...c, options: [...c.options, { id: `opt-${Date.now()}`, productId }] };
+    }));
+    setCourseOptionSearch((prev) => ({ ...prev, [courseId]: "" }));
+  }
+
+  function removeCourseOption(courseId: string, optionId: string) {
+    setDraftMenuCourses((prev) => prev.map((c) => c.id !== courseId ? c : { ...c, options: c.options.filter((o) => o.id !== optionId) }));
+  }
+
+  // Lønnsomhet for selskapsmeny: vis varekost%/margin basert på laveste, høyeste og gjennomsnittlig kost-alternativ per kurs
+  function menuCourseCostRange(courses: MenuCourse[]): { min: number; max: number; avg: number } {
+    if (!courses.length) return { min: 0, max: 0, avg: 0 };
+    // For hver kombinasjon er det for mange permutasjoner å regne fullt ut - vi bruker i stedet
+    // summen av (laveste kost per kurs) og summen av (høyeste kost per kurs) som min/max-grense,
+    // og summen av gjennomsnittlig kost per kurs som "typisk" forventet kost.
+    let minSum = 0, maxSum = 0, avgSum = 0;
+    courses.forEach((course) => {
+      const costs = course.options.map((o) => {
+        const p = data.products.find((x) => x.id === o.productId);
+        return p ? productUnitCost(p) : 0;
+      });
+      if (!costs.length) return;
+      minSum += Math.min(...costs);
+      maxSum += Math.max(...costs);
+      avgSum += costs.reduce((s, c) => s + c, 0) / costs.length;
+    });
+    return { min: minSum, max: maxSum, avg: avgSum };
   }
 
   function lineCost(l: ProductLine) {
@@ -2721,6 +2783,7 @@ th{background:#f3f4f6}
       <option value="cateringmeny">Cateringmeny</option>
       <option value="pasmuurt">Påsmurt</option>
       <option value="egenprodusert">Egenprodusert</option>
+      <option value="selskapsmeny">Selskapsmeny</option>
     </select>
   </label>
 
@@ -2932,6 +2995,91 @@ th{background:#f3f4f6}
             </table>
           </div>
         )}
+
+        {form.type === "selskapsmeny" && (() => {
+          const costRange = menuCourseCostRange(draftMenuCourses);
+          const priceExVat = exVatFromIncVat(Number(form.customerPrice) || 0, data.settings.foodVat);
+          const minMargin = marginPercentFrom(priceExVat, costRange.min);
+          const maxMargin = marginPercentFrom(priceExVat, costRange.max);
+          const avgMargin = marginPercentFrom(priceExVat, costRange.avg);
+          return (
+            <div className="soft-box">
+              <h2>Meny-oppbygging (forrett/hovedrett/dessert)</h2>
+              <p style={{ color: "#64748b", fontSize: 13 }}>
+                Bygg menyen av rettkategorier. Hver kategori kan ha flere alternativer (eksisterende kalkulerte produkter).
+                Ved bestilling kan kunden velge hvilket alternativ som gjelder, og produksjonsgrunnlaget regnes ut fra faktisk valg.
+              </p>
+
+              <div className="form-grid three">
+                <input value={newCourseName} onChange={(e) => setNewCourseName(e.target.value)} placeholder="Ny rettkategori, f.eks. Forrett" />
+                <button className="btn active" onClick={addMenuCourse}>Legg til rettkategori</button>
+                <div />
+              </div>
+
+              {draftMenuCourses.map((course) => (
+                <div key={course.id} className="soft-box" style={{ background: "white" }}>
+                  <div className="between">
+                    <h3>{course.name}</h3>
+                    <button className="link danger" onClick={() => removeMenuCourse(course.id)}>Slett kategori</button>
+                  </div>
+
+                  <div className="search-picker">
+                    <input
+                      value={courseOptionSearch[course.id] || ""}
+                      onChange={(e) => setCourseOptionSearch((prev) => ({ ...prev, [course.id]: e.target.value }))}
+                      placeholder="Søk opp produkt å legge til som alternativ"
+                    />
+                    {courseOptionSearch[course.id] && (
+                      <div className="search-dropdown inline">
+                        {data.products
+                          .filter((p) => p.id !== selected?.id && p.type !== "selskapsmeny")
+                          .filter((p) => p.name.toLowerCase().includes((courseOptionSearch[course.id] || "").toLowerCase()))
+                          .slice(0, 12)
+                          .map((p) => (
+                            <button key={p.id} type="button" className="search-result" onClick={() => addCourseOption(course.id, p.id)}>
+                              <b>{p.name}</b>
+                              <small>{p.category} · {currency(productUnitCost(p))}/{p.yieldUnit}</small>
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <table>
+                    <thead><tr><th>Alternativ</th><th>Kost/enhet</th><th></th></tr></thead>
+                    <tbody>
+                      {course.options.map((opt) => {
+                        const p = data.products.find((x) => x.id === opt.productId);
+                        return (
+                          <tr key={opt.id}>
+                            <td>{p?.name || "Ukjent produkt"}</td>
+                            <td>{currency(p ? productUnitCost(p) : 0)}</td>
+                            <td><button className="link danger" onClick={() => removeCourseOption(course.id, opt.id)}>Slett</button></td>
+                          </tr>
+                        );
+                      })}
+                      {course.options.length === 0 && <tr><td colSpan={3} style={{ color: "#64748b" }}>Ingen alternativer lagt til ennå.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+
+              {draftMenuCourses.length > 0 && (
+                <div className="metric-row">
+                  <Metric label="Laveste varekost (kost-effektivt valg)" value={currency(costRange.min)} />
+                  <Metric label="Høyeste varekost (dyreste valg)" value={currency(costRange.max)} />
+                  <Metric label="Typisk varekost (snitt)" value={currency(costRange.avg)} dark />
+                  <Metric label="Margin ved typisk valg" value={`${num(avgMargin, 1)} %`} tone={marginTone(avgMargin)} />
+                </div>
+              )}
+              {draftMenuCourses.length > 0 && (
+                <p style={{ color: "#64748b", fontSize: 13 }}>
+                  Med fast pris {currency(Number(form.customerPrice) || 0)} blir margin mellom {num(minMargin, 1)}% (dyreste valg) og {num(maxMargin, 1)}% (billigste valg), typisk {num(avgMargin, 1)}%.
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </section>
     );
   }
@@ -3007,7 +3155,7 @@ th{background:#f3f4f6}
               </td>
               <td>{p.type}</td>
               <td>{p.category}</td>
-              <td>{currency(productUnitCost(p))}</td>
+              <td>{p.type === "selskapsmeny" ? (() => { const r = menuCourseCostRange(p.menuCourses || []); return `${currency(r.min)} – ${currency(r.max)}`; })() : currency(productUnitCost(p))}</td>
               <td>{currency(p.customerPrice)}</td>
               <td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td>
               <td>
@@ -3296,6 +3444,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
   const [form, setForm] = useState<Order>(emptyOrder());
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [lineToAdd, setLineToAdd] = useState({ productId: "", quantity: 1 });
+  const [menuSelectionDraft, setMenuSelectionDraft] = useState<Record<string, { productId: string; guestCount: number }[]>>({});
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [showWebshopImport, setShowWebshopImport] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
@@ -3473,6 +3622,30 @@ function OrdersTab({ data, updateData, productAllergens }: {
     setForm({ ...form, orderLines: form.orderLines.filter((_, i) => i !== index) });
   }
 
+  // ── Selskapsmeny: fordeling av gjester per rettkategori ──────────────────
+  function initMenuSelectionDraft(courseId: string) {
+    setMenuSelectionDraft((prev) => prev[courseId] ? prev : { ...prev, [courseId]: [{ productId: "", guestCount: lineToAdd.quantity || 1 }] });
+  }
+
+  function addMenuSelectionRow(courseId: string) {
+    setMenuSelectionDraft((prev) => ({ ...prev, [courseId]: [...(prev[courseId] || []), { productId: "", guestCount: 0 }] }));
+  }
+
+  function removeMenuSelectionRow(courseId: string, index: number) {
+    setMenuSelectionDraft((prev) => ({ ...prev, [courseId]: (prev[courseId] || []).filter((_, i) => i !== index) }));
+  }
+
+  function updateMenuSelectionRow(courseId: string, index: number, patch: Partial<{ productId: string; guestCount: number }>) {
+    setMenuSelectionDraft((prev) => ({
+      ...prev,
+      [courseId]: (prev[courseId] || []).map((row, i) => i === index ? { ...row, ...patch } : row),
+    }));
+  }
+
+  function menuSelectionTotalGuests(courseId: string): number {
+    return (menuSelectionDraft[courseId] || []).reduce((sum, row) => sum + (Number(row.guestCount) || 0), 0);
+  }
+
   function saveOrder() {
     const cleanLines = form.orderLines.filter((l) => l.productId && Number(l.quantity) > 0);
     if (!form.customer.trim() && form.customerType === "privat") return alert("Legg inn kundenavn.");
@@ -3533,8 +3706,21 @@ function OrdersTab({ data, updateData, productAllergens }: {
     return orderSubtotalIncVat(order) - orderDiscountAmount(order);
   }
 
-  function expandProductForProduction(product: Product, multiplier: number, path: string[] = []): { name: string; amount: number; unit: string; source: string }[] {
+ function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[]): { name: string; amount: number; unit: string; source: string }[] {
     if (path.includes(product.id)) return [];
+
+    // Selskapsmeny: bruk faktiske valgte alternativer per rettkategori, hver vektet med antall gjester som valgte det
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
+      if (!menuSelections || !menuSelections.length) {
+        return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name }];
+      }
+      return menuSelections.flatMap((sel) => {
+        const chosenProduct = data.products.find((x) => x.id === sel.productId);
+        if (!chosenProduct) return [];
+        return expandProductForProduction(chosenProduct, sel.guestCount, [...path, product.id]);
+      });
+    }
+
     if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name }];
     return product.lines.flatMap((line) => {
       const amount = line.amount * multiplier;
@@ -3548,7 +3734,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
   function productionRowsForOrder(order: Order) {
     return order.orderLines.flatMap((line) => {
       const product = data.products.find((p) => p.id === line.productId);
-      return product ? expandProductForProduction(product, Number(line.quantity) || 0) : [];
+      return product ? expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections) : [];
     });
   }
 
@@ -3842,17 +4028,99 @@ function OrdersTab({ data, updateData, productAllergens }: {
           )}
           <h3>Legg til produkt / meny</h3>
           <div className="form-grid three">
-            <select value={lineToAdd.productId} onChange={(e) => setLineToAdd({ ...lineToAdd, productId: e.target.value })}>
+            <select value={lineToAdd.productId} onChange={(e) => {
+              setLineToAdd({ ...lineToAdd, productId: e.target.value });
+              setMenuSelectionDraft({});
+            }}>
               <option value="">Velg produkt</option>
               {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <input type="number" value={lineToAdd.quantity} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
-            <button className="btn" onClick={() => { if (!lineToAdd.productId) return; setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] }); setLineToAdd({ productId: "", quantity: form.guests || 1 }); }}>Legg til</button>
+            <button className="btn" onClick={() => {
+              if (!lineToAdd.productId) return;
+              const selectedProduct = data.products.find((p) => p.id === lineToAdd.productId);
+              if (selectedProduct?.type === "selskapsmeny" && (selectedProduct.menuCourses || []).length > 0) {
+                const menuSelections: MenuCourseSelection[] = (selectedProduct.menuCourses || []).flatMap((course) =>
+                  (menuSelectionDraft[course.id] || [])
+                    .filter((row) => row.productId && row.guestCount > 0)
+                    .map((row) => ({ courseId: course.id, productId: row.productId, guestCount: Number(row.guestCount) }))
+                );
+                setForm({ ...form, orderLines: [...form.orderLines, { ...lineToAdd, menuSelections }] });
+              } else {
+                setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] });
+              }
+              setLineToAdd({ productId: "", quantity: form.guests || 1 });
+              setMenuSelectionDraft({});
+            }}>Legg til</button>
           </div>
+
+          {(() => {
+            const selectedForAdd = data.products.find((p) => p.id === lineToAdd.productId);
+            if (selectedForAdd?.type !== "selskapsmeny" || !(selectedForAdd.menuCourses || []).length) return null;
+            return (
+              <div className="soft-box">
+                <h3>Fordel gjester per rett ({selectedForAdd.name})</h3>
+                <p style={{ color: "#64748b", fontSize: 13 }}>Totalt antall gjester for denne menylinjen er {lineToAdd.quantity}. Fordel dette tallet per rettkategori under.</p>
+                {(selectedForAdd.menuCourses || []).map((course) => {
+                  initMenuSelectionDraft(course.id);
+                  const rows = menuSelectionDraft[course.id] || [];
+                  const totalGuests = menuSelectionTotalGuests(course.id);
+                  const mismatch = totalGuests !== lineToAdd.quantity;
+                  return (
+                    <div key={course.id} style={{ marginBottom: 14 }}>
+                      <div className="between">
+                        <b>{course.name}</b>
+                        <span style={{ color: mismatch ? "#dc2626" : "#166534", fontSize: 13, fontWeight: 700 }}>
+                          {totalGuests} / {lineToAdd.quantity} gjester fordelt
+                        </span>
+                      </div>
+                      {rows.map((row, i) => (
+                        <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
+                          <select value={row.productId} onChange={(e) => updateMenuSelectionRow(course.id, i, { productId: e.target.value })}>
+                            <option value="">Velg alternativ</option>
+                            {course.options.map((opt) => {
+                              const p = data.products.find((x) => x.id === opt.productId);
+                              return <option key={opt.id} value={opt.productId}>{p?.name || "Ukjent"}</option>;
+                            })}
+                          </select>
+                          <input type="number" value={row.guestCount || ""} onChange={(e) => updateMenuSelectionRow(course.id, i, { guestCount: Number(e.target.value) || 0 })} placeholder="Antall gjester" />
+                          <button className="link danger" onClick={() => removeMenuSelectionRow(course.id, i)}>Slett valg</button>
+                        </div>
+                      ))}
+                      <button className="btn" onClick={() => addMenuSelectionRow(course.id)}>+ Legg til alternativ valg</button>
+                      {mismatch && <div className="warning" style={{ marginTop: 8 }}>Summen av fordelte gjester ({totalGuests}) stemmer ikke med totalt antall ({lineToAdd.quantity}) for denne menylinjen.</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
           <h3>Produkter i ordre</h3>
           {form.orderLines.map((line, i) => {
             const product = data.products.find((p) => p.id === line.productId);
-            return <div key={i} className="pill">{line.quantity} × {product?.name}<button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>×</button>{product && <button className="btn" style={{ marginLeft: 8 }} onClick={() => printProductPopup(product)}>Se oppskrift</button>}</div>;
+            return (
+              <div key={i} className="pill" style={{ display: "block", marginBottom: 6 }}>
+                <div>
+                  {line.quantity} × {product?.name}
+                  <button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>×</button>
+                  {product && <button className="btn" style={{ marginLeft: 8 }} onClick={() => printProductPopup(product)}>Se oppskrift</button>}
+                </div>
+                {line.menuSelections && line.menuSelections.length > 0 && (
+                  <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
+                    {(product?.menuCourses || []).map((course) => {
+                      const selections = line.menuSelections!.filter((s) => s.courseId === course.id);
+                      if (!selections.length) return null;
+                      return (
+                        <div key={course.id}>
+                          {course.name}: {selections.map((s) => `${s.guestCount}×${data.products.find((p) => p.id === s.productId)?.name || "?"}`).join(", ")}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
           })}
           <h3>Dietter / hensyn</h3>
           <div className="form-grid four">
@@ -4279,7 +4547,15 @@ button{padding:10px 14px;border-radius:10px;border:1px solid #111827;background:
   }
 
   // ── Skalert oppskrift for ett produkt (brukes i catering-print) ───────────
-  function scaledRecipeHtml(product: Product, quantity: number): string {
+  function scaledRecipeHtml(product: Product, quantity: number, menuSelections?: MenuCourseSelection[]): string {
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
+      if (!menuSelections || !menuSelections.length) return "<p>Ingen menyvalg registrert for denne bestillingen.</p>";
+      return menuSelections.map((sel) => {
+        const chosenProduct = data.products.find((x) => x.id === sel.productId);
+        if (!chosenProduct) return "";
+        return `<div class="recipe-block"><h3>${escapeHtml(product.menuCourses!.find((c) => c.id === sel.courseId)?.name || "Rett")}: ${escapeHtml(chosenProduct.name)} (${sel.guestCount} stk)</h3>${scaledRecipeHtml(chosenProduct, sel.guestCount)}</div>`;
+      }).join("");
+    }
     let html = "";
     product.lines.forEach((pl) => {
       if (pl.itemType === "recipe") {
@@ -4435,7 +4711,7 @@ th{background:#f3f4f6}
     <p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div>
     <div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div>
   </div>
-  ${scaledRecipeHtml(product, ol.quantity)}
+  ${scaledRecipeHtml(product, ol.quantity, ol.menuSelections)}
 </div>`;
   }).join("");
 
@@ -4619,8 +4895,7 @@ ${baseRecipePages}${productPages}${packingPages}`;
       const recipesPages = o.orderLines.map((ol) => {
         const product = data.products.find((p) => p.id === ol.productId);
         if (!product) return "";
-        return `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div></div>${scaledRecipeHtml(product, ol.quantity)}</div>`;
-      }).join("");
+return `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div></div>${scaledRecipeHtml(product, ol.quantity, ol.menuSelections)}</div>`;      }).join("");
 
       return pakkseddel + recipesPages;
     }).join("");
@@ -4988,8 +5263,7 @@ ${orderPages}`;
                             if (!product) return null;
                             return (
                               <button key={i} className="btn" onClick={() => {
-                                const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${l.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)}</b></div></div>${scaledRecipeHtml(product, l.quantity)}</div>`;
-                                printWindow(`Oppskrift: ${product.name}`, body);
+const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${l.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)}</b></div></div>${scaledRecipeHtml(product, l.quantity, l.menuSelections)}</div>`;                                printWindow(`Oppskrift: ${product.name}`, body);
                               }}>
                                 Oppskrift: {product.name}
                               </button>
@@ -5076,6 +5350,26 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const kassasvinn = currentInventory.kassasvinn || 0;
   const [year, month] = inventoryMonth.split("-");
 
+  // Forrige måned (referanse, uredigerbar)
+  const prevMonthKey = (() => {
+    const [y, m] = inventoryMonth.split("-").map(Number);
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  })();
+  const prevInventory = countsByMonth[prevMonthKey];
+  const prevCounts = prevInventory?.items || {};
+
+  function getPrevMaterialTotal(materialId: string): number {
+    const c = prevCounts[materialId] as any;
+    if (!c) return 0;
+    return Number(c.packages || 0) + Number(c.loose || 0);
+  }
+  function getPrevProductTotal(productId: string): number {
+    const c = prevCounts[`product_${productId}`] as any;
+    if (!c) return 0;
+    return Number(c.packages || 0) + Number(c.loose || 0);
+  }
+
   function updateKassasvinn(val: number) {
     updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, kassasvinn: val } } });
   }
@@ -5123,6 +5417,52 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     if (egenprodusertCategories.includes(bucket)) return data.products.filter((p) => p.category === bucket).reduce((sum, p) => sum + productWasteValue(p), 0);
     return data.materials.filter((m) => m.category === bucket).reduce((sum, m) => sum + materialWasteValue(m), 0);
   }
+
+  // ── Lønnsomhetsrapport: Mat vs. Deli ──────────────────────────────────────
+  const profitability = currentInventory.profitability || {};
+
+  function updateProfitability(patch: Partial<ProfitabilityInput>) {
+    updateData({
+      inventoryCounts: {
+        ...countsByMonth,
+        [inventoryMonth]: { ...currentInventory, profitability: { ...profitability, ...patch } },
+      },
+    });
+  }
+
+  // Deli varekost% beregnes live: vektet snitt av (pricePerUnit / retailPriceExVat) for alle Deli-råvarer som har retailPrice satt
+  function deliVarekostPctLive(): number {
+    const deliMaterials = data.materials.filter((m) => m.category === "Deli" && m.retailPrice && m.retailPrice > 0);
+    if (!deliMaterials.length) return 0;
+    let weightedCostSum = 0;
+    let weightedRetailSum = 0;
+    deliMaterials.forEach((m) => {
+      const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
+      if (retailExVat <= 0) return;
+      // Vekt: bruk lagerverdi (kost × telling) om finnes, ellers vekt 1 (enkelt snitt)
+      const c = counts[m.id] as any;
+      const qty = c ? Number(c.packages || 0) * (c.packagePrice ? 1 : 1) + Number(c.loose || 0) : 0;
+      const weight = qty > 0 ? qty * m.pricePerUnit : 1;
+      weightedCostSum += m.pricePerUnit * weight;
+      weightedRetailSum += retailExVat * weight;
+    });
+    if (weightedRetailSum <= 0) return 0;
+    return weightedCostSum / weightedRetailSum;
+  }
+
+  const deliVarekostPct = deliVarekostPctLive();
+  const matSalesNetto = profitability.matSalesNetto || 0;
+  const deliSalesNetto = profitability.deliSalesNetto || 0;
+  const favnVarekostPct = profitability.favnVarekostPct || 0;
+
+  const deliVarekostKr = deliVarekostPct * deliSalesNetto;
+  const totalVarekostKr = favnVarekostPct * (matSalesNetto + deliSalesNetto);
+  const matVarekostKr = totalVarekostKr - deliVarekostKr;
+  const matVarekostPctResult = matSalesNetto > 0 ? matVarekostKr / matSalesNetto : 0;
+  const matBruttoKr = matSalesNetto - matVarekostKr;
+  const deliBruttoKr = deliSalesNetto - deliVarekostKr;
+  const matMarginPct = matSalesNetto > 0 ? matBruttoKr / matSalesNetto : 0;
+  const deliMarginPct = deliSalesNetto > 0 ? deliBruttoKr / deliSalesNetto : 0;
 
   function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
     const item = counts[materialId] as any;
@@ -5440,6 +5780,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
           <div>
             <b style={{ fontSize: 15 }}>{m.name}</b>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{m.packageSize} {m.unit} · {currency(m.packagePrice)} pr pk</div>
+            {getPrevMaterialTotal(m.id) > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Forrige mnd: {getPrevMaterialTotal(m.id)}</div>}
             {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
           </div>
           <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
@@ -5539,6 +5880,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
           <div>
             <b style={{ fontSize: 15 }}>{p.name}</b>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{currency(unitCost)}/stk · {Number(p.unitsPerCase || 1)} stk/eske</div>
+            {getPrevProductTotal(p.id) > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Forrige mnd: {getPrevProductTotal(p.id)} stk</div>}
             {hasData && <div style={{ fontSize: 12, color: "#166534", marginTop: 2, fontWeight: 700 }}>Verdi: {currency(value)}</div>}
           </div>
           <span style={{ color: "#94a3b8", fontSize: 20 }}>{isExpanded ? "▲" : "▼"}</span>
@@ -5649,6 +5991,49 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
         </div>
       </details>
 
+      <details className="soft-box" style={{ padding: 0 }}>
+        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Lønnsomhetsrapport: Mat vs. Deli</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+        </summary>
+        <div style={{ padding: "0 16px 16px" }}>
+          <p style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
+            Fyll inn salgstall fra totalrapporten (Favn) for å splitte varekost mellom kjøkken (mat) og deli.
+            Deli sin varekost% beregnes automatisk fra råvarer i Deli-kategorien (kost ÷ utsalgspris), mat beregnes som resten av Favn sin rapporterte totale varekost%.
+          </p>
+
+          <div className="form-grid three">
+            <label>Mat-salg netto eks. mva (fra Favn, ekskl. deli)
+              <input type="number" value={profitability.matSalesNetto || ""} onChange={(e) => updateProfitability({ matSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
+            </label>
+            <label>Deli-salg netto eks. mva (fra Favn)
+              <input type="number" value={profitability.deliSalesNetto || ""} onChange={(e) => updateProfitability({ deliSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
+            </label>
+            <label>Favn varekost % for "Mat" totalt (mat+deli, fra gauge-diagram)
+              <input type="number" step="0.1" value={profitability.favnVarekostPct ? profitability.favnVarekostPct * 100 : ""} onChange={(e) => updateProfitability({ favnVarekostPct: (Number(e.target.value) || 0) / 100 })} placeholder="F.eks. 31.6" />
+            </label>
+          </div>
+
+          <div className="metric-row">
+            <Metric label="Deli varekost % (live, fra råvarer)" value={`${num(deliVarekostPct * 100, 1)} %`} />
+            <Metric label="Deli varekost kr" value={currency(deliVarekostKr)} />
+            <Metric label="Mat varekost % (residual)" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
+            <Metric label="Mat varekost kr" value={currency(matVarekostKr)} dark />
+          </div>
+
+          <div className="metric-row">
+            <Metric label="Mat bruttofortjeneste" value={currency(matBruttoKr)} />
+            <Metric label="Mat bruttomargin %" value={`${num(matMarginPct * 100, 1)} %`} tone={marginTone(matMarginPct * 100)} />
+            <Metric label="Deli bruttofortjeneste" value={currency(deliBruttoKr)} />
+            <Metric label="Deli bruttomargin %" value={`${num(deliMarginPct * 100, 1)} %`} tone={marginTone(deliMarginPct * 100)} />
+          </div>
+
+          {(!matSalesNetto || !deliSalesNetto || !favnVarekostPct) && (
+            <div className="warning">Fyll inn alle tre inputfeltene over for å se en fullstendig beregning.</div>
+          )}
+        </div>
+      </details>
+
       <div className="soft-box">
         <div className="between">
           <h3>Historikk siste 12 registrerte måneder</h3>
@@ -5729,16 +6114,17 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
               <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
                 <table style={{ marginTop: 0 }}>
                   <thead>
-                    <tr><th style={{ minWidth: 200 }}>Produkt</th><th>Kostpris/stk</th><th>Per eske</th>{locations.map((loc) => <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>)}<th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn stk</th><th>Verdi</th></tr>
-                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-e`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Esker</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs stk</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>stk</th><th></th></tr>
+                    <tr><th style={{ minWidth: 200 }}>Produkt</th><th>Kostpris/stk</th><th>Per eske</th>{locations.map((loc) => <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>)}<th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn stk</th><th style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9" }}>Forrige mnd</th><th>Verdi</th></tr>
+                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-e`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Esker</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs stk</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>stk</th><th style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #94a3b8", textAlign: "center", background: "#f1f5f9" }}>stk</th><th></th></tr>
                   </thead>
                   <tbody>
-                    {bucketProducts.map((p) => { const unitCost = productUnitCost(p); const value = productInventoryValue(p, unitCost); const wasteAmt = getProductWaste(p.id); return (
+                    {bucketProducts.map((p) => { const unitCost = productUnitCost(p); const value = productInventoryValue(p, unitCost); const wasteAmt = getProductWaste(p.id); const prevTotal = getPrevProductTotal(p.id); return (
                       <tr key={p.id}>
                         <td><b>{p.name}</b><br /><small style={{ color: "#64748b" }}>{p.productNumber || "-"}</small></td>
                         <td>{currency(unitCost)}</td><td>{Number(p.unitsPerCase || 1)} stk</td>
                         {locations.map((loc) => { const lc = getProductCount(p.id, loc); return (<><td key={`${p.id}-${loc}-e`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} /></td><td key={`${p.id}-${loc}-l`}><input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td></>); })}
                         <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td>
+                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
                     ); })}
@@ -5759,15 +6145,16 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
               <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderTop: 0, borderRadius: "0 0 14px 14px" }}>
                 <table style={{ marginTop: 0 }}>
                   <thead>
-                    <tr><th style={{ minWidth: 200 }}>Vare</th><th>Råvarekost pr pk</th><th>Pakning</th>{locations.map((loc) => <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>)}<th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn</th><th>Verdi</th></tr>
-                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-p`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Pakker</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>enheter</th><th></th></tr>
+                    <tr><th style={{ minWidth: 200 }}>Vare</th><th>Råvarekost pr pk</th><th>Pakning</th>{locations.map((loc) => <th key={loc} colSpan={2} style={{ textAlign: "center", background: color, borderLeft: "2px solid #cbd5e1" }}>{loc}</th>)}<th style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}>Svinn</th><th style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9" }}>Forrige mnd</th><th>Verdi</th></tr>
+                    <tr style={{ background: "#f8fafc" }}><th></th><th></th><th></th>{locations.map((loc) => (<><th key={`${loc}-p`} style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #cbd5e1", textAlign: "center" }}>Pakker</th><th key={`${loc}-l`} style={{ fontSize: 11, color: "#64748b", textAlign: "center" }}>Løs</th></>))}<th style={{ fontSize: 11, color: "#92400e", borderLeft: "2px solid #f59e0b", textAlign: "center", background: "#fffbeb" }}>enheter</th><th style={{ fontSize: 11, color: "#64748b", borderLeft: "2px solid #94a3b8", textAlign: "center", background: "#f1f5f9" }}>enheter</th><th></th></tr>
                   </thead>
                   <tbody>
-                    {materials.map((m) => { const value = materialInventoryValue(m); const wasteAmt = getMaterialWaste(m.id); return (
+                    {materials.map((m) => { const value = materialInventoryValue(m); const wasteAmt = getMaterialWaste(m.id); const prevTotal = getPrevMaterialTotal(m.id); return (
                       <tr key={m.id}>
                         <td><b>{m.name}</b></td><td>{currency(m.packagePrice)}</td><td>{m.packageSize} {m.unit}</td>
                         {locations.map((loc) => { const lc = getLocationCount(m.id, loc); return (<><td key={`${m.id}-${loc}-p`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={{ minWidth: 70, textAlign: "center" }} /></td><td key={`${m.id}-${loc}-l`}><input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td></>); })}
                         <td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} /></td>
+                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
                     ); })}
