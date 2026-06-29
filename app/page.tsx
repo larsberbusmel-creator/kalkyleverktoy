@@ -3648,6 +3648,23 @@ function OrdersTab({ data, updateData, productAllergens }: {
     setForm({ ...form, orderLines: form.orderLines.filter((_, i) => i !== index) });
   }
 
+  function addOrderLine() {
+    if (!lineToAdd.productId) return;
+    const selectedProduct = data.products.find((p) => p.id === lineToAdd.productId);
+    if (selectedProduct?.type === "selskapsmeny" && (selectedProduct.menuCourses || []).length > 0) {
+      const menuSelections: MenuCourseSelection[] = (selectedProduct.menuCourses || []).flatMap((course) =>
+        (menuSelectionDraft[course.id] || [])
+          .filter((row) => row.productId && row.guestCount > 0)
+          .map((row) => ({ courseId: course.id, productId: row.productId, guestCount: Number(row.guestCount) }))
+      );
+      setForm({ ...form, orderLines: [...form.orderLines, { ...lineToAdd, menuSelections }] });
+    } else {
+      setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] });
+    }
+    setLineToAdd({ productId: "", quantity: form.guests || 1 });
+    setMenuSelectionDraft({});
+  }
+
   // ── Selskapsmeny: fordeling av gjester per rettkategori ──────────────────
   function addMenuSelectionRow(courseId: string) {
     setMenuSelectionDraft((prev) => ({ ...prev, [courseId]: [...(prev[courseId] || []), { productId: "", guestCount: 0 }] }));
@@ -4061,22 +4078,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
               {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <input type="number" value={lineToAdd.quantity} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
-            <button className="btn" onClick={() => {
-              if (!lineToAdd.productId) return;
-              const selectedProduct = data.products.find((p) => p.id === lineToAdd.productId);
-              if (selectedProduct?.type === "selskapsmeny" && (selectedProduct.menuCourses || []).length > 0) {
-                const menuSelections: MenuCourseSelection[] = (selectedProduct.menuCourses || []).flatMap((course) =>
-                  (menuSelectionDraft[course.id] || [])
-                    .filter((row) => row.productId && row.guestCount > 0)
-                    .map((row) => ({ courseId: course.id, productId: row.productId, guestCount: Number(row.guestCount) }))
-                );
-                setForm({ ...form, orderLines: [...form.orderLines, { ...lineToAdd, menuSelections }] });
-              } else {
-                setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] });
-              }
-              setLineToAdd({ productId: "", quantity: form.guests || 1 });
-              setMenuSelectionDraft({});
-            }}>Legg til</button>
+            <button className="btn" onClick={addOrderLine}>Legg til</button>
           </div>
 
           {(() => {
@@ -4116,6 +4118,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
                     </div>
                   );
                 })}
+                <button className="btn active" onClick={addOrderLine} style={{ marginTop: 8 }}>Legg til denne menylinjen i ordren</button>
               </div>
             );
           })()}
