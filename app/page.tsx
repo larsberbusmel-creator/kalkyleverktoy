@@ -72,6 +72,7 @@ type ProductLine = {
   amount: number;
   unit: "kg" | "liter" | "stk" | "porsjoner";
   wastePercent?: number;
+  groupLabel?: string;
 };
 
 type ProductPackagingLine = {
@@ -3764,13 +3765,14 @@ function OrdersTab({ data, updateData, productAllergens }: {
       });
     }
 
-    if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+   if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
     return product.lines.flatMap((line) => {
       const amount = line.amount * multiplier;
-      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName }]; }
-      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName }]; }
+      const effectiveCourseName = line.groupLabel || courseName;
+      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName }]; }
+      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName }]; }
       const p = data.products.find((x) => x.id === line.itemId);
-      return p ? expandProductForProduction(p, amount, [...path, product.id], undefined, courseName) : [];
+      return p ? expandProductForProduction(p, amount, [...path, product.id], undefined, effectiveCourseName) : [];
     });
   }
 
