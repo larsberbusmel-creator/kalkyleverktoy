@@ -5327,13 +5327,13 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     "Bakeri, egenprodusert":  ["Fryser bakeri", "Fryser kjeller"],
     "Frukt og grønt":         ["Kjølerom", "Lager"],
     "Krydder":                ["Kjøkken"],
-    "Deli":                   ["Kjølerom", "Disk", "Lager"],
-    "Mineralvann":            ["Lager", "Kafé"],
-    "Kaffe/te":               ["Kafé", "Lager"],
-    "Vin":                    ["Kjøleskap", "Lager"],
-    "Øl":                     ["Kjøleskap", "Lager"],
-    "Cider":                  ["Kjøleskap", "Lager"],
-    "Brennevin":              ["Lager"],
+    "Deli":                   ["Kjølerom", "Disk", "Lager", "Koch"],
+    "Mineralvann":            ["Lager", "Kafé", "Koch", "Bodøgaard"],
+    "Kaffe/te":               ["Kafé", "Lager", "Koch"],
+    "Vin":                    ["Kjøleskap", "Lager", "Bodøgaard"],
+    "Øl":                     ["Kjøleskap", "Lager", "Bodøgaard"],
+    "Cider":                  ["Kjøleskap", "Lager", "Bodøgaard"],
+    "Brennevin":              ["Lager", "Bodøgaard"],
   };
 
   const egenprodusertCategories = ["Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
