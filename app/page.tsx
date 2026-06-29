@@ -2664,13 +2664,25 @@ function printProductLabel(product: Product) {
   }
 
   function printProduct(product: Product) {
-    const rows = product.lines.map((l) => `<tr><td>${l.itemType}</td><td>${escapeHtml(lineItemName(l.itemType, l.itemId) || "Ukjent")}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`).join("");
+    const isMenu = product.type === "selskapsmeny" && (product.menuCourses || []).length > 0;
+    const rows = isMenu
+      ? (product.menuCourses || []).map((course) => {
+          const optionRows = course.options.map((opt) => {
+            const p = data.products.find((x) => x.id === opt.productId);
+            return `<tr><td>Alternativ</td><td>${escapeHtml(p?.name || "Ukjent")}</td><td>-</td><td>${currency(p ? productUnitCost(p) : 0)}</td></tr>`;
+          }).join("");
+          return `<tr><td colspan="4" style="background:#111827;color:white;font-weight:800;">${escapeHtml(course.name)}</td></tr>${optionRows}`;
+        }).join("")
+      : product.lines.map((l) => `<tr><td>${l.itemType}</td><td>${escapeHtml(lineItemName(l.itemType, l.itemId) || "Ukjent")}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`).join("");
     const allergens = productAllergens(product).join(", ") || "Ingen registrert";
     const priceExVat = exVatFromIncVat(product.customerPrice, data.settings.foodVat);
+    const menuCostRange = isMenu ? menuCourseCostRange(product.menuCourses || []) : null;
+    const totalCostDisplay = isMenu ? `${currency(menuCostRange!.min)} – ${currency(menuCostRange!.max)}` : currency(productCost(product));
+    const unitCostForMargin = isMenu ? menuCostRange!.avg : productUnitCost(product);
     const w = window.open("", "_blank");
     if (!w) return;
 
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo-img{height:120px;width:auto;object-fit:contain}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><img src="/logo.png" class="logo-img" /><h1>${escapeHtml(product.name)}</h1><p>${escapeHtml(product.type)} · ${escapeHtml(product.category)}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(productCost(product))}</b></div><div class="metric">Kost per ${product.yieldUnit}<b>${currency(productUnitCost(product))}</b></div><div class="metric">Kundepris inkl. mva<b>${currency(product.customerPrice)}</b></div><div class="metric">Varekost / margin<b>${num(foodCostPercentFrom(priceExVat, productUnitCost(product)), 1)}% / ${num(marginPercentFrom(priceExVat, productUnitCost(product)), 1)}%</b></div></div><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><h2>Innhold</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo-img{height:120px;width:auto;object-fit:contain}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><img src="/logo.png" class="logo-img" /><h1>${escapeHtml(product.name)}</h1><p>${escapeHtml(product.type)} · ${escapeHtml(product.category)}</p></div><div class="metrics"><div class="metric">Total kost eks. mva${isMenu ? " (min–max)" : ""}<b>${totalCostDisplay}</b></div><div class="metric">Kost per ${product.yieldUnit}${isMenu ? " (snitt)" : ""}<b>${currency(unitCostForMargin)}</b></div><div class="metric">Kundepris inkl. mva<b>${currency(product.customerPrice)}</b></div><div class="metric">Varekost / margin${isMenu ? " (snitt)" : ""}<b>${num(foodCostPercentFrom(priceExVat, unitCostForMargin), 1)}% / ${num(marginPercentFrom(priceExVat, unitCostForMargin), 1)}%</b></div></div><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><h2>Innhold</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
     w.document.close();
     w.focus();
   }
@@ -2913,8 +2925,7 @@ th{background:#f3f4f6}
               {lineSearch && (
                 <div className="search-dropdown inline">
                   {lineOptions(line.itemType, lineSearch).map((item) => (
-                    <button key={item.id} type="button" className="search-result" onClick={() => { setLine({ ...line, itemId: item.id }); setLineSearch(item.name); }}>
-                      <b>{item.name}</b>
+                  <button key={item.id} type="button" className="search-result" onClick={() => { setLine({ ...line, itemId: item.id }); setLineSearch(""); }}>                      <b>{item.name}</b>
                       <small>{item.subtitle}</small>
                     </button>
                   ))}
@@ -3638,10 +3649,6 @@ function OrdersTab({ data, updateData, productAllergens }: {
   }
 
   // ── Selskapsmeny: fordeling av gjester per rettkategori ──────────────────
-  function initMenuSelectionDraft(courseId: string) {
-    setMenuSelectionDraft((prev) => prev[courseId] ? prev : { ...prev, [courseId]: [{ productId: "", guestCount: lineToAdd.quantity || 1 }] });
-  }
-
   function addMenuSelectionRow(courseId: string) {
     setMenuSelectionDraft((prev) => ({ ...prev, [courseId]: [...(prev[courseId] || []), { productId: "", guestCount: 0 }] }));
   }
@@ -3650,11 +3657,14 @@ function OrdersTab({ data, updateData, productAllergens }: {
     setMenuSelectionDraft((prev) => ({ ...prev, [courseId]: (prev[courseId] || []).filter((_, i) => i !== index) }));
   }
 
-  function updateMenuSelectionRow(courseId: string, index: number, patch: Partial<{ productId: string; guestCount: number }>) {
-    setMenuSelectionDraft((prev) => ({
-      ...prev,
-      [courseId]: (prev[courseId] || []).map((row, i) => i === index ? { ...row, ...patch } : row),
-    }));
+ function updateMenuSelectionRow(courseId: string, index: number, patch: Partial<{ productId: string; guestCount: number }>) {
+    setMenuSelectionDraft((prev) => {
+      const existing = prev[courseId] || [{ productId: "", guestCount: lineToAdd.quantity || 1 }];
+      return {
+        ...prev,
+        [courseId]: existing.map((row, i) => i === index ? { ...row, ...patch } : row),
+      };
+    });
   }
 
   function menuSelectionTotalGuests(courseId: string): number {
@@ -4077,8 +4087,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
                 <h3>Fordel gjester per rett ({selectedForAdd.name})</h3>
                 <p style={{ color: "#64748b", fontSize: 13 }}>Totalt antall gjester for denne menylinjen er {lineToAdd.quantity}. Fordel dette tallet per rettkategori under.</p>
                 {(selectedForAdd.menuCourses || []).map((course) => {
-                  initMenuSelectionDraft(course.id);
-                  const rows = menuSelectionDraft[course.id] || [];
+                  const rows = menuSelectionDraft[course.id] || [{ productId: "", guestCount: lineToAdd.quantity || 1 }];
                   const totalGuests = menuSelectionTotalGuests(course.id);
                   const mismatch = totalGuests !== lineToAdd.quantity;
                   return (
