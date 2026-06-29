@@ -5493,6 +5493,12 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     const item = counts[`product_${productId}`] as any;
     if (!item) return { cases: 0, loose: 0 };
     if (item.locations?.[location]) return item.locations[location];
+    // Bakoverkompatibilitet: gammel telling uten locations-struktur - vis på første sted i kategorien
+    const product = data.products.find((p) => p.id === productId);
+    const locations = product ? (categoryLocations[product.category] || []) : [];
+    if (locations[0] === location) {
+      return { cases: item.packages || 0, loose: item.loose || 0 };
+    }
     return { cases: 0, loose: 0 };
   }
 
