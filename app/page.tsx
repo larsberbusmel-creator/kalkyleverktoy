@@ -5467,8 +5467,33 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
     const item = counts[materialId] as any;
     if (!item) return { packages: 0, loose: 0 };
-    if (item.locations?.[location]) return item.locations[location];
-    return { packages: 0, loose: 0 };
+
+    const material = data.materials.find((m) => m.id === materialId);
+    const validLocations = categoryLocations[material?.category || ""] || [];
+
+    // Finn "foreldreløse" steder: lagret i data men ikke gyldige i dagens kategori-oppsett
+    const orphanedTotal = item.locations
+      ? Object.entries(item.locations as Record<string, { packages?: number; loose?: number }>)
+          .filter(([loc]) => !validLocations.includes(loc))
+          .reduce((acc, [, v]) => ({ packages: acc.packages + (v.packages || 0), loose: acc.loose + (v.loose || 0) }), { packages: 0, loose: 0 })
+      : { packages: 0, loose: 0 };
+
+    const directValue = item.locations?.[location] || { packages: 0, loose: 0 };
+
+    // Legg foreldreløse steder til det første gyldige stedet, slik at gamle tellinger (f.eks. "Lager" fra en
+    // tidligere stedskonfigurasjon) blir synlige og redigerbare igjen i stedet for å forsvinne fra visningen.
+    if (validLocations[0] === location) {
+      // Hvis det IKKE finnes noen locations-struktur i det hele tatt, bruk root packages/loose som bakoverkompatibilitet
+      if (!item.locations || Object.keys(item.locations).length === 0) {
+        return { packages: item.packages || 0, loose: item.loose || 0 };
+      }
+      return {
+        packages: (directValue.packages || 0) + orphanedTotal.packages,
+        loose: (directValue.loose || 0) + orphanedTotal.loose,
+      };
+    }
+
+    return { packages: directValue.packages || 0, loose: directValue.loose || 0 };
   }
 
   function updateLocationCount(materialId: string, location: string, packages: number, loose: number) {
