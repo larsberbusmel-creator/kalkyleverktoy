@@ -156,6 +156,7 @@ type Venue = { id: string; name: string; price: number };
 
 type Settings = {
   foodVat: number;
+  alcoholVat?: number;
   chefHourlyRate: number;
   chefBaseMinutes: number;
   chefExtraMinutesPer10: number;
@@ -395,6 +396,7 @@ const initialData: AppData = {
   orders: [],
 settings: {
   foodVat: 15,
+  alcoholVat: 25,
   chefHourlyRate: 350,
   chefBaseMinutes: 60,
   chefExtraMinutesPer10: 30,
@@ -1448,13 +1450,25 @@ function defaultRetailMargin(category: string) {
   Number(form.deliMargin || defaultRetailMargin(form.category)),
   0
 );
-        const suggestedIncVat = selectedMargin >= 100 ? 0 : Math.ceil((costExVat / (1 - selectedMargin / 100)) * (1 + data.settings.foodVat / 100));
+        const isAlcohol = ["Øl", "Vin", "Brennevin", "Cider"].includes(form.category);
+        const isMineralvann = form.category === "Mineralvann";
+        const alcoholVat = data.settings.alcoholVat ?? 25;
+        const marginVatRate = isAlcohol ? alcoholVat : data.settings.foodVat;
+
+        function suggestedFor(vatRate: number) {
+          return selectedMargin >= 100 ? 0 : Math.ceil((costExVat / (1 - selectedMargin / 100)) * (1 + vatRate / 100));
+        }
+
+        const suggested15 = suggestedFor(data.settings.foodVat);
+        const suggested25 = suggestedFor(alcoholVat);
+        const suggestedIncVat = isAlcohol ? suggested25 : suggested15;
+
         const retailIncVat = Number(form.retailPrice) || 0;
-        const retailExVat = exVatFromIncVat(retailIncVat, data.settings.foodVat);
+        const retailExVat = exVatFromIncVat(retailIncVat, marginVatRate);
         const finalMargin = marginPercentFrom(retailExVat, costExVat);
         const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
 
-        return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="0" value={form.deliMargin || String(defaultRetailMargin(form.category))} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label><Metric label="Anbefalt utsalgspris inkl. mva" value={currency(suggestedIncVat)} dark /><label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label><button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button></div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label="Valgt pris eks. mva" value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
+        return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="0" value={form.deliMargin || String(defaultRetailMargin(form.category))} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label>{isMineralvann ? (<><Metric label="Anbefalt pris inkl. 15% mva (med seg)" value={currency(suggested15)} dark /><Metric label="Anbefalt pris inkl. 25% mva (i lokalet)" value={currency(suggested25)} dark /></>) : (<Metric label={`Anbefalt utsalgspris inkl. mva${isAlcohol ? " (25%)" : ""}`} value={currency(suggestedIncVat)} dark />)}<label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label>{isMineralvann ? (<div style={{ display: "flex", gap: 8 }}><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested15) })}>Bruk 15%-pris</button><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested25) })}>Bruk 25%-pris</button></div>) : (<button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button>)}</div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label={`Valgt pris eks. mva${isMineralvann ? " (ved 15%)" : ""}`} value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
       })()}
 
       <label>
@@ -1532,13 +1546,13 @@ function defaultRetailMargin(category: string) {
   {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].includes(m.category) && m.retailPrice
     ? `${num(
         marginPercentFrom(
-          exVatFromIncVat(Number(m.retailPrice), data.settings.foodVat),
+          exVatFromIncVat(Number(m.retailPrice), ["Øl", "Vin", "Brennevin", "Cider"].includes(m.category) ? (data.settings.alcoholVat ?? 25) : data.settings.foodVat),
           m.pricePerUnit
         ),
         1
       )} %`
     : "-"}
-</td>         
+</td>      
 <td>{(m.allergens || []).join(", ") || "-"}</td>
           <td><button className="btn" onClick={() => { edit(m); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Rediger</button><button style={{ marginLeft: 8 }} className="btn danger" onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td>
           <td>{m.priceUpdatedAt ? formatDateNo(m.priceUpdatedAt.slice(0, 10)) : "-"}</td>
@@ -6776,6 +6790,9 @@ const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", per
         <div className="form-grid">
           <label>MVA mat<input type="number" value={localSettings.foodVat}
             onChange={(e) => setLocalSettings({ ...localSettings, foodVat: Number(e.target.value) })}
+            onBlur={() => updateData({ settings: localSettings })} /></label>
+          <label>MVA alkohol<input type="number" value={localSettings.alcoholVat ?? 25}
+            onChange={(e) => setLocalSettings({ ...localSettings, alcoholVat: Number(e.target.value) })}
             onBlur={() => updateData({ settings: localSettings })} /></label>
           <label>Kostnad kokker/time<input type="number" value={localSettings.chefHourlyRate}
             onChange={(e) => setLocalSettings({ ...localSettings, chefHourlyRate: Number(e.target.value) })}
