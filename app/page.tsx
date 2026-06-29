@@ -3832,8 +3832,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
       } else {
         const prodRows = order.orderLines.map((line) => {
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-          const rowsForProduct = expandProductForProduction(product, Number(line.quantity) || 0).map((r) => `<tr><td>${r.name}</td><td>${num(r.amount)} ${r.unit}</td></tr>`).join("");
-          return `<tr><td colspan="2" style="background:#111827;color:white;font-weight:800;">${line.quantity} × ${product.name}</td></tr>${rowsForProduct}`;
+const rowsForProduct = expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections).map((r) => `<tr><td>${r.name}</td><td>${num(r.amount)} ${r.unit}</td></tr>`).join("");          return `<tr><td colspan="2" style="background:#111827;color:white;font-weight:800;">${line.quantity} × ${product.name}</td></tr>${rowsForProduct}`;
         }).join("");
         prodSection = `<h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table>`;
       }
