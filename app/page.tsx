@@ -2019,10 +2019,11 @@ unitWeightKg: "1",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
   unitsPerCase: "",
-});    setDraftLines([]);
+});    
+setDraftLines([]);
     setDraftPackaging([]);
     setDraftMenuCourses([]);
-    setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg", wastePercent: "" });
+    setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg", wastePercent: "", groupLabel: "" });
     setLineSearch("");
   }
 
