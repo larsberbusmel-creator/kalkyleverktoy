@@ -3748,29 +3748,42 @@ function OrdersTab({ data, updateData, productAllergens }: {
     return orderSubtotalIncVat(order) - orderDiscountAmount(order);
   }
 
- function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[]): { name: string; amount: number; unit: string; source: string }[] {
+ function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string): { name: string; amount: number; unit: string; source: string; courseName?: string }[] {
     if (path.includes(product.id)) return [];
 
     // Selskapsmeny: bruk faktiske valgte alternativer per rettkategori, hver vektet med antall gjester som valgte det
     if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
       if (!menuSelections || !menuSelections.length) {
-        return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name }];
+        return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
       }
       return menuSelections.flatMap((sel) => {
         const chosenProduct = data.products.find((x) => x.id === sel.productId);
         if (!chosenProduct) return [];
-        return expandProductForProduction(chosenProduct, sel.guestCount, [...path, product.id]);
+        const course = (product.menuCourses || []).find((c) => c.id === sel.courseId);
+        return expandProductForProduction(chosenProduct, sel.guestCount, [...path, product.id], undefined, course?.name || courseName);
       });
     }
 
-    if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name }];
+    if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
     return product.lines.flatMap((line) => {
       const amount = line.amount * multiplier;
-      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name }]; }
-      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name }]; }
+      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName }]; }
+      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName }]; }
       const p = data.products.find((x) => x.id === line.itemId);
-      return p ? expandProductForProduction(p, amount, [...path, product.id]) : [];
+      return p ? expandProductForProduction(p, amount, [...path, product.id], undefined, courseName) : [];
     });
+  }
+
+  function productionRowsHtml(items: { name: string; amount: number; unit: string; courseName?: string }[]) {
+    let lastCourse: string | undefined;
+    return items.map((r) => {
+      let header = "";
+      if (r.courseName !== lastCourse) {
+        if (r.courseName) header = `<tr><td colspan="2" style="background:#e2e8f0;font-weight:800;padding-left:20px;">${escapeHtml(r.courseName)}</td></tr>`;
+        lastCourse = r.courseName;
+      }
+      return `${header}<tr><td style="padding-left:${r.courseName ? "34px" : "9px"}">${escapeHtml(r.name)}</td><td>${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`;
+    }).join("");
   }
 
   function productionRowsForOrder(order: Order) {
@@ -3828,17 +3841,16 @@ function OrdersTab({ data, updateData, productAllergens }: {
             ? `<div class="recipe-block"><h3>Direkte råvarer – ${escapeHtml(product.name)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${directMaterialRows}</tbody></table></div>` : "";
           return `<div class="prod-product"><h2>${qty} × ${escapeHtml(product.name)}</h2>${recipeBlocks}${directSection}</div>`;
         }).join("");
-        prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPages}`;
-      } else {
+prodSection = `<div class="page-break"></div><h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPages}`;      } else {
         const prodRows = order.orderLines.map((line) => {
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-const rowsForProduct = expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections).map((r) => `<tr><td>${r.name}</td><td>${num(r.amount)} ${r.unit}</td></tr>`).join("");          return `<tr><td colspan="2" style="background:#111827;color:white;font-weight:800;">${line.quantity} × ${product.name}</td></tr>${rowsForProduct}`;
+const rowsForProduct = productionRowsHtml(expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections));          return `<tr><td colspan="2" style="background:#111827;color:white;font-weight:800;">${line.quantity} × ${product.name}</td></tr>${rowsForProduct}`;
         }).join("");
-        prodSection = `<h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table>`;
+        prodSection = `<div class="page-break"></div><h2>Produksjonsgrunnlag</h2><table><thead><tr><th>Element</th><th>Mengde</th></tr></thead><tbody>${prodRows}</tbody></table>`;
       }
     }
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}.prod-product{border:2px solid #111827;border-radius:12px;padding:16px;margin:16px 0;break-inside:avoid}.prod-product h2{margin:0 0 12px;font-size:18px}.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}.recipe-block h3{margin:0 0 8px;font-size:14px}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table><div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${prodSection}</body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.box{border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#f3f4f6}.right{text-align:right}.total{font-size:20px;font-weight:900}.prod-product{border:2px solid #111827;border-radius:12px;padding:16px;margin:16px 0;break-inside:avoid}.prod-product h2{margin:0 0 12px;font-size:18px}.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}.recipe-block h3{margin:0 0 8px;font-size:14px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:18px}}.recipe-block h3{margin:0 0 8px;font-size:14px}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table><div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${prodSection}</body></html>`);
     w.document.close(); w.focus();
   }
 
@@ -4305,7 +4317,7 @@ const rowsForProduct = expandProductForProduction(product, Number(line.quantity)
                 </table>
                 <details style={{ marginTop: 10 }}>
                   <summary style={{ cursor: "pointer", color: "#64748b" }}>Produksjonsgrunnlag</summary>
-                  <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody></table>
+                  <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.courseName || r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody></table>
                 </details>
                 <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                   <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
