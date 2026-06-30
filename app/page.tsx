@@ -3808,7 +3808,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
     return orderSubtotalIncVat(order) - orderDiscountAmount(order);
   }
 
- function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string): { name: string; amount: number; unit: string; source: string; courseName?: string }[] {
+ function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
     if (path.includes(product.id)) return [];
 
     // Bakeri-produkter (Søtbakst, Bakeri-egenprodusert) skal kun vises som navn i catering/selskapsmeny-produksjon,
@@ -3835,14 +3835,14 @@ function OrdersTab({ data, updateData, productAllergens }: {
     return product.lines.flatMap((line) => {
       const amount = line.amount * multiplier;
       const effectiveCourseName = line.groupLabel || courseName;
-      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName }]; }
-      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName }]; }
+      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
+      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
       const p = data.products.find((x) => x.id === line.itemId);
       return p ? expandProductForProduction(p, amount, [...path, product.id], undefined, effectiveCourseName) : [];
     });
   }
 
-  function productionRowsHtml(items: { name: string; amount: number; unit: string; courseName?: string }[]) {
+  function productionRowsHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
     let lastCourse: string | undefined;
     return items.map((r) => {
       let header = "";
@@ -3850,12 +3850,13 @@ function OrdersTab({ data, updateData, productAllergens }: {
         if (r.courseName) header = `<tr><td colspan="2" style="background:#e2e8f0;font-weight:800;padding-left:20px;">${escapeHtml(r.courseName)}</td></tr>`;
         lastCourse = r.courseName;
       }
-      return `${header}<tr><td style="padding-left:${r.courseName ? "34px" : "9px"}">${escapeHtml(r.name)}</td><td>${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`;
+      const perUnitHtml = r.perUnit != null ? ` <span style="color:#94a3b8;font-size:9px">(à ${num(r.perUnit, 3)} ${escapeHtml(r.unit)})</span>` : "";
+      return `${header}<tr><td style="padding-left:${r.courseName ? "34px" : "9px"}">${escapeHtml(r.name)}${perUnitHtml}</td><td>${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`;
     }).join("");
   }
 
-  function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string }[]) {
-    type Group = { key?: string; rows: typeof items };
+function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
+      type Group = { key?: string; rows: typeof items };
     const groups: Group[] = [];
     items.forEach((r) => {
       const last = groups[groups.length - 1];
@@ -3874,7 +3875,10 @@ function OrdersTab({ data, updateData, productAllergens }: {
     function renderGroups(list: Group[]) {
       return list.map((g) => {
         const header = g.key ? `<tr><td colspan="2" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
-        const rows = g.rows.map((r) => `<tr><td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}</td><td style="text-align:right;padding:1px 0;white-space:nowrap">${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`).join("");
+        const rows = g.rows.map((r) => {
+          const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${num(r.perUnit, 3)} ${escapeHtml(r.unit)}</span>` : "";
+          return `<tr><td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`;
+        }).join("");
         return header + rows;
       }).join("");
     }
@@ -3903,6 +3907,10 @@ function OrdersTab({ data, updateData, productAllergens }: {
     const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
     const customerName = order.customerType === "bedrift"
       ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
+    const allergenWarnings = orderAllergenWarnings(order);
+    const allergenWarningHtml = allergenWarnings.length
+      ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel: ordren inneholder produkter med ${escapeHtml(allergenWarnings.join(", "))}</div>`
+      : "";
     let prodSection = "";
     if (includeProduction) {
       const isBakery = order.type === "bakeri" || order.type === "egenprodusert";
@@ -3943,7 +3951,7 @@ const twoColHtml = productionTwoColumnHtml(expandProductForProduction(product, N
 prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}`;      }
     }
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:14px;line-height:1.25;font-size:11px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-bottom:8px}.box p{margin:2px 0}h2{font-size:13px;margin:10px 0 4px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:3px 5px;text-align:left;font-size:11px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:6px 0;background:#f8fafc;border-radius:6px;padding:6px}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:14px;line-height:1.25;font-size:11px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-bottom:8px}.box p{margin:2px 0}h2{font-size:13px;margin:10px 0 4px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:3px 5px;text-align:left;font-size:11px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:6px 0;background:#f8fafc;border-radius:6px;padding:6px}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button>${allergenWarningHtml}<div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div><h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div></body></html>`);
     w.document.close(); w.focus();
   }
 
