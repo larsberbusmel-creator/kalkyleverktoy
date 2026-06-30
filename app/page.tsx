@@ -3001,7 +3001,11 @@ th{background:#f3f4f6}
                   <td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
                   <td><input value={l.groupLabel || ""} onChange={(e) => updateDraftLine(i, { groupLabel: e.target.value || undefined })} placeholder="-" style={{ minWidth: 100 }} /></td>
                   <td>{currency(lineCost(l))}</td>
-                  <td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button className="link" disabled={i === 0} onClick={() => setDraftLines((prev) => { const next = [...prev]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; return next; })}>↑</button>
+                    <button className="link" disabled={i === draftLines.length - 1} onClick={() => setDraftLines((prev) => { const next = [...prev]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; return next; })}>↓</button>
+                    <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
