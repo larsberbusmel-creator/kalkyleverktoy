@@ -6321,10 +6321,10 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         </button>
       </div>
 
-      <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} placeholder="Søk råvare eller produkt" style={{ fontSize: 16, padding: "12px 14px" }} />
-      <select value={inventoryCategoryFilter} onChange={(e) => { setInventoryCategoryFilter(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} style={{ marginBottom: 12, fontSize: 16, padding: "10px 14px" }}>
+      <select value={inventoryCategoryFilter} onChange={(e) => { setInventoryCategoryFilter(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} style={{ marginBottom: 8, fontSize: 16, padding: "10px 14px" }}>
         {internalBuckets.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
       </select>
+      <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} placeholder="Søk råvare eller produkt" style={{ fontSize: 16, padding: "12px 14px", marginBottom: 12, background: "#f1f5f9" }} />
       <p style={{ color: "#64748b" }}>Viser {filtered.length} råvarer.</p>
 
       <div className="inventory-mobile-view">
