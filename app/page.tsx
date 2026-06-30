@@ -586,6 +586,46 @@ export default function Page() {
   });
 }, []);
 
+  const updateInventoryRpc = React.useCallback((month: string, patch: {
+    itemsPatch?: Record<string, any>;
+    wastePatch?: Record<string, number>;
+    kassasvinn?: number;
+    locked?: boolean;
+    pricesFrozen?: boolean;
+    profitability?: any;
+  }) => {
+    setData((prev) => {
+      const prevMonth: any = prev.inventoryCounts?.[month] || { items: {}, waste: {} };
+      const nextMonth: any = {
+        ...prevMonth,
+        items: { ...(prevMonth.items || {}), ...(patch.itemsPatch || {}) },
+        waste: { ...(prevMonth.waste || {}), ...(patch.wastePatch || {}) },
+      };
+      if (patch.kassasvinn !== undefined) nextMonth.kassasvinn = patch.kassasvinn;
+      if (patch.locked !== undefined) nextMonth.locked = patch.locked;
+      if (patch.pricesFrozen !== undefined) nextMonth.pricesFrozen = patch.pricesFrozen;
+      if (patch.profitability !== undefined) nextMonth.profitability = patch.profitability;
+
+      const next = { ...prev, inventoryCounts: { ...(prev.inventoryCounts || {}), [month]: nextMonth } };
+
+      isSavingRef.current = true;
+      supabase.rpc("update_inventory_items", {
+        p_month: month,
+        p_items_patch: patch.itemsPatch || null,
+        p_waste_patch: patch.wastePatch || null,
+        p_kassasvinn: patch.kassasvinn ?? null,
+        p_locked: patch.locked ?? null,
+        p_prices_frozen: patch.pricesFrozen ?? null,
+        p_profitability: patch.profitability ?? null,
+      }).then(({ error }: any) => {
+        if (error) console.error("Supabase RPC error (inventory):", error);
+        setTimeout(() => { isSavingRef.current = false; }, 2000);
+      });
+
+      return next;
+    });
+  }, []);
+
   function exportData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -791,7 +831,7 @@ return (
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} />}
-        {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} />}
+        {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} />}
 
@@ -5434,7 +5474,7 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
   );
 }
 
-function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number }) {
+function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number; updateInventoryRpc: (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void }) {
   const currentYm = new Date().toISOString().slice(0, 7);
   const [inventoryMonth, setInventoryMonth] = useState(currentYm);
   const [inventorySearch, setInventorySearch] = useState("");
@@ -5511,7 +5551,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   }
 
   function updateKassasvinn(val: number) {
-    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, kassasvinn: val } } });
+    updateInventoryRpc(inventoryMonth, { kassasvinn: val });
   }
 
   const xlsxColors: Record<string, string> = {
@@ -5541,13 +5581,13 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     const pricesAreFrozen = !!currentInventory.pricesFrozen;
     const packagePrice = pricesAreFrozen ? existing.packagePrice : (material?.packagePrice || existing.packagePrice || 0);
     const pricePerUnit = pricesAreFrozen ? existing.pricePerUnit : (material?.pricePerUnit || existing.pricePerUnit || 0);
-    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packagePrice, pricePerUnit, waste: wasteAmount } } } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [materialId]: { ...existing, packagePrice, pricePerUnit, waste: wasteAmount } } });
   }
   function getProductWaste(productId: string): number { return (counts[`product_${productId}`] as any)?.waste || 0; }
   function updateProductWaste(product: Product, wasteAmount: number) {
     const key = `product_${product.id}`;
     const existing = (counts[key] as any) || {};
-    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [key]: { ...existing, waste: wasteAmount } } } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [key]: { ...existing, waste: wasteAmount } } });
   }
   function materialWasteValue(m: Material): number { return getMaterialWaste(m.id) * m.pricePerUnit; }
   function productWasteValue(p: Product): number { return getProductWaste(p.id) * productUnitCost(p); }
@@ -5565,12 +5605,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
   const profitability = currentInventory.profitability || {};
 
   function updateProfitability(patch: Partial<ProfitabilityInput>) {
-    updateData({
-      inventoryCounts: {
-        ...countsByMonth,
-        [inventoryMonth]: { ...currentInventory, profitability: { ...profitability, ...patch } },
-      },
-    });
+    updateInventoryRpc(inventoryMonth, { profitability: { ...profitability, ...patch } });
   }
 
   // Deli varekost% beregnes live: vektet snitt av (pricePerUnit / retailPriceExVat) for alle Deli-råvarer som har retailPrice satt
@@ -5665,7 +5700,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
 
     const totalPackages = Object.values(newLocations).reduce((s: number, l: any) => s + (l.packages || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: frozenPackagePrice, pricePerUnit: frozenPricePerUnit, locations: newLocations } } } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: frozenPackagePrice, pricePerUnit: frozenPricePerUnit, locations: newLocations } } });
   }
 
   function materialInventoryValue(m: Material) {
@@ -5696,7 +5731,7 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
     const newLocations = { ...(existing.locations || {}), [location]: { cases, loose } };
     const totalCases = Object.values(newLocations).reduce((s: number, l: any) => s + (l.cases || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-    updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, items: { ...counts, [key]: { ...existing, packages: totalCases, loose: totalLoose, packagePrice: 0, pricePerUnit: 0, locations: newLocations } } } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [key]: { ...existing, packages: totalCases, loose: totalLoose, packagePrice: 0, pricePerUnit: 0, locations: newLocations } } });
   }
 
   function productInventoryValue(product: Product, liveUnitCost: number): number {
@@ -6275,9 +6310,9 @@ function InventoryTab({ data, updateData, productUnitCost }: { data: AppData; up
                 frozenItems[key] = { ...existing, frozenUnitCost: productUnitCost(p) };
               }
             });
-            updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: true, pricesFrozen: true, items: frozenItems } } });
+            updateInventoryRpc(inventoryMonth, { itemsPatch: frozenItems, locked: true, pricesFrozen: true });
           } else {
-            updateData({ inventoryCounts: { ...countsByMonth, [inventoryMonth]: { ...currentInventory, waste, locked: false, items: counts } } });
+            updateInventoryRpc(inventoryMonth, { locked: false });
           }
         }}>{isLocked ? "Lås opp måned" : "Lås måned"}</button>
         <button className="btn active" onClick={exportInventoryXlsx}>Eksporter XLSX</button>
