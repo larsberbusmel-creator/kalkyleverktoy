@@ -271,7 +271,7 @@ type AppData = {
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
-const BUILD_ID = "2026-07-01a";
+const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_TIME || "dev";
 
 const defaultAllergens = ["Gluten", "Hvete", "Rug", "Spelt", "Bygg", "Egg", "Melk", "Laktose", "Fisk", "Skalldyr", "Bløtdyr", "Selleri", "Lupin", "Sulfitt", "Nøtter", "Hasselnøtt", "Mandler", "Valnøtt", "Pistasj", "Peanøtter", "Sesam", "Soya"];
 const defaultMaterialCategories = ["Mat", "Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
@@ -570,13 +570,33 @@ export default function Page() {
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
 
   useEffect(() => {
-    async function checkBuild() {
-      const { data: row, error } = await supabase.from("app_meta").select("build_id").eq("id", "main").single();
-      if (!error && row?.build_id && row.build_id !== BUILD_ID) {
-        setShowUpdateBanner(true);
+    let localBuildId = BUILD_ID;
+
+    async function initBuild() {
+      const { data: row, error } = await supabase
+        .from("app_meta")
+        .select("build_id")
+        .eq("id", "main")
+        .single();
+
+      if (error || !row) {
+        // Første gang / tabell ikke klar – skriv vår versjon
+        await supabase.from("app_meta").upsert({ id: "main", build_id: localBuildId, updated_at: new Date().toISOString() });
+        return;
+      }
+
+      if (row.build_id !== localBuildId) {
+        // Vi er nyere enn det som ligger i databasen – oppdater databasen
+        if (row.build_id < localBuildId) {
+          await supabase.from("app_meta").update({ build_id: localBuildId, updated_at: new Date().toISOString() }).eq("id", "main");
+        } else {
+          // Det som ligger i databasen er nyere enn oss – vis banner
+          setShowUpdateBanner(true);
+        }
       }
     }
-    checkBuild();
+
+    initBuild();
 
     const channel = supabase
       .channel("app_meta_changes")
@@ -585,7 +605,7 @@ export default function Page() {
         { event: "UPDATE", schema: "public", table: "app_meta", filter: "id=eq.main" },
         (payload) => {
           const newBuildId = (payload.new as any)?.build_id;
-          if (newBuildId && newBuildId !== BUILD_ID) {
+          if (newBuildId && newBuildId !== localBuildId && newBuildId > localBuildId) {
             setShowUpdateBanner(true);
           }
         }
