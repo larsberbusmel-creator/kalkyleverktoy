@@ -5547,6 +5547,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
   const [showInventoryStats, setShowInventoryStats] = useState(false);
   const [expandedMobileId, setExpandedMobileId] = useState<string | null>(null);
   const [showAllLocations, setShowAllLocations] = useState(false);
+  const [showRecentCounts, setShowRecentCounts] = useState(false);
   const pageSize = 50;
 
   function toggleMobileCard(id: string) {
@@ -5645,13 +5646,13 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     const pricesAreFrozen = !!currentInventory.pricesFrozen;
     const packagePrice = pricesAreFrozen ? existing.packagePrice : (material?.packagePrice || existing.packagePrice || 0);
     const pricePerUnit = pricesAreFrozen ? existing.pricePerUnit : (material?.pricePerUnit || existing.pricePerUnit || 0);
-    updateInventoryRpc(inventoryMonth, { itemsPatch: { [materialId]: { ...existing, packagePrice, pricePerUnit, waste: wasteAmount } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [materialId]: { ...existing, packagePrice, pricePerUnit, waste: wasteAmount, countedAt: new Date().toISOString() } } });
   }
   function getProductWaste(productId: string): number { return (counts[`product_${productId}`] as any)?.waste || 0; }
   function updateProductWaste(product: Product, wasteAmount: number) {
     const key = `product_${product.id}`;
     const existing = (counts[key] as any) || {};
-    updateInventoryRpc(inventoryMonth, { itemsPatch: { [key]: { ...existing, waste: wasteAmount } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [key]: { ...existing, waste: wasteAmount, countedAt: new Date().toISOString() } } });
   }
   function materialWasteValue(m: Material): number { return getMaterialWaste(m.id) * m.pricePerUnit; }
   function productWasteValue(p: Product): number { return getProductWaste(p.id) * productUnitCost(p); }
@@ -5764,7 +5765,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
 
     const totalPackages = Object.values(newLocations).reduce((s: number, l: any) => s + (l.packages || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-    updateInventoryRpc(inventoryMonth, { itemsPatch: { [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: frozenPackagePrice, pricePerUnit: frozenPricePerUnit, locations: newLocations } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [materialId]: { ...existing, packages: totalPackages, loose: totalLoose, packagePrice: frozenPackagePrice, pricePerUnit: frozenPricePerUnit, locations: newLocations, countedAt: new Date().toISOString() } } });
   }
 
   function materialInventoryValue(m: Material) {
@@ -5797,7 +5798,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     const newLocations = { ...(existing.locations || {}), [location]: { cases, loose } };
     const totalCases = Object.values(newLocations).reduce((s: number, l: any) => s + (l.cases || 0), 0);
     const totalLoose = Object.values(newLocations).reduce((s: number, l: any) => s + (l.loose || 0), 0);
-    updateInventoryRpc(inventoryMonth, { itemsPatch: { [key]: { ...existing, packages: totalCases, loose: totalLoose, packagePrice: 0, pricePerUnit: 0, locations: newLocations } } });
+    updateInventoryRpc(inventoryMonth, { itemsPatch: { [key]: { ...existing, packages: totalCases, loose: totalLoose, packagePrice: 0, pricePerUnit: 0, locations: newLocations, countedAt: new Date().toISOString() } } });
   }
 
   function productInventoryValue(product: Product, liveUnitCost: number): number {
@@ -6392,6 +6393,77 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         {internalBuckets.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
       </select>
       <input value={inventorySearch} onChange={(e) => { setInventorySearch(e.target.value); setInventoryPage(1); setExpandedMobileId(null); }} placeholder="Søk" style={{ fontSize: 16, fontWeight: 700, padding: "12px 14px", marginBottom: 12, background: "#fef3c7" }} />
+      <button
+        className={showRecentCounts ? "btn active" : "btn"}
+        onClick={() => setShowRecentCounts(!showRecentCounts)}
+        style={{ marginBottom: 12 }}
+      >
+        🕐 Siste tellinger
+      </button>
+
+      {showRecentCounts && (() => {
+        type RecentItem = { name: string; total: number; unit: string; countedAt: string; isProduct: boolean };
+        const recent: RecentItem[] = [];
+
+        data.materials.forEach((m) => {
+          const c = counts[m.id] as any;
+          if (!c?.countedAt) return;
+          const total = Number(c.packages || 0) + Number(c.loose || 0);
+          recent.push({ name: m.name, total, unit: m.unit, countedAt: c.countedAt, isProduct: false });
+        });
+
+        data.products.filter((p) => egenprodusertCategories.includes(p.category)).forEach((p) => {
+          const c = counts[`product_${p.id}`] as any;
+          if (!c?.countedAt) return;
+          const total = (Number(c.packages || 0) * Number(p.unitsPerCase || 1)) + Number(c.loose || 0);
+          recent.push({ name: p.name, total, unit: "stk", countedAt: c.countedAt, isProduct: true });
+        });
+
+        recent.sort((a, b) => b.countedAt.localeCompare(a.countedAt));
+        const top20 = recent.slice(0, 20);
+
+        return (
+          <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 16, overflow: "hidden", background: "white" }}>
+            <div style={{ background: "#0f172a", color: "white", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <b style={{ fontSize: 14 }}>🕐 Siste {top20.length} tellinger – {inventoryMonth}</b>
+              <button onClick={() => setShowRecentCounts(false)} style={{ background: "transparent", border: 0, color: "white", cursor: "pointer", fontSize: 18 }}>×</button>
+            </div>
+            {top20.length === 0 ? (
+              <p style={{ padding: 16, color: "#64748b" }}>Ingen tellinger registrert denne måneden ennå.</p>
+            ) : (
+              <table style={{ marginTop: 0 }}>
+                <thead>
+                  <tr>
+                    <th>Tidspunkt</th>
+                    <th>Vare</th>
+                    <th style={{ textAlign: "right" }}>Totalt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top20.map((item, i) => {
+                    const d = new Date(item.countedAt);
+                    const dato = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+                    const tid = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+                    return (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "white" : "#f8fafc" }}>
+                        <td style={{ color: "#64748b", whiteSpace: "nowrap" }}>{dato} {tid}</td>
+                        <td>
+                          <b>{item.name}</b>
+                          <span style={{ marginLeft: 6, fontSize: 11, color: "#94a3b8" }}>
+                            {item.isProduct ? "egenprodusert" : "råvare"}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{num(item.total, 2)} {item.unit}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
+
       <p style={{ color: "#64748b" }}>Viser {filtered.length} råvarer.</p>
 
       <div className="inventory-mobile-view">
