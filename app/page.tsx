@@ -6179,7 +6179,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <label style={{ fontSize: 13 }}>Kasser
                       <input
-                        type="number" inputMode="numeric" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked}
                         value={lv.packages}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], packages: e.target.value } }))}
                         onBlur={(e) => {
@@ -6193,7 +6193,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                     </label>
                     <label style={{ fontSize: 13 }}>Løs ({m.unit})
                       <input
-                        type="number" inputMode="numeric" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked}
                         value={lv.loose}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], loose: e.target.value } }))}
                         onBlur={(e) => {
@@ -6212,7 +6212,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
             <div style={{ marginTop: 14 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn</div>
               <input
-                type="number" inputMode="numeric" disabled={isLocked}
+                type="number" inputMode="decimal" disabled={isLocked}
                 value={localWaste}
                 onChange={(e) => setLocalWaste(e.target.value)}
                 onBlur={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)}
@@ -6279,7 +6279,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <label style={{ fontSize: 13 }}>Esker
                       <input
-                        type="number" inputMode="numeric" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked}
                         value={lv.cases}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], cases: e.target.value } }))}
                         onBlur={(e) => {
@@ -6293,7 +6293,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                     </label>
                     <label style={{ fontSize: 13 }}>Løs stk
                       <input
-                        type="number" inputMode="numeric" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked}
                         value={lv.loose}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], loose: e.target.value } }))}
                         onBlur={(e) => {
@@ -6312,7 +6312,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
             <div style={{ marginTop: 14 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn stk</div>
               <input
-                type="number" inputMode="numeric" disabled={isLocked}
+                type="number" inputMode="decimal" disabled={isLocked}
                 value={localWaste}
                 onChange={(e) => setLocalWaste(e.target.value)}
                 onBlur={(e) => updateProductWaste(p, Number(e.target.value) || 0)}
