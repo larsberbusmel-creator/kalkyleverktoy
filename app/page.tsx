@@ -558,11 +558,11 @@ export default function Page() {
           if (payload.new?.data) {
             setData((prev) => {
               const incoming = migrateData(payload.new.data);
-              // Behold lokal inventoryCounts – den er alltid mest oppdatert siden vi bruker RPC for den
-              // For alt annet (ordre, produkter, råvarer osv.) bruker vi incoming-data som autoritativ kilde
+              // Behold lokal inventoryCounts og materials – begge håndteres via RPC og er alltid mest oppdatert lokalt
               return {
                 ...incoming,
                 inventoryCounts: prev.inventoryCounts,
+                materials: prev.materials,
               };
             });
           }
@@ -677,6 +677,32 @@ export default function Page() {
         p_profitability: patch.profitability ?? null,
       }).then(({ error }: any) => {
         if (error) console.error("Supabase RPC error (inventory):", error);
+        setTimeout(() => { isSavingRef.current = false; }, 2000);
+      });
+
+      return next;
+    });
+  }, []);
+
+  const updateMaterialsRpc = React.useCallback((materialsPatch: Record<string, any>) => {
+    setData((prev) => {
+      const next = {
+        ...prev,
+        materials: prev.materials.map((m) => {
+          if (materialsPatch[m.id]) return { ...m, ...materialsPatch[m.id] };
+          return m;
+        }),
+      };
+      const newMaterials = Object.entries(materialsPatch)
+        .filter(([id]) => !prev.materials.find((m) => m.id === id))
+        .map(([, mat]) => mat as Material);
+      if (newMaterials.length) next.materials = [...next.materials, ...newMaterials];
+
+      isSavingRef.current = true;
+      supabase.rpc("update_materials", {
+        p_materials: materialsPatch,
+      }).then(({ error }: any) => {
+        if (error) console.error("Supabase RPC error (materials):", error);
         setTimeout(() => { isSavingRef.current = false; }, 2000);
       });
 
@@ -890,7 +916,7 @@ return (
       {/* ── INNHOLD ── */}
       <div className="main-content">
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
-        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} />}
+        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
@@ -1400,7 +1426,7 @@ const bg = isToday ? "#dcfce7"
   );
 }
 
-function MaterialsTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
+function MaterialsTab({ data, updateData, updateMaterialsRpc }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateMaterialsRpc: (patch: Record<string, any>) => void }) {
   const blank = {
     id: "",
     name: "",
@@ -1512,23 +1538,25 @@ breadScaleFlourPercent:
       priceUpdatedAt: priceChanged ? new Date().toISOString() : oldMaterial?.priceUpdatedAt,
     };
 
-    updateData({ materials: editingId ? data.materials.map((x) => x.id === editingId ? m : x) : [m, ...data.materials] });
+    if (editingId) {
+      updateMaterialsRpc({ [m.id]: m });
+    } else {
+      updateData({ materials: [m, ...data.materials] });
+    }
     reset();
     setShowForm(false);
   }
 
   function updateMaterialInline(materialId: string, patch: Partial<Material>, priceChanged = false) {
-    updateData({
-      materials: data.materials.map((m) => {
-        if (m.id !== materialId) return m;
-        return {
-          ...m,
-          ...patch,
-          updatedAt: new Date().toISOString(),
-          priceUpdatedAt: priceChanged ? new Date().toISOString() : m.priceUpdatedAt,
-        };
-      }),
-     });
+    const existing = data.materials.find((m) => m.id === materialId);
+    if (!existing) return;
+    const updated = {
+      ...existing,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+      priceUpdatedAt: priceChanged ? new Date().toISOString() : existing.priceUpdatedAt,
+    };
+    updateMaterialsRpc({ [materialId]: updated });
 }
 
 function defaultRetailMargin(category: string) {
@@ -6408,7 +6436,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         data.materials.forEach((m) => {
           const c = counts[m.id] as any;
           if (!c?.countedAt) return;
-          const total = Number(c.packages || 0) + Number(c.loose || 0);
+          const total = (Number(c.packages || 0) * Number(m.packageSize || 1)) + Number(c.loose || 0);
           recent.push({ name: m.name, total, unit: m.unit, countedAt: c.countedAt, isProduct: false });
         });
 
