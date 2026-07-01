@@ -1460,6 +1460,7 @@ breadScaleFlourPercent: "0",
   const [showForm, setShowForm] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("Alle");
   const [materialPage, setMaterialPage] = useState(1);
+  const [showRecentMaterials, setShowRecentMaterials] = useState(false);
   const pageSize = 50;
 
   const filtered = data.materials
@@ -1653,7 +1654,60 @@ function defaultRetailMargin(category: string) {
 
     <input value={search} onChange={(e) => { setSearch(e.target.value); setMaterialPage(1); }} placeholder="Søk råvare / leverandør" />
     <div className="chips">{["Alle", ...data.materialCategories].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => { setCategoryFilter(cat); setMaterialPage(1); }}>{cat}</button>)}</div>
-    <p style={{ color: "#64748b" }}>Viser {visibleMaterials.length} av {filtered.length} råvarer. Side {materialPage} av {totalPages}.</p>
+    <button
+        className={showRecentMaterials ? "btn active" : "btn"}
+        onClick={() => setShowRecentMaterials(!showRecentMaterials)}
+        style={{ marginBottom: 12 }}
+      >
+        🕐 Siste oppdaterte råvarer
+      </button>
+
+      {showRecentMaterials && (() => {
+        const recent = [...data.materials]
+          .filter((m) => !!m.updatedAt)
+          .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
+          .slice(0, 20);
+
+        return (
+          <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, marginBottom: 16, overflow: "hidden", background: "white" }}>
+            <div style={{ background: "#0f172a", color: "white", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <b style={{ fontSize: 14 }}>🕐 Siste {recent.length} oppdaterte råvarer</b>
+              <button onClick={() => setShowRecentMaterials(false)} style={{ background: "transparent", border: 0, color: "white", cursor: "pointer", fontSize: 18 }}>×</button>
+            </div>
+            {recent.length === 0 ? (
+              <p style={{ padding: 16, color: "#64748b" }}>Ingen råvarer oppdatert ennå.</p>
+            ) : (
+              <table style={{ marginTop: 0 }}>
+                <thead>
+                  <tr>
+                    <th>Tidspunkt</th>
+                    <th>Råvare</th>
+                    <th>Kategori</th>
+                    <th style={{ textAlign: "right" }}>Pris/enhet</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recent.map((m, i) => {
+                    const d = new Date(m.updatedAt || "");
+                    const dato = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+                    const tid = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+                    return (
+                      <tr key={m.id} style={{ background: i % 2 === 0 ? "white" : "#f8fafc" }}>
+                        <td style={{ color: "#64748b", whiteSpace: "nowrap" }}>{dato} {tid}</td>
+                        <td><b>{m.name}</b></td>
+                        <td style={{ color: "#64748b" }}>{m.category}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{currency(m.pricePerUnit)}/{m.unit}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
+
+      <p style={{ color: "#64748b" }}>Viser {visibleMaterials.length} av {filtered.length} råvarer. Side {materialPage} av {totalPages}.</p>
 
     <table>
       <thead><tr><th>Råvare</th><th>Leverandør</th><th>Kategori</th><th>Pakning</th><th>Pris/enhet</th><th>Utsalgspris</th><th>Margin</th><th>Allergener</th><th></th><th>Sist prisendret</th></tr></thead>
