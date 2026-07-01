@@ -594,11 +594,11 @@ export default function Page() {
       }
 
       if (row.build_id !== localBuildId) {
-        // Vi er nyere enn det som ligger i databasen – oppdater databasen
-        if (row.build_id < localBuildId) {
+        const dbTime = Number(row.build_id) || 0;
+        const myTime = Number(localBuildId) || 0;
+        if (myTime >= dbTime) {
           await supabase.from("app_meta").update({ build_id: localBuildId, updated_at: new Date().toISOString() }).eq("id", "main");
         } else {
-          // Det som ligger i databasen er nyere enn oss – vis banner
           setShowUpdateBanner(true);
         }
       }
