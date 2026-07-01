@@ -271,7 +271,7 @@ type AppData = {
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
-const BUILD_ID = "2026-06-30a";
+const BUILD_ID = "2026-07-01a";
 
 const defaultAllergens = ["Gluten", "Hvete", "Rug", "Spelt", "Bygg", "Egg", "Melk", "Laktose", "Fisk", "Skalldyr", "Bløtdyr", "Selleri", "Lupin", "Sulfitt", "Nøtter", "Hasselnøtt", "Mandler", "Valnøtt", "Pistasj", "Peanøtter", "Sesam", "Soya"];
 const defaultMaterialCategories = ["Mat", "Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
