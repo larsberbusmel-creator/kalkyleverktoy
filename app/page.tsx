@@ -271,6 +271,7 @@ type AppData = {
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
+const BUILD_ID = "2026-06-30a";
 
 const defaultAllergens = ["Gluten", "Hvete", "Rug", "Spelt", "Bygg", "Egg", "Melk", "Laktose", "Fisk", "Skalldyr", "Bløtdyr", "Selleri", "Lupin", "Sulfitt", "Nøtter", "Hasselnøtt", "Mandler", "Valnøtt", "Pistasj", "Peanøtter", "Sesam", "Soya"];
 const defaultMaterialCategories = ["Mat", "Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
@@ -515,6 +516,7 @@ export default function Page() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
+  const [showUpdateBanner, setShowUpdateBanner] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -566,6 +568,34 @@ export default function Page() {
   }, []);
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
+
+  useEffect(() => {
+    async function checkBuild() {
+      const { data: row, error } = await supabase.from("app_meta").select("build_id").eq("id", "main").single();
+      if (!error && row?.build_id && row.build_id !== BUILD_ID) {
+        setShowUpdateBanner(true);
+      }
+    }
+    checkBuild();
+
+    const channel = supabase
+      .channel("app_meta_changes")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "app_meta", filter: "id=eq.main" },
+        (payload) => {
+          const newBuildId = (payload.new as any)?.build_id;
+          if (newBuildId && newBuildId !== BUILD_ID) {
+            setShowUpdateBanner(true);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const updateData = React.useCallback((partial: Partial<AppData>) => {
   setData((prev) => {
@@ -773,6 +803,12 @@ function productCost(product: Product, visited: string[] = []) {
 
 return (
   <main style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
+    {showUpdateBanner && (
+      <div style={{ position: "sticky", top: 0, zIndex: 200, background: "#f59e0b", color: "white", padding: "10px 16px", display: "flex", justifyContent: "center", alignItems: "center", gap: 12, fontWeight: 700, fontSize: 14 }}>
+        <span>⚠️ Ny versjon av appen er tilgjengelig. Last inn på nytt for å unngå at data overskrives.</span>
+        <button onClick={() => window.location.reload()} style={{ background: "white", color: "#92400e", border: 0, borderRadius: 8, padding: "6px 14px", fontWeight: 800, cursor: "pointer" }}>Last inn på nytt</button>
+      </div>
+    )}
     <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", gap: 0 }}>
 
       {/* ── VENSTRE SIDEBAR (desktop) ── */}
