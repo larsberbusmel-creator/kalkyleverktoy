@@ -556,7 +556,15 @@ export default function Page() {
         (payload) => {
           if (isSavingRef.current) return;
           if (payload.new?.data) {
-            setData(migrateData(payload.new.data));
+            setData((prev) => {
+              const incoming = migrateData(payload.new.data);
+              // Behold lokal inventoryCounts – den er alltid mest oppdatert siden vi bruker RPC for den
+              // For alt annet (ordre, produkter, råvarer osv.) bruker vi incoming-data som autoritativ kilde
+              return {
+                ...incoming,
+                inventoryCounts: prev.inventoryCounts,
+              };
+            });
           }
         }
       )
@@ -6440,7 +6448,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                       <tr key={p.id}>
                         <td><b>{p.name}</b><br /><small style={{ color: "#64748b" }}>{p.productNumber || "-"}</small></td>
                         <td>{currency(unitCost)}</td><td>{Number(p.unitsPerCase || 1)} stk</td>
-{locations.map((loc) => { const lc = getProductCount(p.id, loc); return (<><td key={`${p.id}-${loc}-e`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} value={lc.cases || ""} onChange={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${p.id}-${loc}-l`}><input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>
+{locations.map((loc) => { const lc = getProductCount(p.id, loc); return (<><td key={`${p.id}-${loc}-e`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} defaultValue={lc.cases || ""} key={`${p.id}-${loc}-e-${lc.cases}`} onBlur={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${p.id}-${loc}-l`}><input type="number" disabled={isLocked} defaultValue={lc.loose || ""} key={`${p.id}-${loc}-l-${lc.loose}`} onBlur={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} defaultValue={wasteAmt || ""} key={`${p.id}-waste-${wasteAmt}`} onBlur={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
                     ); })}
@@ -6468,8 +6476,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                     {materials.map((m) => { const value = materialInventoryValue(m); const wasteAmt = getMaterialWaste(m.id); const prevTotal = getPrevMaterialTotal(m.id); return (
                       <tr key={m.id}>
 <td><b>{m.name}</b></td><td>{currency(m.packagePrice)}</td><td>{m.packageSize} {m.unit}</td>
-                        {locations.map((loc) => { const lc = getLocationCount(m.id, loc); return (<><td key={`${m.id}-${loc}-p`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} value={lc.packages || ""} onChange={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${m.id}-${loc}-l`}><input type="number" disabled={isLocked} value={lc.loose || ""} onChange={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}
-<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} value={wasteAmt || ""} onChange={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>                        <td><b>{currency(value)}</b></td>
+                        {locations.map((loc) => { const lc = getLocationCount(m.id, loc); return (<><td key={`${m.id}-${loc}-p`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} defaultValue={lc.packages || ""} key={`${m.id}-${loc}-p-${lc.packages}`} onBlur={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${m.id}-${loc}-l`}><input type="number" disabled={isLocked} defaultValue={lc.loose || ""} key={`${m.id}-${loc}-l-${lc.loose}`} onBlur={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}
+<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} defaultValue={wasteAmt || ""} key={`${m.id}-waste-${wasteAmt}`} onBlur={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>                        <td><b>{currency(value)}</b></td>
                       </tr>
                     ); })}
                   </tbody>
