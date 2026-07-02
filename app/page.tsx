@@ -554,6 +554,7 @@ export default function Page() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "app_data", filter: "id=eq.main" },
         (payload) => {
+          console.log("Realtime mottatt:", new Date().toISOString(), payload?.new?.updated_at);
           if (payload.new?.data) {
             setData((prev) => {
               const incoming = migrateData(payload.new.data);
