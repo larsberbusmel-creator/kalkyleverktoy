@@ -5855,8 +5855,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     const packages = Number(c.packages || 0);
     const loose = Number(c.loose || 0);
     const packagePrice = c.packagePrice ?? m.packagePrice;
-    const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
-    return packages * packagePrice + loose * pricePerUnit;
+    return packages * packagePrice + loose * packagePrice;
   }
 
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
@@ -5993,6 +5992,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
       });
       const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), bucketWasteValue(bucket), bucketValue(bucket)]);
       sumRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00"; });
+      ws.pageSetup = { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 } };
     });
     const allEgenprodCategories = Array.from(new Set(data.products.map((p) => p.category))).filter((c) => egenprodusertCategories.includes(c));
     allEgenprodCategories.forEach((bucket) => {
@@ -6019,6 +6019,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
       });
       const sumRow = ws.addRow([`SUM ${bucket}`, "", "", ...locations.flatMap(() => ["", ""]), bucketWasteValue(bucket), egenprodusertBucketValue(bucket)]);
       sumRow.eachCell((cell: any, colNumber: number) => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `44${color}` } }; cell.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } }; if (colNumber === totalCols || colNumber === totalCols - 1) cell.numFmt = "#,##0.00"; });
+      ws.pageSetup = { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 } };
     });
     const wsWaste = wb.addWorksheet("Svinn");
     wsWaste.columns = [{ width: 35 }, { width: 20 }, { width: 20 }];
