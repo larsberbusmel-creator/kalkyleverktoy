@@ -5855,7 +5855,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     const packages = Number(c.packages || 0);
     const loose = Number(c.loose || 0);
     const packagePrice = c.packagePrice ?? m.packagePrice;
-    return packages * packagePrice + loose * packagePrice;
+    const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+    return packages * packagePrice + loose * pricePerUnit;
   }
 
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
