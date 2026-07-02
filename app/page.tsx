@@ -6080,7 +6080,9 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     fInputGreen(wsFront, 5, 8);
     const drinkCategories = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
     const matBuckets = data.materialCategories.filter((c: string) => !drinkCategories.includes(c) && c !== "Mat");
-    const matTotal = matBuckets.reduce((sum: number, b: string) => sum + bucketValue(b), 0);
+    const egenprodTotal = egenprodusertCategories.reduce((sum: number, b: string) => sum + bucketValue(b), 0);
+    const deliTotal = bucketValue("Deli");
+    const matTotal = matBuckets.reduce((sum: number, b: string) => sum + bucketValue(b), 0) + egenprodTotal + deliTotal;
     wsFront.getRow(6).height = 24.75; fLbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):"); mergeF(wsFront, 6, 3, 6, 4); fVal(wsFront, 6, 3, Math.round(matTotal * 100) / 100);
     const g6 = wsFront.getCell(6, 7); g6.value = "Levert Loomis siste mnd/ Delivered to Loomis last month"; g6.font = { size: 11 }; g6.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g6.border = border; fInputGreen(wsFront, 6, 8);
     wsFront.getRow(7).height = 41.25; fLbl(wsFront, 7, 2, "Mat (Evt. eksternt lager):"); mergeF(wsFront, 7, 3, 7, 4); fVal(wsFront, 7, 3, 0);
