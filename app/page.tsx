@@ -5950,7 +5950,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         const loose = Number(c.loose || 0);
         const packagePrice = c.packagePrice ?? m.packagePrice;
         const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
-        return sum + packages * packagePrice + loose * pricePerUnit;
+        const looseVal = m.unit === "stk" ? loose * pricePerUnit : loose * packagePrice;
+        return sum + packages * packagePrice + looseVal;
       }, 0);
     const monthEgenprodTotal = egenprodusertCategories.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0);
     return {
