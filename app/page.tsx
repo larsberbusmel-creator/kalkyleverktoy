@@ -5928,7 +5928,14 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
       }, 0);
     }
     const items = countsByMonth[monthKey]?.items || {};
-    return data.materials.reduce((sum, m) => { if (!belongsToBucket(m, bucket)) return sum; const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit }; return sum + c.packages * (c.packagePrice ?? m.packagePrice) + c.loose * (c.pricePerUnit ?? m.pricePerUnit); }, 0);
+    return data.materials.reduce((sum, m) => {
+      if (!belongsToBucket(m, bucket)) return sum;
+      const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
+      const packagePrice = c.packagePrice ?? m.packagePrice;
+      const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+      const looseValue = m.unit === "stk" ? c.loose * pricePerUnit : c.loose * packagePrice;
+      return sum + c.packages * packagePrice + looseValue;
+    }, 0);
   }
 
   const inventoryHistory = Object.keys(countsByMonth).sort().map((monthKey) => {
