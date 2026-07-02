@@ -554,11 +554,19 @@ export default function Page() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "app_data", filter: "id=eq.main" },
         (payload) => {
-          if (isSavingRef.current) return;
           if (payload.new?.data) {
             setData((prev) => {
               const incoming = migrateData(payload.new.data);
-              // Behold lokal inventoryCounts og materials – begge håndteres via RPC og er alltid mest oppdatert lokalt
+              if (isSavingRef.current) {
+                // Vi holder på å lagre selv – behold lokal state for alt,
+                // men hent inventoryCounts fra databasen siden RPC alltid er autoritativ der
+                return {
+                  ...prev,
+                  inventoryCounts: incoming.inventoryCounts,
+                };
+              }
+              // Ikke i ferd med å lagre – ta inn alt fra databasen, men behold lokal inventoryCounts
+              // siden vår lokale RPC-oppdatering kan være nyere enn det som nettopp kom inn
               return {
                 ...incoming,
                 inventoryCounts: prev.inventoryCounts,
@@ -677,7 +685,7 @@ export default function Page() {
         p_profitability: patch.profitability ?? null,
       }).then(({ error }: any) => {
         if (error) console.error("Supabase RPC error (inventory):", error);
-        setTimeout(() => { isSavingRef.current = false; }, 2000);
+        setTimeout(() => { isSavingRef.current = false; }, 500);
       });
 
       return next;
@@ -703,7 +711,7 @@ export default function Page() {
         p_materials: materialsPatch,
       }).then(({ error }: any) => {
         if (error) console.error("Supabase RPC error (materials):", error);
-        setTimeout(() => { isSavingRef.current = false; }, 2000);
+        setTimeout(() => { isSavingRef.current = false; }, 500);
       });
 
       return next;
@@ -5630,7 +5638,16 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
   const [expandedMobileId, setExpandedMobileId] = useState<string | null>(null);
   const [showAllLocations, setShowAllLocations] = useState(false);
   const [showRecentCounts, setShowRecentCounts] = useState(false);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(true);
   const pageSize = 50;
+
+  React.useEffect(() => {
+    const channel = supabase.channel("inventory-presence")
+      .subscribe((status) => {
+        setIsRealtimeConnected(status === "SUBSCRIBED");
+      });
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   function toggleMobileCard(id: string) {
     const currentScroll = window.scrollY;
@@ -5856,10 +5873,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     const loose = Number(c.loose || 0);
     const packagePrice = c.packagePrice ?? m.packagePrice;
     const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
-    const looseValue = m.unit === "stk"
-      ? loose * pricePerUnit
-      : loose * packagePrice;
-    return packages * packagePrice + looseValue;
+    const looseVal = m.category === "Brennevin" ? loose * packagePrice : loose * pricePerUnit;
+    return packages * packagePrice + looseVal;
   }
 
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
@@ -5933,8 +5948,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
       const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
       const packagePrice = c.packagePrice ?? m.packagePrice;
       const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
-      const looseValue = m.unit === "stk" ? c.loose * pricePerUnit : c.loose * packagePrice;
-      return sum + c.packages * packagePrice + looseValue;
+      const looseVal2 = m.category === "Brennevin" ? c.loose * packagePrice : c.loose * pricePerUnit;
+      return sum + c.packages * packagePrice + looseVal2;
     }, 0);
   }
 
@@ -5950,8 +5965,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         const loose = Number(c.loose || 0);
         const packagePrice = c.packagePrice ?? m.packagePrice;
         const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
-        const looseVal = m.unit === "stk" ? loose * pricePerUnit : loose * packagePrice;
-        return sum + packages * packagePrice + looseVal;
+        const looseVal3 = m.category === "Brennevin" ? loose * packagePrice : loose * pricePerUnit;
+        return sum + packages * packagePrice + looseVal3;
       }, 0);
     const monthEgenprodTotal = egenprodusertCategories.reduce((sum, b) => sum + valueForBucketInMonth(monthKey, b), 0);
     return {
@@ -6343,7 +6358,13 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
 
   return (
     <section className="card">
-      <h2>Varetelling</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <h2 style={{ margin: 0 }}>Varetelling</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: isRealtimeConnected ? "#166534" : "#991b1b" }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: isRealtimeConnected ? "#16a34a" : "#dc2626" }} />
+          {isRealtimeConnected ? "Live" : "Frakoblet"}
+        </div>
+      </div>
 
       <div className="form-grid three">
         <label>Måned<select value={month} onChange={(e) => { setInventoryMonth(`${year}-${e.target.value}`); setInventoryPage(1); }}><option value="01">Januar</option><option value="02">Februar</option><option value="03">Mars</option><option value="04">April</option><option value="05">Mai</option><option value="06">Juni</option><option value="07">Juli</option><option value="08">August</option><option value="09">September</option><option value="10">Oktober</option><option value="11">November</option><option value="12">Desember</option></select></label>
