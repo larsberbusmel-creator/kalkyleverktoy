@@ -600,7 +600,9 @@ export default function Page() {
             const incoming = migrateData(fullRow.data);
             return {
               ...incoming,
-              inventoryCounts: prev.inventoryCounts,
+              // Ved polling tar vi alltid inn inventoryCounts fra databasen
+              // siden RPC garanterer at databasen alltid har komplett og korrekt data
+              inventoryCounts: incoming.inventoryCounts,
               materials: prev.materials,
             };
           });
