@@ -579,8 +579,33 @@ export default function Page() {
       )
       .subscribe();
 
+    // Polling som backup hvis Realtime ikke leverer
+    const lastUpdatedRef = { current: "" };
+    const pollInterval = setInterval(async () => {
+      if (isSavingRef.current) return;
+      const { data: row } = await supabase
+        .from("app_data")
+        .select("updated_at, data")
+        .eq("id", "main")
+        .single();
+      if (row?.updated_at && row.updated_at !== lastUpdatedRef.current) {
+        lastUpdatedRef.current = row.updated_at;
+        if (row.data) {
+          setData((prev) => {
+            const incoming = migrateData(row.data);
+            return {
+              ...incoming,
+              inventoryCounts: prev.inventoryCounts,
+              materials: prev.materials,
+            };
+          });
+        }
+      }
+    }, 3000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollInterval);
     };
   }, []);
 
