@@ -583,16 +583,21 @@ export default function Page() {
     const lastUpdatedRef = { current: "" };
     const pollInterval = setInterval(async () => {
       if (isSavingRef.current) return;
-      const { data: row } = await supabase
+      const { data: tsRow } = await supabase
         .from("app_data")
-        .select("updated_at, data")
+        .select("updated_at")
         .eq("id", "main")
         .single();
-      if (row?.updated_at && row.updated_at !== lastUpdatedRef.current) {
-        lastUpdatedRef.current = row.updated_at;
-        if (row.data) {
+      if (tsRow?.updated_at && tsRow.updated_at !== lastUpdatedRef.current) {
+        lastUpdatedRef.current = tsRow.updated_at;
+        const { data: fullRow } = await supabase
+          .from("app_data")
+          .select("data")
+          .eq("id", "main")
+          .single();
+        if (fullRow?.data) {
           setData((prev) => {
-            const incoming = migrateData(row.data);
+            const incoming = migrateData(fullRow.data);
             return {
               ...incoming,
               inventoryCounts: prev.inventoryCounts,
