@@ -684,8 +684,18 @@ export default function Page() {
         p_locked: patch.locked ?? null,
         p_prices_frozen: patch.pricesFrozen ?? null,
         p_profitability: patch.profitability ?? null,
-      }).then(({ error }: any) => {
-        if (error) console.error("Supabase RPC error (inventory):", error);
+      }).then(async ({ data, error }: any) => {
+        if (error) {
+          console.error("Supabase RPC error (inventory):", error);
+        } else if (data) {
+          // Trigger Realtime ved å oppdatere updated_at på app_data
+          // RPC returnerer oppdatert data – vi trenger ikke skrive hele blokken tilbake,
+          // bare trigge en minimal UPDATE som Realtime plukker opp
+          await supabase
+            .from("app_data")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", "main");
+        }
         setTimeout(() => { isSavingRef.current = false; }, 500);
       });
 
