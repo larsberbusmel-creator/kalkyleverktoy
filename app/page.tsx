@@ -4183,6 +4183,15 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
         }
       }
     });
+    const materialRows = product.lines
+      .filter((pl) => pl.itemType === "material")
+      .map((pl) => {
+        const m = data.materials.find((x) => x.id === pl.itemId);
+        return `<tr><td>${escapeHtml(m?.name || "Ukjent råvare")}</td><td class="right">${num(Number(pl.amount || 0) * quantity, 3)} ${escapeHtml(pl.unit)}</td></tr>`;
+      }).join("");
+    if (materialRows) {
+      html += `<table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${materialRows}</tbody></table>`;
+    }
     return html;
   }
 
