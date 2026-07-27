@@ -307,6 +307,13 @@ function num(value: number, digits = 2) {
   return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: digits }).format(Number(value) || 0);
 }
 
+function formatAmountUnit(amount: number, unit: string, digits = 2) {
+  if (unit === "kg" && Math.abs(amount) < 1) {
+    return `${num(amount * 1000, 0)} g`;
+  }
+  return `${num(amount, digits)} ${unit}`;
+}
+
 function escapeHtml(value: string) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -4186,8 +4193,8 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
       return list.map((g) => {
         const header = g.key ? `<tr><td colspan="2" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
         const rows = g.rows.map((r) => {
-          const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${num(r.perUnit, 3)} ${escapeHtml(r.unit)}</span>` : "";
-          return `<tr><td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`;
+          const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${escapeHtml(formatAmountUnit(r.perUnit, r.unit, 3))}</span>` : "";
+          return `<tr><td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${escapeHtml(formatAmountUnit(r.amount, r.unit))}</td></tr>`;
         }).join("");
         const groupTable = `<table style="width:100%;border-collapse:collapse">${header}${rows}</table>`;
         return `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
@@ -4303,7 +4310,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     return html;
   }
 
-  function printOrder(order: Order, includeProduction = true) {
+  function printOrder(order: Order, printLevel: "basis" | "recipes" | "full" = "full") {
     const rows = order.orderLines.map((line) => {
       const product = data.products.find((p) => p.id === line.productId);
       const lineTotal = (product?.customerPrice || 0) * line.quantity;
@@ -4323,7 +4330,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
       ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel: ordren inneholder produkter med ${escapeHtml(allergenWarnings.join(", "))}</div>`
       : "";
     let prodSection = "";
-    if (includeProduction) {
+    {
       const isBakery = order.type === "bakeri" || order.type === "egenprodusert";
       if (isBakery) {
         const prodPages = order.orderLines.map((line) => {
@@ -4340,13 +4347,13 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
               let name = "Ukjent"; let unit = recipe.yieldUnit;
               if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
               if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
-              return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(rl.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
+              return `<tr><td>${escapeHtml(name)}</td><td class="right">${escapeHtml(formatAmountUnit(Number(rl.amount || 0) * scale, unit, 3))}</td></tr>`;
             }).join("");
             recipeMap[recipe.id] = { name: recipe.name, totalAmount, unit: pl.unit, ingredientRows };
           });
           const directMaterialRows = product.lines.filter((pl) => pl.itemType === "material").map((pl) => {
             const m = data.materials.find((x) => x.id === pl.itemId);
-            return `<tr><td>${escapeHtml(m?.name || "Ukjent")}</td><td class="right">${num(Number(pl.amount || 0) * qty, 3)} ${escapeHtml(pl.unit)}</td></tr>`;
+            return `<tr><td>${escapeHtml(m?.name || "Ukjent")}</td><td class="right">${escapeHtml(formatAmountUnit(Number(pl.amount || 0) * qty, pl.unit, 3))}</td></tr>`;
           }).join("");
           const recipeBlocks = Object.values(recipeMap).map((entry) =>
             `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(entry.name)} – ${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)} (for ${qty} stk)</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${entry.ingredientRows}</tbody></table></div>`
@@ -4359,13 +4366,13 @@ prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPa
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
 const twoColHtml = productionTwoColumnHtml(expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections));          return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
         }).join("");
-        const recipePages = order.orderLines.map((line) => {
+        const recipePages = printLevel === "basis" ? "" : order.orderLines.map((line) => {
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
           const html = scaledRecipeHtmlForOrder(product, Number(line.quantity) || 0, line.menuSelections);
           if (!html) return "";
           return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
         }).join("");
-const materialsAgg = collectOrderMaterials(order);
+const materialsAgg = printLevel === "full" ? collectOrderMaterials(order) : {};
         const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
         Object.values(materialsAgg).forEach((entry) => {
           if (!byCategory[entry.category]) byCategory[entry.category] = [];
@@ -4873,12 +4880,24 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                 </table>
                 <details style={{ marginTop: 10 }}>
                   <summary style={{ cursor: "pointer", color: "#64748b" }}>Produksjonsgrunnlag</summary>
-                  <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.courseName || r.source}</td><td>{r.name}</td><td>{num(r.amount)} {r.unit}</td></tr>)}</tbody></table>
+                  <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.courseName || r.source}</td><td>{r.name}</td><td>{formatAmountUnit(r.amount, r.unit)}</td></tr>)}</tbody></table>
                 </details>
                 <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                   <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
-                  <button className="btn" onClick={() => printOrder(o, true)}>Print med grunnlag</button>
-                  <button className="btn" onClick={() => printOrder(o, false)}>Print uten grunnlag</button>
+                  <select
+                    className="btn"
+                    defaultValue=""
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) printOrder(o, v as "basis" | "recipes" | "full");
+                      e.target.value = "";
+                    }}
+                  >
+                    <option value="" disabled>Skriv ut...</option>
+                    <option value="basis">Print ordre</option>
+                    <option value="recipes">Print med oppskrift</option>
+                    <option value="full">Print med oppskrift/varebestilling</option>
+                  </select>
                   <button className="btn danger" onClick={() => softDeleteOrder(o.id)}>Flytt til papirkurv</button>
                 </div>
               </div>
