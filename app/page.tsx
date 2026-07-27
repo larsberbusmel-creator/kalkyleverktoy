@@ -3824,6 +3824,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens }: {
   const [form, setForm] = useState<Order>(emptyOrder());
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [lineToAdd, setLineToAdd] = useState({ productId: "", quantity: 1 });
+  const [addProductSearch, setAddProductSearch] = useState("");
   const [menuSelectionDraft, setMenuSelectionDraft] = useState<Record<string, { productId: string; guestCount: number }[]>>({});
   const [showNewOrder, setShowNewOrder] = useState(false);
   const [showWebshopImport, setShowWebshopImport] = useState(false);
@@ -4014,6 +4015,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens }: {
       setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] });
     }
     setLineToAdd({ productId: "", quantity: form.guests || 1 });
+    setAddProductSearch("");
     setMenuSelectionDraft({});
   }
 
@@ -4592,13 +4594,39 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           )}
           <h3>Legg til produkt / meny</h3>
           <div className="form-grid three">
-            <select value={lineToAdd.productId} onChange={(e) => {
-              setLineToAdd({ ...lineToAdd, productId: e.target.value });
-              setMenuSelectionDraft({});
-            }}>
-              <option value="">Velg produkt</option>
-              {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <div className="search-picker">
+              <input
+                value={addProductSearch || (data.products.find((p) => p.id === lineToAdd.productId)?.name || "")}
+                onChange={(e) => {
+                  setAddProductSearch(e.target.value);
+                  setLineToAdd({ ...lineToAdd, productId: "" });
+                  setMenuSelectionDraft({});
+                }}
+                placeholder="Søk og velg produkt"
+              />
+              {addProductSearch && (
+                <div className="search-dropdown inline">
+                  {data.products
+                    .filter((p) => p.name.toLowerCase().includes(addProductSearch.toLowerCase()))
+                    .slice(0, 12)
+                    .map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="search-result"
+                        onClick={() => {
+                          setLineToAdd({ ...lineToAdd, productId: p.id });
+                          setMenuSelectionDraft({});
+                          setAddProductSearch("");
+                        }}
+                      >
+                        <b>{p.name}</b>
+                        <small>{p.category}</small>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
             <input type="number" value={lineToAdd.quantity} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
             <button className="btn" onClick={addOrderLine}>Legg til</button>
           </div>
