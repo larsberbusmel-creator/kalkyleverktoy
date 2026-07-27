@@ -4228,7 +4228,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
         const subProduct = data.products.find((x) => x.id === pl.itemId);
         if (subProduct && subProduct.id !== product.id) {
           const totalAmount = Number(pl.amount || 0) * quantity;
-          const subYield = Number(subProduct.yieldAmount || 1) || 1;
+          const subYield = Number(subProduct.recipeYieldAmount || subProduct.yieldAmount || 1) || 1;
           const subScale = totalAmount / subYield;
           html += `<div class="recipe-block"><h3>Produkt: ${escapeHtml(subProduct.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3>${scaledRecipeHtmlForOrder(subProduct, subScale, undefined, true)}</div>`;
         }
