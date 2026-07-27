@@ -760,6 +760,29 @@ export default function Page() {
     });
   }, []);
 
+  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => {
+    setData((prev) => {
+      const list = (prev as any)[listKey] as any[];
+      const next = { ...prev } as any;
+      next[listKey] = list.map((item) => itemsPatch[item.id] ? itemsPatch[item.id] : item);
+      const newItems = Object.entries(itemsPatch)
+        .filter(([id]) => !list.find((item) => item.id === id))
+        .map(([, item]) => item);
+      if (newItems.length) next[listKey] = [...next[listKey], ...newItems];
+
+      isSavingRef.current = true;
+      supabase.rpc("update_list_items", {
+        p_list_key: listKey,
+        p_items: itemsPatch,
+      }).then(({ error }: any) => {
+        if (error) console.error(`Supabase RPC error (${listKey}):`, error);
+        setTimeout(() => { isSavingRef.current = false; }, 500);
+      });
+
+      return next;
+    });
+  }, []);
+
   function exportData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -967,9 +990,9 @@ return (
       <div className="main-content">
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} />}
-        {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
-        {tab === "products"   && <ProductsTab data={data} updateData={updateData} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} productAllergens={productAllergens} />}
+        {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
+        {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} />}
@@ -1800,7 +1823,7 @@ function defaultRetailMargin(category: string) {
   </section>;
 }
 
-function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[] }) {
+function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[] }) {
   const [selectedId, setSelectedId] = useState(data.recipes[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
@@ -1858,7 +1881,7 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
       yieldUnit: form.yieldUnit,
       lines: draftLines,
     };
-    updateData({ recipes: mode === "edit" ? data.recipes.map((r) => r.id === recipe.id ? recipe : r) : [recipe, ...data.recipes] });
+    updateListRpc("recipes", { [recipe.id]: recipe });
     setSelectedId(recipe.id);
     setMode("view");
     setDraftLines([]);
@@ -2136,7 +2159,7 @@ function RecipesTab({ data, updateData, recipeCost, recipeUnitCost, recipeTotalA
   );
 }
 
-function ProductsTab({ data, updateData, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
+function ProductsTab({ data, updateData, updateListRpc, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
   const [selectedId, setSelectedId] = useState(data.products[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
 const [form, setForm] = useState({
@@ -2300,11 +2323,7 @@ if (exists) {
   return alert("Produktnummer finnes allerede!");
 }
 
-    updateData({
-      products: mode === "edit"
-        ? data.products.map((x) => x.id === product.id ? product : x)
-        : [product, ...data.products],
-    });
+    updateListRpc("products", { [product.id]: product });
 
     setSelectedId(product.id);
     setMode("view");
@@ -2372,7 +2391,7 @@ function copyProduct(p: Product) {
   };
 
   // legg til i state
-  updateData({ products: [copy, ...data.products] });
+  updateListRpc("products", { [copy.id]: copy });
 
   setForm({
 productNumber: copy.productNumber,    name: copy.name,
@@ -3749,7 +3768,8 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, productAllergens }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens }: {
+  updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productAllergens: (p: Product) => string[];
@@ -3926,14 +3946,12 @@ function OrdersTab({ data, updateData, productAllergens }: {
 
     if (existing) {
       if (!confirm(`Ordrenr ${webshopPreview.orderNumber} finnes allerede. Oppdatere?`)) return;
-      updateData({ orders: data.orders.map((o) => o.id === existing.id ? { ...webshopPreview, id: existing.id } : o) });
+      updateListRpc("orders", { [existing.id]: { ...webshopPreview, id: existing.id } });
       alert("Eksisterende ordre oppdatert.");
     } else {
       const seenIds = data.seenOrderIds || [];
-      updateData({
-        orders: [webshopPreview, ...data.orders],
-        seenOrderIds: [...seenIds, webshopPreview.id],
-      });
+      updateListRpc("orders", { [webshopPreview.id]: webshopPreview });
+      updateData({ seenOrderIds: [...seenIds, webshopPreview.id] });
       alert("Webshopordre opprettet.");
     }
 
@@ -3993,11 +4011,7 @@ function OrdersTab({ data, updateData, productAllergens }: {
     if (!form.companyName?.trim() && form.customerType === "bedrift") return alert("Legg inn bedriftsnavn.");
     if (!cleanLines.length) return alert("Legg inn minst ett produkt/meny i ordren.");
     const savedOrder = { ...form, id: editingOrderId || `order-${Date.now()}`, orderLines: cleanLines };
-    updateData({
-      orders: editingOrderId
-        ? data.orders.map((o) => o.id === editingOrderId ? savedOrder : o)
-        : [savedOrder, ...data.orders],
-    });
+    updateListRpc("orders", { [savedOrder.id]: savedOrder });
     setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false);
   }
 
