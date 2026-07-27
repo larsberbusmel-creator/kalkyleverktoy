@@ -3276,7 +3276,6 @@ th{background:#f3f4f6}
     <th>Mengde</th>
     <th>Svinn %</th>
     <th>Enhet</th>
-    <th>Gruppe</th>
     <th>Kost</th>
     <th></th>
   </tr>
@@ -3286,7 +3285,7 @@ th{background:#f3f4f6}
                 <React.Fragment key={i}>
                 {isGroupFirstLine(draftLines, i) && l.groupLabel && (
                   <tr style={{ background: Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#e2e8f0" : "#c7d2fe", borderTop: i > 0 ? "3px solid #94a3b8" : undefined }}>
-                    <td colSpan={8} style={{ padding: "6px 10px" }}>
+                    <td colSpan={7} style={{ padding: "6px 10px" }}>
                       <input
                         value={l.groupLabel}
                         onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
@@ -3346,7 +3345,6 @@ th{background:#f3f4f6}
   />
 </td>
                   <td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
-                  <td><input value={l.groupLabel || ""} onChange={(e) => updateDraftLine(i, { groupLabel: e.target.value || undefined })} placeholder="-" style={{ minWidth: 100 }} /></td>
                   <td>{currency(lineCost(l))}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
