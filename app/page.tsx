@@ -3277,7 +3277,7 @@ th{background:#f3f4f6}
 </thead>
             <tbody>
               {draftLines.map((l, i) => (
-                <tr key={i}>
+                <tr key={i} style={{ background: l.groupLabel ? (Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#f8fafc" : "#eef2ff") : "white", borderTop: isGroupFirstLine(draftLines, i) && i > 0 ? "3px solid #94a3b8" : undefined }}>
                   <td>
                     <select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}>
                       <option value="material">Råvare</option>
@@ -3285,7 +3285,14 @@ th{background:#f3f4f6}
                       <option value="product">Produkt</option>
                     </select>
                   </td>
-                  <td><input value={lineItemName(l.itemType, l.itemId)} readOnly /></td>
+                  <td>
+                    <select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
+                      <option value="">Velg</option>
+                      {l.itemType === "material" && data.materials.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {l.itemType === "recipe" && data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      {l.itemType === "product" && data.products.filter((p) => p.id !== selected?.id).slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </td>
                   <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
                   <td>
   <input
