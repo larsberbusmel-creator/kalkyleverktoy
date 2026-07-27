@@ -2444,6 +2444,11 @@ unitWeightKg: "1",
     return groupBounds(lines, index).start === index;
   }
 
+  function renameGroup(oldLabel: string, newLabel: string) {
+    const trimmed = newLabel.trim();
+    setDraftLines((prev) => prev.map((l) => (l.groupLabel === oldLabel ? { ...l, groupLabel: trimmed || undefined } : l)));
+  }
+
   function moveGroup(index: number, direction: -1 | 1) {
     setDraftLines((prev) => {
       const { start, end } = groupBounds(prev, index);
@@ -3278,7 +3283,20 @@ th{background:#f3f4f6}
 </thead>
             <tbody>
               {draftLines.map((l, i) => (
-                <tr key={i} style={{ background: l.groupLabel ? (Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#f8fafc" : "#eef2ff") : "white", borderTop: isGroupFirstLine(draftLines, i) && i > 0 ? "3px solid #94a3b8" : undefined }}>
+                <React.Fragment key={i}>
+                {isGroupFirstLine(draftLines, i) && l.groupLabel && (
+                  <tr style={{ background: Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#e2e8f0" : "#c7d2fe", borderTop: i > 0 ? "3px solid #94a3b8" : undefined }}>
+                    <td colSpan={8} style={{ padding: "6px 10px" }}>
+                      <input
+                        value={l.groupLabel}
+                        onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
+                        style={{ fontWeight: 700, fontSize: 14, border: "none", background: "transparent", width: "100%", outline: "none" }}
+                        placeholder="Gruppenavn"
+                      />
+                    </td>
+                  </tr>
+                )}
+                <tr style={{ background: l.groupLabel ? (Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#f8fafc" : "#eef2ff") : "white", borderTop: isGroupFirstLine(draftLines, i) && i > 0 && !l.groupLabel ? "3px solid #94a3b8" : undefined }}>
                   <td>
                     <select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}>
                       <option value="material">Råvare</option>
@@ -3340,6 +3358,7 @@ th{background:#f3f4f6}
                     )}
                   </td>
                 </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
