@@ -547,8 +547,11 @@ export default function Page() {
     }
 
     loadData();
+  supabase.rpc("ensure_daily_backup").then(({ error }: any) => {
+    if (error) console.error("Backup error:", error);
+  });
 
-    const channel = supabase
+  const channel = supabase
       .channel("app_data_changes")
       .on(
         "postgres_changes",
