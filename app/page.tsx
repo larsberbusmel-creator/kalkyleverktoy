@@ -2488,9 +2488,12 @@ function addLine() {
     const r = l.itemType === "recipe" ? data.recipes.find((x) => x.id === l.itemId) : undefined;
     const p = l.itemType === "product" ? data.products.find((x) => x.id === l.itemId) : undefined;
 
-    if (l.itemType === "material") return l.amount * (m?.pricePerUnit || 0);
-    if (l.itemType === "recipe") return l.amount * (r ? recipeUnitCost(r) : 0);
-    return l.amount * (p ? productUnitCost(p) : 0);
+    const waste = Math.min(Number(l.wastePercent || 0), 95) / 100;
+    const adjustedAmount = waste > 0 ? l.amount / (1 - waste) : l.amount;
+
+    if (l.itemType === "material") return adjustedAmount * (m?.pricePerUnit || 0);
+    if (l.itemType === "recipe") return adjustedAmount * (r ? recipeUnitCost(r) : 0);
+    return adjustedAmount * (p ? productUnitCost(p) : 0);
   }
 
   function lineItemName(itemType: ProductLine["itemType"], itemId: string) {
@@ -4947,6 +4950,17 @@ button{padding:10px 14px;border-radius:10px;border:1px solid #111827;background:
       if (pl.itemType === "material") {
         const m = data.materials.find((x) => x.id === pl.itemId);
         if (m) html += `<div class="recipe-block"><h3>Råvare: ${escapeHtml(m.name)}</h3><p>${num(Number(pl.amount || 0) * quantity, 3)} ${escapeHtml(pl.unit)}</p></div>`;
+      }
+      if (pl.itemType === "product") {
+        const subProduct = data.products.find((x) => x.id === pl.itemId);
+        if (subProduct && subProduct.id !== product.id) {
+          const totalAmount = Number(pl.amount || 0) * quantity;
+          // Skaler underproduktets oppskrift: totalAmount er i pl.unit (f.eks. kg),
+          // underproduktets oppskrift er definert per yieldAmount av samme enhet
+          const subYield = Number(subProduct.yieldAmount || 1) || 1;
+          const subScale = totalAmount / subYield;
+          html += `<div class="recipe-block"><h3>Produkt: ${escapeHtml(subProduct.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3>${scaledRecipeHtml(subProduct, subScale)}</div>`;
+        }
       }
     });
     return html || "<p>Ingen oppskriftslinjer registrert på produktet.</p>";
