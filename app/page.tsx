@@ -4887,6 +4887,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                   <select
                     className="btn"
                     defaultValue=""
+                    style={{ width: "auto", maxWidth: 220 }}
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v) printOrder(o, v as "basis" | "recipes" | "full");
