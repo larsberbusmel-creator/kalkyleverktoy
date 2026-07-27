@@ -2204,6 +2204,7 @@ const [line, setLine] = useState<{
   groupLabel: "",
 });
 const [lineSearch, setLineSearch] = useState("");
+  const [editLineSearch, setEditLineSearch] = useState<Record<number, string>>({});
   const [packLine, setPackLine] = useState({ packagingId: "", quantity: "1" });
   const [draftMenuCourses, setDraftMenuCourses] = useState<MenuCourse[]>([]);
   const [newCourseName, setNewCourseName] = useState("");
@@ -3286,12 +3287,34 @@ th{background:#f3f4f6}
                     </select>
                   </td>
                   <td>
-                    <select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
-                      <option value="">Velg</option>
-                      {l.itemType === "material" && data.materials.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                      {l.itemType === "recipe" && data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      {l.itemType === "product" && data.products.filter((p) => p.id !== selected?.id).slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
+                    <div className="search-picker">
+                      <input
+                        value={editLineSearch[i] ?? lineItemName(l.itemType, l.itemId)}
+                        onChange={(e) => setEditLineSearch({ ...editLineSearch, [i]: e.target.value })}
+                        onFocus={() => setEditLineSearch({ ...editLineSearch, [i]: "" })}
+                        placeholder="Søk og velg"
+                      />
+                      {editLineSearch[i] !== undefined && editLineSearch[i] !== "" && (
+                        <div className="search-dropdown inline">
+                          {lineOptions(l.itemType, editLineSearch[i]).map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className="search-result"
+                              onClick={() => {
+                                updateDraftLine(i, { itemId: item.id });
+                                const next = { ...editLineSearch };
+                                delete next[i];
+                                setEditLineSearch(next);
+                              }}
+                            >
+                              <b>{item.name}</b>
+                              <small>{item.subtitle}</small>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
                   <td>
@@ -4338,7 +4361,7 @@ const materialsAgg = collectOrderMaterials(order);
 prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div class="page-break"></div><h2>Oppskrifter (skalert til bestilt antall)</h2>${recipePages}` : ""}${shoppingHtml ? `<div class="page-break"></div><h2>Varebestilling</h2>${shoppingHtml}` : ""}`;      }
     }
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:14px;line-height:1.25;font-size:11px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-bottom:8px}.box p{margin:2px 0}h2{font-size:13px;margin:10px 0 4px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:3px 5px;text-align:left;font-size:11px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div></body></html>`);
     w.document.close(); w.focus();
   }
 
