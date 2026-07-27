@@ -4200,6 +4200,8 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
   }
 
   function scaledRecipeHtmlForOrder(product: Product, quantity: number, menuSelections?: MenuCourseSelection[], includeMaterials = false): string {
+    const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
+    if (bakeryNoExpand.includes(product.category)) return "";
     if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
       if (!menuSelections || !menuSelections.length) return "";
       return menuSelections.map((sel) => {
