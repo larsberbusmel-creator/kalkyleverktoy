@@ -4091,7 +4091,10 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens }: {
       if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
       if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
       const p = data.products.find((x) => x.id === line.itemId);
-      return p ? expandProductForProduction(p, amount, [...path, product.id], undefined, effectiveCourseName) : [];
+      if (!p) return [];
+      // Underprodukter vises som egen linje (f.eks. "Chimichurri 0,2 kg") i stedet for å flates ut til råvarer.
+      // Oppskriften for å lage mengden vises som egen skalert blokk i printen (scaledRecipeHtml).
+      return [{ name: p.name, amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }];
     });
   }
 
