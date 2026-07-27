@@ -2159,6 +2159,15 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   );
 }
 
+function hashCode(str: string) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
 function ProductsTab({ data, updateData, updateListRpc, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
   const [selectedId, setSelectedId] = useState(data.products[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
@@ -3253,7 +3262,7 @@ th{background:#f3f4f6}
             Bruk samme gruppenavn på flere linjer (f.eks. "Albondigas") for å samle dem under en egen overskrift i produksjonsgrunnlaget. Stå tomt for vanlig flat liste.
           </p>
 
-         <table>
+         <table className="compact-lines">
             <thead>
   <tr>
     <th>Type</th>
@@ -3276,7 +3285,7 @@ th{background:#f3f4f6}
                       <option value="product">Produkt</option>
                     </select>
                   </td>
-                  <td><input value={lineItemName(l.itemType, l.itemId)} readOnly /><small style={{ color: "#64748b" }}>Endre ved å slette/legge inn ny linje</small></td>
+                  <td><input value={lineItemName(l.itemType, l.itemId)} readOnly /></td>
                   <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
                   <td>
   <input
@@ -3292,61 +3301,14 @@ th{background:#f3f4f6}
                   <td><input value={l.groupLabel || ""} onChange={(e) => updateDraftLine(i, { groupLabel: e.target.value || undefined })} placeholder="-" style={{ minWidth: 100 }} /></td>
                   <td>{currency(lineCost(l))}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
+                    <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
                     {isGroupFirstLine(draftLines, i) && (
                       <>
-                        <button className="link" disabled={i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
-                        <button className="link" disabled={i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
+                        <button className="btn" style={{ marginLeft: 6, fontSize: 15, padding: "4px 10px" }} disabled={i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
+                        <button className="btn" style={{ marginLeft: 4, fontSize: 15, padding: "4px 10px" }} disabled={i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
                       </>
                     )}
-                    <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
                   </td>
-                </tr>
-              ))}
-            </tbody>
-          </table><table>
-            <thead>
-  <tr>
-    <th>Type</th>
-    <th>Navn</th>
-    <th>Mengde</th>
-    <th>Svinn %</th>
-    <th>Enhet</th>
-    <th>Kost</th>
-    <th></th>
-  </tr>
-</thead>
-            <tbody>
-              {draftLines.map((l, i) => (
-                <tr key={i}>
-                  <td>
-                    <select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}>
-                      <option value="material">Råvare</option>
-                      <option value="recipe">Grunnoppskrift</option>
-                      <option value="product">Produkt</option>
-                    </select>
-                  </td>
-                  <td>
-                    <select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
-                      <option value="">Velg</option>
-                      {l.itemType === "material" && data.materials.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                      {l.itemType === "recipe" && data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      {l.itemType === "product" && data.products.filter((p) => p.id !== selected?.id).slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </td>
-                  <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
-                  <td>
-  <input
-    type="number"
-    value={(l as any).wastePercent || ""}
-    onChange={(e) =>
-      updateDraftLine(i, { wastePercent: Number(e.target.value) || 0 })
-    }
-    placeholder="%"
-  />
-</td>
-                  <td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
-                  <td>{currency(lineCost(l))}</td>
-                  <td><button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td>
                 </tr>
               ))}
             </tbody>
@@ -7741,6 +7703,7 @@ function GlobalStyles() {
     .metric.warn { background: #fef3c7; }
     .metric.bad { background: #fee2e2; }
     table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    table.compact-lines td, table.compact-lines th { padding: 5px 7px; }
     th { text-align: left; background: #f1f5f9; }
     td, th { border-bottom: 1px solid #e2e8f0; padding: 9px; vertical-align: top; }
     .link { border: 0; background: transparent; cursor: pointer; font-weight: 700; margin-right: 8px; }
