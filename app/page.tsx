@@ -2420,6 +2420,38 @@ unitWeightKg: "1",
     setDraftLines((prev) => prev.map((l, i) => i === index ? { ...l, ...partial } : l));
   }
 
+  function groupBounds(lines: ProductLine[], index: number) {
+    const label = lines[index].groupLabel;
+    let start = index; let end = index;
+    if (label) {
+      while (start > 0 && lines[start - 1].groupLabel === label) start--;
+      while (end < lines.length - 1 && lines[end + 1].groupLabel === label) end++;
+    }
+    return { start, end };
+  }
+
+  function isGroupFirstLine(lines: ProductLine[], index: number) {
+    return groupBounds(lines, index).start === index;
+  }
+
+  function moveGroup(index: number, direction: -1 | 1) {
+    setDraftLines((prev) => {
+      const { start, end } = groupBounds(prev, index);
+      const block = prev.slice(start, end + 1);
+      if (direction === -1) {
+        if (start === 0) return prev;
+        const { start: prevStart } = groupBounds(prev, start - 1);
+        const prevBlock = prev.slice(prevStart, start);
+        return [...prev.slice(0, prevStart), ...block, ...prevBlock, ...prev.slice(end + 1)];
+      } else {
+        if (end === prev.length - 1) return prev;
+        const { end: nextEnd } = groupBounds(prev, end + 1);
+        const nextBlock = prev.slice(end + 1, nextEnd + 1);
+        return [...prev.slice(0, start), ...nextBlock, ...block, ...prev.slice(nextEnd + 1)];
+      }
+    });
+  }
+
   function updateDraftPackaging(index: number, partial: Partial<ProductPackagingLine>) {
     setDraftPackaging((prev) => prev.map((p, i) => i === index ? { ...p, ...partial } : p));
   }
@@ -3260,8 +3292,12 @@ th{background:#f3f4f6}
                   <td><input value={l.groupLabel || ""} onChange={(e) => updateDraftLine(i, { groupLabel: e.target.value || undefined })} placeholder="-" style={{ minWidth: 100 }} /></td>
                   <td>{currency(lineCost(l))}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    <button className="link" disabled={i === 0} onClick={() => setDraftLines((prev) => { const next = [...prev]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; return next; })}>↑</button>
-                    <button className="link" disabled={i === draftLines.length - 1} onClick={() => setDraftLines((prev) => { const next = [...prev]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; return next; })}>↓</button>
+                    {isGroupFirstLine(draftLines, i) && (
+                      <>
+                        <button className="link" disabled={i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
+                        <button className="link" disabled={i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
+                      </>
+                    )}
                     <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
                   </td>
                 </tr>
@@ -3289,7 +3325,14 @@ th{background:#f3f4f6}
                       <option value="product">Produkt</option>
                     </select>
                   </td>
-                  <td><input value={lineItemName(l.itemType, l.itemId)} readOnly /><small style={{ color: "#64748b" }}>Endre ved å slette/legge inn ny linje</small></td>
+                  <td>
+                    <select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
+                      <option value="">Velg</option>
+                      {l.itemType === "material" && data.materials.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {l.itemType === "recipe" && data.recipes.slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      {l.itemType === "product" && data.products.filter((p) => p.id !== selected?.id).slice().sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </td>
                   <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
                   <td>
   <input
@@ -4135,10 +4178,11 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
           const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${num(r.perUnit, 3)} ${escapeHtml(r.unit)}</span>` : "";
           return `<tr><td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`;
         }).join("");
-        return header + rows;
+        const groupTable = `<table style="width:100%;border-collapse:collapse">${header}${rows}</table>`;
+        return `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
       }).join("");
     }
-    return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px"><tr><td style="vertical-align:top;width:50%;padding-right:8px;border-right:1px solid #e5e7eb"><table style="width:100%;border-collapse:collapse;font-size:10px">${renderGroups(colA)}</table></td><td style="vertical-align:top;width:50%;padding-left:8px"><table style="width:100%;border-collapse:collapse;font-size:10px">${renderGroups(colB)}</table></td></tr></table>`;
+    return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px"><tr><td style="vertical-align:top;width:50%;padding-right:8px;border-right:1px solid #e5e7eb;font-size:10px">${renderGroups(colA)}</td><td style="vertical-align:top;width:50%;padding-left:8px;font-size:10px">${renderGroups(colB)}</td></tr></table>`;
   }
 
   function productionRowsForOrder(order: Order) {
