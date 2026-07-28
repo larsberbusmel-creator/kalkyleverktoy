@@ -4191,10 +4191,11 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     });
     function renderGroups(list: Group[]) {
       return list.map((g) => {
-        const header = g.key ? `<tr><td colspan="2" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
+        const header = g.key ? `<tr><td colspan="3" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
         const rows = g.rows.map((r) => {
           const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${escapeHtml(formatAmountUnit(r.perUnit, r.unit, 3))}</span>` : "";
-          return `<tr><td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${escapeHtml(formatAmountUnit(r.amount, r.unit))}</td></tr>`;
+          const checkbox = `<td style="width:12px;padding:1px 3px 1px 0"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td>`;
+          return `<tr>${checkbox}<td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${escapeHtml(formatAmountUnit(r.amount, r.unit))}</td></tr>`;
         }).join("");
         const groupTable = `<table style="width:100%;border-collapse:collapse">${header}${rows}</table>`;
         return `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
@@ -4347,19 +4348,19 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
               let name = "Ukjent"; let unit = recipe.yieldUnit;
               if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
               if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
-              return `<tr><td>${escapeHtml(name)}</td><td class="right">${escapeHtml(formatAmountUnit(Number(rl.amount || 0) * scale, unit, 3))}</td></tr>`;
+              return `<tr><td style="width:12px"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td><td>${escapeHtml(name)}</td><td class="right">${escapeHtml(formatAmountUnit(Number(rl.amount || 0) * scale, unit, 3))}</td></tr>`;
             }).join("");
             recipeMap[recipe.id] = { name: recipe.name, totalAmount, unit: pl.unit, ingredientRows };
           });
           const directMaterialRows = product.lines.filter((pl) => pl.itemType === "material").map((pl) => {
             const m = data.materials.find((x) => x.id === pl.itemId);
-            return `<tr><td>${escapeHtml(m?.name || "Ukjent")}</td><td class="right">${escapeHtml(formatAmountUnit(Number(pl.amount || 0) * qty, pl.unit, 3))}</td></tr>`;
+            return `<tr><td style="width:12px"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td><td>${escapeHtml(m?.name || "Ukjent")}</td><td class="right">${escapeHtml(formatAmountUnit(Number(pl.amount || 0) * qty, pl.unit, 3))}</td></tr>`;
           }).join("");
           const recipeBlocks = Object.values(recipeMap).map((entry) =>
-            `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(entry.name)} – ${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)} (for ${qty} stk)</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${entry.ingredientRows}</tbody></table></div>`
+            `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(entry.name)} – ${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)} (for ${qty} stk)</h3><table><thead><tr><th style="width:12px"></th><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${entry.ingredientRows}</tbody></table></div>`
           ).join("");
           const directSection = directMaterialRows
-            ? `<div class="recipe-block"><h3>Direkte råvarer – ${escapeHtml(product.name)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${directMaterialRows}</tbody></table></div>` : "";
+            ? `<div class="recipe-block"><h3>Direkte råvarer – ${escapeHtml(product.name)}</h3><table><thead><tr><th style="width:12px"></th><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${directMaterialRows}</tbody></table></div>` : "";
           return `<div class="prod-product"><h2>${qty} × ${escapeHtml(product.name)}</h2>${recipeBlocks}${directSection}</div>`;
         }).join("");
 prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPages}`;      } else {        const prodRows = order.orderLines.map((line) => {
