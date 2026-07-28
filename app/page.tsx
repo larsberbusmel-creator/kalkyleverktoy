@@ -4241,7 +4241,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
         if (pl.itemType === "product") {
           const sub = data.products.find((x) => x.id === pl.itemId);
           if (sub) {
-            const subYield = Number(sub.yieldAmount || 1) || 1;
+            const subYield = Number(sub.recipeYieldAmount || sub.yieldAmount || 1) || 1;
             expandProduct(sub, amt / subYield, [...path, product.id]);
           }
         }
