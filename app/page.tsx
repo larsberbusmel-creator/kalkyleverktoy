@@ -999,7 +999,7 @@ return (
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} />}
@@ -3827,11 +3827,12 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
-  productAllergens: (p: Product) => string[];
+  productAllergens: (p: Product, visited?: string[]) => string[];
+  recipeAllergens: (r: Recipe) => string[];
 }) {
   const emptyOrder = (): Order => ({
     id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
@@ -4326,9 +4327,9 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
     const customerName = order.customerType === "bedrift"
       ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
-    const allergenWarnings = orderAllergenWarnings(order);
-    const allergenWarningHtml = allergenWarnings.length
-      ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel: ordren inneholder produkter med ${escapeHtml(allergenWarnings.join(", "))}</div>`
+    const allergenDetails = orderAllergenWarningDetails(order);
+    const allergenWarningHtml = allergenDetails.length
+      ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel:<br>${allergenDetails.map((d) => `${escapeHtml(d.dish)}${d.name !== d.dish ? ` – ${escapeHtml(d.name)}` : ""}: ${escapeHtml(d.allergens.join(", "))}`).join("<br>")}</div>`
       : "";
     let prodSection = "";
     {
@@ -4396,14 +4397,59 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
     return data.products.find((p) => p.id === id)?.name || "Ukjent produkt";
   }
 
+  function productAllergenBreakdown(product: Product, visited: string[] = []): { name: string; allergens: string[] }[] {
+    if (visited.includes(product.id)) return [];
+    const nextVisited = [...visited, product.id];
+    return product.lines.map((line) => {
+      if (line.itemType === "material") {
+        const m = data.materials.find((x) => x.id === line.itemId);
+        return m && (m.allergens || []).length ? { name: m.name, allergens: m.allergens } : null;
+      }
+      if (line.itemType === "recipe") {
+        const r = data.recipes.find((x) => x.id === line.itemId);
+        const allergens = r ? recipeAllergens(r) : [];
+        return r && allergens.length ? { name: r.name, allergens } : null;
+      }
+      const p = data.products.find((x) => x.id === line.itemId);
+      const allergens = p ? productAllergens(p, nextVisited) : [];
+      return p && allergens.length ? { name: p.name, allergens } : null;
+    }).filter((x): x is { name: string; allergens: string[] } => !!x);
+  }
+
+  function orderLineAllergenBreakdown(line: OrderLine): { dish: string; name: string; allergens: string[] }[] {
+    const product = data.products.find((p) => p.id === line.productId);
+    if (!product) return [];
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length && line.menuSelections?.length) {
+      return line.menuSelections.flatMap((sel) => {
+        const chosen = data.products.find((p) => p.id === sel.productId);
+        if (!chosen) return [];
+        const breakdown = productAllergenBreakdown(chosen);
+        return (breakdown.length ? breakdown : [{ name: chosen.name, allergens: productAllergens(chosen) }])
+          .filter((b) => b.allergens.length)
+          .map((b) => ({ dish: chosen.name, name: b.name, allergens: b.allergens }));
+      });
+    }
+    const breakdown = productAllergenBreakdown(product);
+    return (breakdown.length ? breakdown : [{ name: product.name, allergens: productAllergens(product) }])
+      .filter((b) => b.allergens.length)
+      .map((b) => ({ dish: product.name, name: b.name, allergens: b.allergens }));
+  }
+
   function orderAllergenWarnings(order: Order) {
-    const orderAllergens = new Set(order.orderLines.flatMap((l) => {
-      const p = data.products.find((x) => x.id === l.productId);
-      return p ? productAllergens(p) : [];
-    }));
+    const orderAllergens = new Set(order.orderLines.flatMap((l) => orderLineAllergenBreakdown(l).flatMap((b) => b.allergens)));
     return Object.entries(order.allergens || {})
       .filter(([allergen, count]) => Number(count) > 0 && orderAllergens.has(allergen))
       .map(([allergen]) => allergen);
+  }
+
+  function orderAllergenWarningDetails(order: Order) {
+    const flagged = new Set(Object.entries(order.allergens || {}).filter(([, c]) => Number(c) > 0).map(([a]) => a));
+    if (!flagged.size) return [];
+    return order.orderLines.flatMap((line) =>
+      orderLineAllergenBreakdown(line)
+        .map((b) => ({ ...b, allergens: b.allergens.filter((a) => flagged.has(a)) }))
+        .filter((b) => b.allergens.length)
+    );
   }
 
   function printProductPopup(product: Product) {
