@@ -48,6 +48,15 @@ type RecipeLine = {
   itemId: string;
   amount: number;
   wastePercent?: number;
+  groupLabel?: string;
+};
+
+type RecipeStepInput = { kind: "group" | "step"; ref: string };
+
+type RecipeStep = {
+  id: string;
+  action: string;
+  inputs: RecipeStepInput[];
 };
 
 type Recipe = {
@@ -58,6 +67,7 @@ type Recipe = {
   yieldAmount: number;
   yieldUnit: YieldUnit;
   lines: RecipeLine[];
+  steps?: RecipeStep[];
 };
 
 type Packaging = {
@@ -1835,9 +1845,12 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
   const [draftLines, setDraftLines] = useState<RecipeLine[]>([]);
-  const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0", wastePercent: "" });
+  const [draftSteps, setDraftSteps] = useState<RecipeStep[]>([]);
+  const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
   const [lineSearch, setLineSearch] = useState("");
   const [recipeSearch, setRecipeSearch] = useState("");
+  const [newStep, setNewStep] = useState<{ action: string; inputs: RecipeStepInput[] }>({ action: "", inputs: [] });
+  const [showSteps, setShowSteps] = useState(false);
 
   const selected = data.recipes.find((r) => r.id === selectedId);
   const activeRecipe: Recipe | undefined = mode === "view" ? selected : {
@@ -1848,6 +1861,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     yieldAmount: Number(form.yieldAmount) || 1,
     yieldUnit: form.yieldUnit,
     lines: draftLines,
+    steps: draftSteps,
   };
 
   const filteredRecipes = data.recipes
@@ -1858,8 +1872,10 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setMode("new");
     setForm({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" });
     setDraftLines([]);
-    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "" });
+    setDraftSteps([]);
+    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
     setLineSearch("");
+    setNewStep({ action: "", inputs: [] });
   }
 
   function editRecipe(r: Recipe) {
@@ -1867,13 +1883,16 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setMode("edit");
     setForm({ productNumber: r.productNumber || "", name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit });
     setDraftLines(r.lines.map((l) => ({ ...l })));
-    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "" });
+    setDraftSteps((r.steps || []).map((s) => ({ ...s, inputs: s.inputs.map((i) => ({ ...i })) })));
+    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
     setLineSearch("");
+    setNewStep({ action: "", inputs: [] });
   }
 
   function cancelEdit() {
     setMode("view");
     setDraftLines([]);
+    setDraftSteps([]);
     setLineSearch("");
   }
 
@@ -1887,11 +1906,13 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
       yieldAmount: Number(form.yieldAmount) || 1,
       yieldUnit: form.yieldUnit,
       lines: draftLines,
+      steps: draftSteps,
     };
     updateListRpc("recipes", { [recipe.id]: recipe });
     setSelectedId(recipe.id);
     setMode("view");
     setDraftLines([]);
+    setDraftSteps([]);
   }
 
   function lineItemName(itemType: RecipeLine["itemType"], itemId: string) {
@@ -1930,14 +1951,38 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
         itemId: line.itemId,
         amount: Number(line.amount) || 0,
         wastePercent: Number(line.wastePercent) || 0,
+        groupLabel: line.groupLabel.trim() || undefined,
       },
     ]);
-    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "" });
+    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
     setLineSearch("");
   }
 
   function updateDraftLine(index: number, partial: Partial<RecipeLine>) {
     setDraftLines((prev) => prev.map((l, i) => i === index ? { ...l, ...partial } : l));
+  }
+
+  const groupOptions = Array.from(new Set(draftLines.map((l) => l.groupLabel).filter((g): g is string => !!g)));
+
+  function toggleStepInput(kind: "group" | "step", ref: string) {
+    setNewStep((prev) => {
+      const exists = prev.inputs.some((i) => i.kind === kind && i.ref === ref);
+      return { ...prev, inputs: exists ? prev.inputs.filter((i) => !(i.kind === kind && i.ref === ref)) : [...prev.inputs, { kind, ref }] };
+    });
+  }
+
+  function addStep() {
+    if (!newStep.action.trim() || !newStep.inputs.length) return;
+    setDraftSteps((prev) => [...prev, { id: `step-${Date.now()}-${prev.length}`, action: newStep.action.trim(), inputs: newStep.inputs }]);
+    setNewStep({ action: "", inputs: [] });
+  }
+
+  function removeStep(id: string) {
+    setDraftSteps((prev) => prev.filter((s) => s.id !== id).map((s) => ({ ...s, inputs: s.inputs.filter((i) => !(i.kind === "step" && i.ref === id)) })));
+  }
+
+  function stepLabel(step: RecipeStep, steps: RecipeStep[]) {
+    return step.inputs.map((inp) => inp.kind === "group" ? inp.ref : (steps.find((s) => s.id === inp.ref)?.action || "?")).join(" + ");
   }
 
   function printRecipe(recipe: Recipe) {
@@ -2040,6 +2085,12 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
               placeholder="Svinn %"
             />
 
+            <input
+              value={line.groupLabel}
+              onChange={(e) => setLine({ ...line, groupLabel: e.target.value })}
+              placeholder="Gruppe (valgfritt)"
+            />
+
             <button className="btn" onClick={addLine}>Legg til</button>
           </div>
 
@@ -2050,6 +2101,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                 <th>Navn</th>
                 <th>Mengde</th>
                 <th>Svinn %</th>
+                <th>Gruppe</th>
                 <th>Kost</th>
                 <th></th>
               </tr>
@@ -2089,6 +2141,14 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                       placeholder="%"
                     />
                   </td>
+                  <td>
+                    <input
+                      value={l.groupLabel || ""}
+                      onChange={(e) => updateDraftLine(i, { groupLabel: e.target.value || undefined })}
+                      placeholder="-"
+                      style={{ minWidth: 100 }}
+                    />
+                  </td>
                   <td>{currency(lineCost(l))}</td>
                   <td>
                     <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>
@@ -2099,6 +2159,52 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
               ))}
             </tbody>
           </table>
+
+          <button className="btn" style={{ marginTop: 20 }} onClick={() => setShowSteps((v) => !v)}>
+            {showSteps || draftSteps.length ? "Skjul fremgangsmåte" : "+ Legg til fremgangsmåte"}
+          </button>
+          {(showSteps || draftSteps.length > 0) && (
+          <>
+          <p style={{ color: "#64748b", fontSize: 13 }}>Sett en gruppe på linjene over (f.eks. "Eggedosis", "Bland"), lag så steg som kombinerer hele grupper og/eller tidligere steg.</p>
+          <div className="form-grid two">
+            <input
+              value={newStep.action}
+              onChange={(e) => setNewStep({ ...newStep, action: e.target.value })}
+              placeholder="Handling, f.eks. bland, smelt, vend inn, stek"
+            />
+            <button className="btn" onClick={addStep}>Legg til steg</button>
+          </div>
+          <div className="chips" style={{ margin: "8px 0" }}>
+            {groupOptions.map((g) => (
+              <label key={`g-${g}`} className="check">
+                <input type="checkbox" checked={newStep.inputs.some((i) => i.kind === "group" && i.ref === g)} onChange={() => toggleStepInput("group", g)} />
+                {g}
+              </label>
+            ))}
+            {draftSteps.map((s, i) => (
+              <label key={`s-${s.id}`} className="check">
+                <input type="checkbox" checked={newStep.inputs.some((i2) => i2.kind === "step" && i2.ref === s.id)} onChange={() => toggleStepInput("step", s.id)} />
+                Steg {i + 1}: {s.action}
+              </label>
+            ))}
+          </div>
+          {!groupOptions.length && <p style={{ color: "#94a3b8", fontSize: 12 }}>Ingen grupper satt på linjene ennå.</p>}
+
+          <table>
+            <thead><tr><th>#</th><th>Handling</th><th>Kombinerer</th><th></th></tr></thead>
+            <tbody>
+              {draftSteps.map((s, i) => (
+                <tr key={s.id}>
+                  <td>{i + 1}</td>
+                  <td>{s.action}</td>
+                  <td>{stepLabel(s, draftSteps)}</td>
+                  <td><button className="link danger" onClick={() => removeStep(s.id)}>Slett</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </>
+          )}
         </div>
       </section>
     );
