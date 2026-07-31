@@ -7153,8 +7153,7 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
     ((data as any).deletedRentalOffers || []) as RentalOffer[]
   );
 
-  const rental = data.rental;
-  function setRental(next: RentalOffer) { updateData({ rental: next }); }
+  const [rental, setRental] = useState<RentalOffer>(() => ({ ...initialData.rental }));
 
   const addonLines = rental.extraLines || [];
   const addonTotal = addonLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
