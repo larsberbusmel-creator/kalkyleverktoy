@@ -183,6 +183,7 @@ type ProfitabilityInput = {
   matSalesNetto?: number;
   deliSalesNetto?: number;
   favnVarekostPct?: number;
+  varekjopMatTotalt?: number;
 };
 
 type InventoryMonthData = {
@@ -6240,11 +6241,21 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
   const deliVarekostPct = deliVarekostPctLive();
   const matSalesNetto = profitability.matSalesNetto || 0;
   const deliSalesNetto = profitability.deliSalesNetto || 0;
-  const favnVarekostPct = profitability.favnVarekostPct || 0;
+  const varekjopMatTotalt = profitability.varekjopMatTotalt || 0;
 
-  const deliVarekostKr = deliVarekostPct * deliSalesNetto;
-  const totalVarekostKr = favnVarekostPct * (matSalesNetto + deliSalesNetto);
-  const matVarekostKr = totalVarekostKr - deliVarekostKr;
+  // Ekte varekost via lagerbevegelse: Åpningsbeholdning + Innkjøp − Sluttbeholdning.
+  // Innkjøpet (fra regnskap) er kun kjent samlet for mat+deli, så vi bruker Deli sin
+  // proxy-kost% til å anslå Delis andel av innkjøpet, og gir resten til Mat.
+  const deliOpening = valueForBucketInMonth(prevMonthKey, "Deli");
+  const deliClosing = valueForBucketInMonth(inventoryMonth, "Deli");
+  const matOpening = valueForBucketInMonth(prevMonthKey, "Mat");
+  const matClosing = valueForBucketInMonth(inventoryMonth, "Mat");
+
+  const deliVarekostKr = deliSalesNetto * deliVarekostPct;
+  const deliInnkjopEstimat = deliVarekostKr - deliOpening + deliClosing;
+  const matInnkjopEstimat = varekjopMatTotalt - deliInnkjopEstimat;
+  const matVarekostKr = matOpening + matInnkjopEstimat - matClosing;
+
   const matVarekostPctResult = matSalesNetto > 0 ? matVarekostKr / matSalesNetto : 0;
   const matBruttoKr = matSalesNetto - matVarekostKr;
   const deliBruttoKr = deliSalesNetto - deliVarekostKr;
@@ -6578,13 +6589,13 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     wsFront.getRow(24).height = 15.75; fHdr(wsFront, 24, 3, "Beløp:", blue, false); fHdr(wsFront, 24, 4, "Beløp:", green, false);
     const matWasteTotal = matBuckets.reduce((sum: number, b: string) => sum + bucketWasteValue(b), 0);
     const brekkasjeRader = [
-      { label: "Igjen ved dagsslutt, måned:", bv: Math.round(kassasvinn * 100) / 100 },
-      { label: "Mat:", bv: Math.round(matWasteTotal * 100) / 100 },
+      { label: "Mat (inkl. igjen ved dagsslutt):", bv: Math.round((matWasteTotal + kassasvinn) * 100) / 100 },
       { label: "Vin + Cider:", bv: Math.round((bucketWasteValue("Vin") + bucketWasteValue("Cider")) * 100) / 100 },
       { label: "Brennevin:", bv: Math.round(bucketWasteValue("Brennevin") * 100) / 100 },
       { label: "Øl:", bv: Math.round(bucketWasteValue("Øl") * 100) / 100 },
       { label: "Mineralvann:", bv: Math.round(bucketWasteValue("Mineralvann") * 100) / 100 },
       { label: "Kaffe/te:", bv: Math.round(bucketWasteValue("Kaffe/te") * 100) / 100 },
+      { label: "", bv: 0 },
     ];
     brekkasjeRader.forEach(({ label, bv }, i) => { const r = 25 + i; fLbl(wsFront, r, 2, label); fVal(wsFront, r, 3, bv, blue); fVal(wsFront, r, 4, 0, green); });
     fLbl(wsFront, 32, 2, "Total:", true);
@@ -6862,26 +6873,32 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         </summary>
         <div style={{ padding: "0 16px 16px" }}>
           <p style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
-            Fyll inn salgstall fra totalrapporten (Favn) for å splitte varekost mellom kjøkken (mat) og deli.
-            Deli sin varekost% beregnes automatisk fra råvarer i Deli-kategorien (kost ÷ utsalgspris), mat beregnes som resten av Favn sin rapporterte totale varekost%.
+            Regner ekte varekost via lagerbevegelse: Åpningsbeholdning (forrige måneds telling) + Innkjøp − Sluttbeholdning (denne månedens telling).
+            Innkjøpet fra regnskapet er kun kjent samlet for mat+deli, så Deli sin andel anslås fra Deli sin egen kost/utsalgspris-proxy, og resten tilfaller Mat.
           </p>
 
           <div className="form-grid three">
-            <label>Mat-salg netto eks. mva (fra Favn, ekskl. deli)
+            <label>Mat-salg netto eks. mva (ekskl. deli)
               <input type="number" value={profitability.matSalesNetto || ""} onChange={(e) => updateProfitability({ matSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
             </label>
-            <label>Deli-salg netto eks. mva (fra Favn)
+            <label>Deli-salg netto eks. mva
               <input type="number" value={profitability.deliSalesNetto || ""} onChange={(e) => updateProfitability({ deliSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
             </label>
-            <label>Favn varekost % for "Mat" totalt (mat+deli, fra gauge-diagram)
-              <input type="number" step="0.1" value={profitability.favnVarekostPct ? profitability.favnVarekostPct * 100 : ""} onChange={(e) => updateProfitability({ favnVarekostPct: (Number(e.target.value) || 0) / 100 })} placeholder="F.eks. 31.6" />
+            <label>Varekjøp mat totalt (fra regnskap, mat+deli samlet)
+              <input type="number" value={profitability.varekjopMatTotalt || ""} onChange={(e) => updateProfitability({ varekjopMatTotalt: Number(e.target.value) || 0 })} placeholder="F.eks. 600000" />
             </label>
+          </div>
+
+          <div className="metric-row">
+            <Metric label="Åpningsbeholdning Mat/Deli" value={`${currency(matOpening)} / ${currency(deliOpening)}`} />
+            <Metric label="Sluttbeholdning Mat/Deli" value={`${currency(matClosing)} / ${currency(deliClosing)}`} />
+            <Metric label="Anslått innkjøp Mat / Deli" value={`${currency(matInnkjopEstimat)} / ${currency(deliInnkjopEstimat)}`} />
           </div>
 
           <div className="metric-row">
             <Metric label="Deli varekost % (live, fra råvarer)" value={`${num(deliVarekostPct * 100, 1)} %`} />
             <Metric label="Deli varekost kr" value={currency(deliVarekostKr)} />
-            <Metric label="Mat varekost % (residual)" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
+            <Metric label="Mat varekost % (beregnet)" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
             <Metric label="Mat varekost kr" value={currency(matVarekostKr)} dark />
           </div>
 
@@ -6892,7 +6909,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
             <Metric label="Deli bruttomargin %" value={`${num(deliMarginPct * 100, 1)} %`} tone={marginTone(deliMarginPct * 100)} />
           </div>
 
-          {(!matSalesNetto || !deliSalesNetto || !favnVarekostPct) && (
+          {(!matSalesNetto || !deliSalesNetto || !varekjopMatTotalt) && (
             <div className="warning">Fyll inn alle tre inputfeltene over for å se en fullstendig beregning.</div>
           )}
         </div>
