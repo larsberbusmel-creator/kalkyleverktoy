@@ -6227,10 +6227,10 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     deliMaterials.forEach((m) => {
       const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
       if (retailExVat <= 0) return;
-      // Vekt: bruk lagerverdi (kost × telling) om finnes, ellers vekt 1 (enkelt snitt)
+      // Vekt: bruk faktisk talt mengde denne måneden om den finnes, ellers vekt 1 (enkelt snitt)
       const c = counts[m.id] as any;
-      const qty = c ? Number(c.packages || 0) * (c.packagePrice ? 1 : 1) + Number(c.loose || 0) : 0;
-      const weight = qty > 0 ? qty * m.pricePerUnit : 1;
+      const qty = c ? Number(c.packages || 0) + Number(c.loose || 0) : 0;
+      const weight = qty > 0 ? qty : 1;
       weightedCostSum += m.pricePerUnit * weight;
       weightedRetailSum += retailExVat * weight;
     });
