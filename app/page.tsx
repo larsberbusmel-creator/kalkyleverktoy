@@ -233,6 +233,15 @@ type StorkjokkenSpecialPrice = {
   priceExVat: number;
 };
 
+type StorkjokkenPickupOrder = {
+  id: string;
+  customerId: string;
+  productId: string;
+  quantity: number;
+  date: string;
+  createdAt: string;
+};
+
 type RecurringStorkjokkenOrder = {
   id: string;
   customerId: string;
@@ -276,6 +285,7 @@ type AppData = {
   bakeryProductionTemplateLines: BakeryProductionTemplateLine[];
   storkjokkenCustomers: StorkjokkenCustomer[];
   storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
+  storkjokkenPickupOrders: StorkjokkenPickupOrder[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
   seenOrderIds: string[]
@@ -446,6 +456,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   bakeryProductionTemplateLines: [],
   storkjokkenCustomers: [],
   storkjokkenSpecialPrices: [],
+  storkjokkenPickupOrders: [],
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
   seenOrderIds: [],
@@ -507,6 +518,9 @@ storkjokkenCustomers:
 
 storkjokkenSpecialPrices:
   (raw as any).storkjokkenSpecialPrices || [],
+
+storkjokkenPickupOrders:
+  (raw as any).storkjokkenPickupOrders || [],
 
 recurringStorkjokkenOrders:
   (raw as any).recurringStorkjokkenOrders || [],
@@ -5121,7 +5135,7 @@ function ProductionTab({
 
   const [activeDate, setActiveDate] = useState(today());
   const [mainPanel, setMainPanel] = useState<"bakeri" | "catering">("bakeri");
-  const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice">("day");
+  const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice" | "stats">("day");
   const [categoryFilter, setCategoryFilter] = useState<"alle" | ProductionCategory>("alle");
   const [gridSearch, setGridSearch] = useState("");
   const [invoiceFrom, setInvoiceFrom] = useState(today());
@@ -5133,6 +5147,12 @@ function ProductionTab({
   const [expandedCateringOrderId, setExpandedCateringOrderId] = useState<string | null>(null);
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [specialPriceSearch, setSpecialPriceSearch] = useState("");
+  const [expandedPickupCustomerId, setExpandedPickupCustomerId] = useState<string | null>(null);
+  const [pickupProductSearch, setPickupProductSearch] = useState("");
+  const [pickupProductId, setPickupProductId] = useState("");
+  const [pickupQty, setPickupQty] = useState("1");
+  const [statsMode, setStatsMode] = useState<"week" | "month" | "year">("month");
+  const [statsAnchor, setStatsAnchor] = useState(today());
 
   const productionDays = data.bakeryProductionDays || {};
   const activeDay: BakeryProductionDay = productionDays[activeDate] || {
@@ -5249,6 +5269,70 @@ function ProductionTab({
     updateData({ storkjokkenCustomers: (data.storkjokkenCustomers || []).filter((x) => x.id !== id) });
   }
 
+  function updateCustomer(id: string, patch: Partial<StorkjokkenCustomer>) {
+    updateData({ storkjokkenCustomers: (data.storkjokkenCustomers || []).map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+  }
+
+  function moveCustomer(id: string, dir: -1 | 1) {
+    const list = [...(data.storkjokkenCustomers || [])];
+    const idx = list.findIndex((c) => c.id === id);
+    const swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= list.length) return;
+    [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
+    updateData({ storkjokkenCustomers: list });
+  }
+
+  function addPickupOrder(customerId: string, productId: string, quantity: number) {
+    if (!productId || !quantity) return;
+    const entry: StorkjokkenPickupOrder = { id: `pickup-${Date.now()}`, customerId, productId, quantity, date: today(), createdAt: new Date().toISOString() };
+    updateData({ storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), entry] });
+  }
+
+  function deletePickupOrder(id: string) {
+    updateData({ storkjokkenPickupOrders: (data.storkjokkenPickupOrders || []).filter((x) => x.id !== id) });
+  }
+
+  function pickupQuantity(productId: string, customerId: string, from: string, to: string) {
+    return (data.storkjokkenPickupOrders || [])
+      .filter((p) => p.customerId === customerId && p.productId === productId && p.date >= from && p.date <= to)
+      .reduce((sum, p) => sum + Number(p.quantity || 0), 0);
+  }
+
+  function customerSalesSum(customerId: string, from: string, to: string) {
+    let sum = 0;
+    data.products.forEach((product) => {
+      let quantity = 0;
+      listDates(from, to).forEach((date) => { const day = productionDays[date]; if (!day?.approved) return; quantity += Number(day.quantities?.[product.id]?.[customerId] || 0); });
+      quantity += pickupQuantity(product.id, customerId, from, to);
+      if (!quantity) return;
+      sum += quantity * priceForCustomer(product.id, customerId);
+    });
+    return sum;
+  }
+
+  function statsPeriod(mode: "week" | "month" | "year", anchor: string) {
+    if (mode === "week") {
+      const from = startOfWeek(anchor);
+      return { from, to: addDays(from, 6), label: `${formatDateNo(from)} – ${formatDateNo(addDays(from, 6))}` };
+    }
+    if (mode === "year") {
+      const y = anchor.split("-")[0];
+      return { from: `${y}-01-01`, to: `${y}-12-31`, label: y };
+    }
+    const [y, m] = anchor.split("-");
+    const lastDay = new Date(Number(y), Number(m), 0).getDate();
+    const monthNames = ["Januar", "Februar", "Mars", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Desember"];
+    return { from: `${y}-${m}-01`, to: `${y}-${m}-${String(lastDay).padStart(2, "0")}`, label: `${monthNames[Number(m) - 1]} ${y}` };
+  }
+
+  function shiftStatsAnchor(dir: -1 | 1) {
+    if (statsMode === "week") { setStatsAnchor(addDays(statsAnchor, dir * 7)); return; }
+    if (statsMode === "year") { setStatsAnchor(`${Number(statsAnchor.split("-")[0]) + dir}-01-01`); return; }
+    const [y, m] = statsAnchor.split("-").map(Number);
+    const d = new Date(y, m - 1 + dir, 1);
+    setStatsAnchor(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+  }
+
   function priceForCustomer(productId: string, customerId: string) {
     const special = (data.storkjokkenSpecialPrices || []).find((x) => x.customerId === customerId && x.productId === productId);
     if (special) return special.priceExVat;
@@ -5271,6 +5355,7 @@ function ProductionTab({
       data.products.forEach((product) => {
         let quantity = 0;
         dates.forEach((date) => { const day = productionDays[date]; if (!day?.approved) return; quantity += Number(day.quantities?.[product.id]?.[customer.id] || 0); });
+        quantity += pickupQuantity(product.id, customer.id, from, to);
         if (!quantity) return;
         const priceExVat = priceForCustomer(product.id, customer.id);
         const sumExVat = quantity * priceExVat; const vat = sumExVat * 0.15;
@@ -5796,6 +5881,8 @@ ${orderPages}`;
                 <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
                 <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
                 <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
+                <button className="btn" onClick={() => setPanel("stats")}>Salgsstatistikk</button>
+                <button className="btn" onClick={copyProductionWeekToNext}>Kopiér denne uken → neste uke</button>
               </div>
               <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
             </div>
@@ -5923,17 +6010,80 @@ ${orderPages}`;
                 <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
               </div>
               <table>
-                <thead><tr><th>Kunde</th><th>Org.nr</th><th>Levering</th><th>Telefon</th><th></th></tr></thead>
+                <thead><tr><th></th><th>Kunde</th><th>Org.nr</th><th>Fakturaadresse</th><th>Leveringsadresse</th><th>Telefon</th><th></th></tr></thead>
                 <tbody>
-                  {(data.storkjokkenCustomers || []).map((customer) => (
-                    <tr key={customer.id}>
-                      <td><b>{customer.name}</b></td>
-                      <td>{customer.orgNumber || "-"}</td>
-                      <td>{customer.deliveryAddress || "-"}</td>
-                      <td>{customer.phone || "-"}</td>
-                      <td><button className="link danger" onClick={() => deleteCustomer(customer.id)}>Slett</button></td>
-                    </tr>
-                  ))}
+                  {(data.storkjokkenCustomers || []).map((customer, i) => {
+                    const isPickupOpen = expandedPickupCustomerId === customer.id;
+                    const pickupHistory = (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customer.id).sort((a, b) => b.date.localeCompare(a.date));
+                    return (
+                      <React.Fragment key={customer.id}>
+                        <tr>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <button className="link" disabled={i === 0} onClick={() => moveCustomer(customer.id, -1)}>↑</button>
+                            <button className="link" disabled={i === (data.storkjokkenCustomers || []).length - 1} onClick={() => moveCustomer(customer.id, 1)}>↓</button>
+                          </td>
+                          <td><input value={customer.name} onChange={(e) => updateCustomer(customer.id, { name: e.target.value })} /></td>
+                          <td><input value={customer.orgNumber || ""} onChange={(e) => updateCustomer(customer.id, { orgNumber: e.target.value })} /></td>
+                          <td><input value={customer.address || ""} onChange={(e) => updateCustomer(customer.id, { address: e.target.value })} /></td>
+                          <td><input value={customer.deliveryAddress || ""} onChange={(e) => updateCustomer(customer.id, { deliveryAddress: e.target.value })} /></td>
+                          <td><input value={customer.phone || ""} onChange={(e) => updateCustomer(customer.id, { phone: e.target.value })} /></td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <button className="btn" onClick={() => { setExpandedPickupCustomerId(isPickupOpen ? null : customer.id); setPickupProductSearch(""); setPickupProductId(""); setPickupQty("1"); }}>Henteordre</button>
+                            <button className="link danger" onClick={() => deleteCustomer(customer.id)}>Slett</button>
+                          </td>
+                        </tr>
+                        {isPickupOpen && (
+                          <tr>
+                            <td colSpan={7}>
+                              <div className="soft-box">
+                                <h4 style={{ marginTop: 0 }}>Registrer henteordre – {customer.name}</h4>
+                                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                                  <div className="search-picker" style={{ maxWidth: 320, position: "relative" }}>
+                                    <input
+                                      value={pickupProductId ? (data.products.find((p) => p.id === pickupProductId)?.name || "") : pickupProductSearch}
+                                      onChange={(e) => { setPickupProductSearch(e.target.value); setPickupProductId(""); }}
+                                      placeholder="Søk produkt, f.eks. Fransk Landbrød"
+                                    />
+                                    {pickupProductSearch && !pickupProductId && (
+                                      <div className="search-dropdown inline">
+                                        {data.products.filter((p) => p.name.toLowerCase().includes(pickupProductSearch.toLowerCase())).slice(0, 12).map((p) => (
+                                          <button key={p.id} type="button" className="search-result" onClick={() => { setPickupProductId(p.id); setPickupProductSearch(""); }}>
+                                            <b>{p.name}</b>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <input type="number" value={pickupQty} onChange={(e) => setPickupQty(e.target.value)} style={{ maxWidth: 90 }} placeholder="Antall" />
+                                  <button
+                                    className="btn active"
+                                    onClick={() => { if (pickupProductId && Number(pickupQty) > 0) { addPickupOrder(customer.id, pickupProductId, Number(pickupQty)); setPickupProductId(""); setPickupQty("1"); } }}
+                                  >
+                                    Lagre henteordre
+                                  </button>
+                                </div>
+                                {pickupHistory.length > 0 && (
+                                  <table style={{ marginTop: 10 }}>
+                                    <thead><tr><th>Dato</th><th>Produkt</th><th>Antall</th><th></th></tr></thead>
+                                    <tbody>
+                                      {pickupHistory.map((p) => (
+                                        <tr key={p.id}>
+                                          <td>{formatDateNo(p.date)}</td>
+                                          <td>{data.products.find((prod) => prod.id === p.productId)?.name || "Ukjent"}</td>
+                                          <td>{p.quantity}</td>
+                                          <td><button className="link danger" onClick={() => deletePickupOrder(p.id)}>Slett</button></td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
               <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
@@ -6016,6 +6166,31 @@ ${orderPages}`;
                   );
                 })
               ) : <p>Ingen fastordre lagt inn ennå.</p>}
+            </div>
+          )}
+
+          {panel === "stats" && (
+            <div className="card">
+              <h3>Salgsstatistikk – storkjøkkenkunder</h3>
+              <div className="chips">
+                <button className={statsMode === "week" ? "btn active" : "btn"} onClick={() => setStatsMode("week")}>Ukesvis</button>
+                <button className={statsMode === "month" ? "btn active" : "btn"} onClick={() => setStatsMode("month")}>Månedsvis</button>
+                <button className={statsMode === "year" ? "btn active" : "btn"} onClick={() => setStatsMode("year")}>Årsvis</button>
+              </div>
+              <div className="production-date-row">
+                <button className="btn" onClick={() => shiftStatsAnchor(-1)}>← Forrige</button>
+                <div className="production-date-box"><b>{statsPeriod(statsMode, statsAnchor).label}</b></div>
+                <button className="btn" onClick={() => shiftStatsAnchor(1)}>Neste →</button>
+              </div>
+              <table>
+                <thead><tr><th>Kunde</th><th>Salg eks. mva</th></tr></thead>
+                <tbody>
+                  {storkjokkenCustomers.map((customer) => {
+                    const { from, to } = statsPeriod(statsMode, statsAnchor);
+                    return <tr key={customer.id}><td>{customer.name}</td><td>{currency(customerSalesSum(customer.id, from, to))}</td></tr>;
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
 
