@@ -6879,29 +6879,52 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
             </label>
           </div>
 
-          <div className="metric-row">
-            <Metric label="Åpningsbeholdning Mat/Deli" value={`${currency(matOpening)} / ${currency(deliOpening)}`} />
-            <Metric label="Sluttbeholdning Mat/Deli" value={`${currency(matClosing)} / ${currency(deliClosing)}`} />
-            <Metric label="Anslått innkjøp Mat / Deli" value={`${currency(matInnkjopEstimat)} / ${currency(deliInnkjopEstimat)}`} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
+            <div style={{ border: "2px solid #f59e0b", background: "#fffbeb", borderRadius: 10, padding: 12 }}>
+              <h4 style={{ margin: "0 0 8px 0", color: "#92400e" }}>Mat</h4>
+              <div className="metric-row">
+                <Metric label="Åpningsbeholdning" value={currency(matOpening)} />
+                <Metric label="Sluttbeholdning" value={currency(matClosing)} />
+              </div>
+              <div className="metric-row">
+                <Metric label="Anslått innkjøp" value={currency(matInnkjopEstimat)} />
+                <Metric label="Varekost kr" value={currency(matVarekostKr)} />
+              </div>
+              <div className="metric-row">
+                <Metric label="Varekost %" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
+                <Metric label="Bruttomargin %" value={`${num(matMarginPct * 100, 1)} %`} tone={marginTone(matMarginPct * 100)} />
+              </div>
+              <div className="metric-row">
+                <Metric label="Bruttofortjeneste" value={currency(matBruttoKr)} />
+              </div>
+            </div>
+
+            <div style={{ border: "2px solid #2563eb", background: "#eff6ff", borderRadius: 10, padding: 12 }}>
+              <h4 style={{ margin: "0 0 8px 0", color: "#1e3a8a" }}>Deli</h4>
+              <div className="metric-row">
+                <Metric label="Åpningsbeholdning" value={currency(deliOpening)} />
+                <Metric label="Sluttbeholdning" value={currency(deliClosing)} />
+              </div>
+              <div className="metric-row">
+                <Metric label="Anslått innkjøp" value={currency(deliInnkjopEstimat)} />
+                <Metric label="Varekost kr" value={currency(deliVarekostKr)} />
+              </div>
+              <div className="metric-row">
+                <Metric label="Varekost %" value={`${num(deliVarekostPctResult * 100, 1)} %`} dark />
+                <Metric label="Bruttomargin %" value={`${num(deliMarginPct * 100, 1)} %`} tone={marginTone(deliMarginPct * 100)} />
+              </div>
+              <div className="metric-row">
+                <Metric label="Bruttofortjeneste" value={currency(deliBruttoKr)} />
+              </div>
+            </div>
           </div>
 
-          <div className="metric-row">
-            <Metric label="Deli varekost % (beregnet)" value={`${num(deliVarekostPctResult * 100, 1)} %`} />
-            <Metric label="Deli varekost kr" value={currency(deliVarekostKr)} />
-            <Metric label="Mat varekost % (beregnet)" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
-            <Metric label="Mat varekost kr" value={currency(matVarekostKr)} dark />
-          </div>
-
-          <div className="metric-row">
-            <Metric label="Mat bruttofortjeneste" value={currency(matBruttoKr)} />
-            <Metric label="Mat bruttomargin %" value={`${num(matMarginPct * 100, 1)} %`} tone={marginTone(matMarginPct * 100)} />
-            <Metric label="Deli bruttofortjeneste" value={currency(deliBruttoKr)} />
-            <Metric label="Deli bruttomargin %" value={`${num(deliMarginPct * 100, 1)} %`} tone={marginTone(deliMarginPct * 100)} />
-          </div>
-
-          <div className="metric-row">
-            <Metric label="Varekost totalt (Mat+Deli) kr" value={currency(totalVarekostKr)} dark />
-            <Metric label="Varekost totalt (Mat+Deli) %" value={`${num(totalVarekostPctResult * 100, 1)} %`} dark />
+          <div style={{ border: "2px solid #1e293b", background: "#f1f5f9", borderRadius: 10, padding: 12, marginTop: 12 }}>
+            <h4 style={{ margin: "0 0 8px 0", color: "#0f172a" }}>Mat + Deli samlet</h4>
+            <div className="metric-row">
+              <Metric label="Varekost totalt kr" value={currency(totalVarekostKr)} dark />
+              <Metric label="Varekost totalt %" value={`${num(totalVarekostPctResult * 100, 1)} %`} dark />
+            </div>
           </div>
 
           {(!matSalesNetto || !deliSalesNetto || !varekjopMatTotalt) && (
