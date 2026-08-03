@@ -5153,6 +5153,9 @@ function ProductionTab({
   const [pickupQty, setPickupQty] = useState("1");
   const [statsMode, setStatsMode] = useState<"week" | "month" | "year">("month");
   const [statsAnchor, setStatsAnchor] = useState(today());
+  const [statsCustomerId, setStatsCustomerId] = useState<string | null>(null);
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
+  const [customerDraft, setCustomerDraft] = useState<Partial<StorkjokkenCustomer>>({});
 
   const productionDays = data.bakeryProductionDays || {};
   const activeDay: BakeryProductionDay = productionDays[activeDate] || {
@@ -5265,8 +5268,31 @@ function ProductionTab({
     setNewCustomer({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "" });
   }
 
-  function deleteCustomer(id: string) {
-    updateData({ storkjokkenCustomers: (data.storkjokkenCustomers || []).filter((x) => x.id !== id) });
+  function startEditCustomer(customer: StorkjokkenCustomer) {
+    setEditingCustomerId(customer.id);
+    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone });
+  }
+
+  function cancelEditCustomer() {
+    setEditingCustomerId(null);
+    setCustomerDraft({});
+  }
+
+  function saveEditCustomer() {
+    if (!editingCustomerId) return;
+    updateCustomer(editingCustomerId, customerDraft);
+    setEditingCustomerId(null);
+    setCustomerDraft({});
+  }
+
+  function archiveCustomer(id: string) {
+    if (!window.confirm("Slette denne kunden? Kunden fjernes fra aktive lister, men kan hentes opp igjen senere.")) return;
+    updateCustomer(id, { active: false });
+    setEditingCustomerId(null);
+  }
+
+  function restoreCustomer(id: string) {
+    updateCustomer(id, { active: true });
   }
 
   function updateCustomer(id: string, patch: Partial<StorkjokkenCustomer>) {
@@ -5296,6 +5322,17 @@ function ProductionTab({
     return (data.storkjokkenPickupOrders || [])
       .filter((p) => p.customerId === customerId && p.productId === productId && p.date >= from && p.date <= to)
       .reduce((sum, p) => sum + Number(p.quantity || 0), 0);
+  }
+
+  function customerSalesBreakdown(customerId: string, from: string, to: string) {
+    return data.products.map((product) => {
+      let quantity = 0;
+      listDates(from, to).forEach((date) => { const day = productionDays[date]; if (!day?.approved) return; quantity += Number(day.quantities?.[product.id]?.[customerId] || 0); });
+      quantity += pickupQuantity(product.id, customerId, from, to);
+      if (!quantity) return null;
+      const priceExVat = priceForCustomer(product.id, customerId);
+      return { productId: product.id, productName: product.name, quantity, priceExVat, sumExVat: quantity * priceExVat };
+    }).filter((x): x is { productId: string; productName: string; quantity: number; priceExVat: number; sumExVat: number } => !!x);
   }
 
   function customerSalesSum(customerId: string, from: string, to: string) {
@@ -6010,31 +6047,59 @@ ${orderPages}`;
                 <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
               </div>
               <table>
-                <thead><tr><th></th><th>Kunde</th><th>Org.nr</th><th>Fakturaadresse</th><th>Leveringsadresse</th><th>Telefon</th><th></th></tr></thead>
+                <thead><tr><th></th><th>Kunde</th><th></th></tr></thead>
                 <tbody>
                   {(data.storkjokkenCustomers || []).map((customer, i) => {
+                    const isActiveCustomer = customer.active !== false;
                     const isPickupOpen = expandedPickupCustomerId === customer.id;
+                    const isEditOpen = editingCustomerId === customer.id;
                     const pickupHistory = (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customer.id).sort((a, b) => b.date.localeCompare(a.date));
                     return (
                       <React.Fragment key={customer.id}>
-                        <tr>
+                        <tr style={!isActiveCustomer ? { opacity: 0.5 } : undefined}>
                           <td style={{ whiteSpace: "nowrap" }}>
                             <button className="link" disabled={i === 0} onClick={() => moveCustomer(customer.id, -1)}>↑</button>
                             <button className="link" disabled={i === (data.storkjokkenCustomers || []).length - 1} onClick={() => moveCustomer(customer.id, 1)}>↓</button>
                           </td>
-                          <td><input value={customer.name} onChange={(e) => updateCustomer(customer.id, { name: e.target.value })} /></td>
-                          <td><input value={customer.orgNumber || ""} onChange={(e) => updateCustomer(customer.id, { orgNumber: e.target.value })} /></td>
-                          <td><input value={customer.address || ""} onChange={(e) => updateCustomer(customer.id, { address: e.target.value })} /></td>
-                          <td><input value={customer.deliveryAddress || ""} onChange={(e) => updateCustomer(customer.id, { deliveryAddress: e.target.value })} /></td>
-                          <td><input value={customer.phone || ""} onChange={(e) => updateCustomer(customer.id, { phone: e.target.value })} /></td>
+                          <td><b>{customer.name}</b>{!isActiveCustomer && <span style={{ color: "#94a3b8" }}> (arkivert)</span>}</td>
                           <td style={{ whiteSpace: "nowrap" }}>
-                            <button className="btn" onClick={() => { setExpandedPickupCustomerId(isPickupOpen ? null : customer.id); setPickupProductSearch(""); setPickupProductId(""); setPickupQty("1"); }}>Henteordre</button>
-                            <button className="link danger" onClick={() => deleteCustomer(customer.id)}>Slett</button>
+                            {isActiveCustomer ? (
+                              <>
+                                <button className="btn" onClick={() => { setExpandedPickupCustomerId(isPickupOpen ? null : customer.id); setEditingCustomerId(null); setPickupProductSearch(""); setPickupProductId(""); setPickupQty("1"); }}>Henteordre</button>
+                                <button className="btn" onClick={() => { if (isEditOpen) { cancelEditCustomer(); } else { startEditCustomer(customer); setExpandedPickupCustomerId(null); } }}>Rediger</button>
+                                <button className="btn" onClick={() => { setPanel("stats"); setStatsCustomerId(customer.id); }}>Salgsstatistikk</button>
+                              </>
+                            ) : (
+                              <button className="btn" onClick={() => restoreCustomer(customer.id)}>Gjenopprett</button>
+                            )}
                           </td>
                         </tr>
+                        {isEditOpen && (
+                          <tr>
+                            <td colSpan={3}>
+                              <div className="soft-box">
+                                <h4 style={{ marginTop: 0 }}>Rediger – {customer.name}</h4>
+                                <div className="form-grid five">
+                                  <input value={customerDraft.name || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, name: e.target.value })} placeholder="Kundenavn" />
+                                  <input value={customerDraft.orgNumber || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, orgNumber: e.target.value })} placeholder="Org.nr" />
+                                  <input value={customerDraft.address || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, address: e.target.value })} placeholder="Fakturaadresse" />
+                                  <input value={customerDraft.deliveryAddress || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
+                                  <input value={customerDraft.phone || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
+                                </div>
+                                <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between" }}>
+                                  <button className="link danger" onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
+                                  <div style={{ display: "flex", gap: 8 }}>
+                                    <button className="btn" onClick={cancelEditCustomer}>Avbryt</button>
+                                    <button className="btn active" onClick={saveEditCustomer}>Lagre</button>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                         {isPickupOpen && (
                           <tr>
-                            <td colSpan={7}>
+                            <td colSpan={3}>
                               <div className="soft-box">
                                 <h4 style={{ marginTop: 0 }}>Registrer henteordre – {customer.name}</h4>
                                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -6171,26 +6236,71 @@ ${orderPages}`;
 
           {panel === "stats" && (
             <div className="card">
-              <h3>Salgsstatistikk – storkjøkkenkunder</h3>
-              <div className="chips">
-                <button className={statsMode === "week" ? "btn active" : "btn"} onClick={() => setStatsMode("week")}>Ukesvis</button>
-                <button className={statsMode === "month" ? "btn active" : "btn"} onClick={() => setStatsMode("month")}>Månedsvis</button>
-                <button className={statsMode === "year" ? "btn active" : "btn"} onClick={() => setStatsMode("year")}>Årsvis</button>
-              </div>
-              <div className="production-date-row">
-                <button className="btn" onClick={() => shiftStatsAnchor(-1)}>← Forrige</button>
-                <div className="production-date-box"><b>{statsPeriod(statsMode, statsAnchor).label}</b></div>
-                <button className="btn" onClick={() => shiftStatsAnchor(1)}>Neste →</button>
-              </div>
-              <table>
-                <thead><tr><th>Kunde</th><th>Salg eks. mva</th></tr></thead>
-                <tbody>
-                  {storkjokkenCustomers.map((customer) => {
-                    const { from, to } = statsPeriod(statsMode, statsAnchor);
-                    return <tr key={customer.id}><td>{customer.name}</td><td>{currency(customerSalesSum(customer.id, from, to))}</td></tr>;
-                  })}
-                </tbody>
-              </table>
+              {statsCustomerId ? (() => {
+                const statsCustomer = data.storkjokkenCustomers.find((c) => c.id === statsCustomerId);
+                const { from, to } = statsPeriod(statsMode, statsAnchor);
+                const breakdown = customerSalesBreakdown(statsCustomerId, from, to);
+                const breakdownTotal = breakdown.reduce((s, r) => s + r.sumExVat, 0);
+                return (
+                  <>
+                    <div className="between">
+                      <h3>Salgsstatistikk – {statsCustomer?.name || "Ukjent kunde"}</h3>
+                      <button className="link" onClick={() => setStatsCustomerId(null)}>← Alle kunder</button>
+                    </div>
+                    <div className="chips">
+                      <button className={statsMode === "week" ? "btn active" : "btn"} onClick={() => setStatsMode("week")}>Ukesvis</button>
+                      <button className={statsMode === "month" ? "btn active" : "btn"} onClick={() => setStatsMode("month")}>Månedsvis</button>
+                      <button className={statsMode === "year" ? "btn active" : "btn"} onClick={() => setStatsMode("year")}>Årsvis</button>
+                    </div>
+                    <div className="production-date-row">
+                      <button className="btn" onClick={() => shiftStatsAnchor(-1)}>← Forrige</button>
+                      <div className="production-date-box"><b>{statsPeriod(statsMode, statsAnchor).label}</b></div>
+                      <button className="btn" onClick={() => shiftStatsAnchor(1)}>Neste →</button>
+                    </div>
+                    <table>
+                      <thead><tr><th>Produkt</th><th>Antall</th><th>Pris eks.</th><th>Sum eks. mva</th></tr></thead>
+                      <tbody>
+                        {breakdown.map((r) => (
+                          <tr key={r.productId}><td>{r.productName}</td><td>{r.quantity}</td><td>{currency(r.priceExVat)}</td><td>{currency(r.sumExVat)}</td></tr>
+                        ))}
+                        {!breakdown.length && <tr><td colSpan={4} style={{ color: "#94a3b8" }}>Ingen salg i denne perioden.</td></tr>}
+                      </tbody>
+                      {breakdown.length > 0 && (
+                        <tfoot><tr className="total"><td colSpan={3}>Sum</td><td><b>{currency(breakdownTotal)}</b></td></tr></tfoot>
+                      )}
+                    </table>
+                  </>
+                );
+              })() : (
+                <>
+                  <h3>Salgsstatistikk – storkjøkkenkunder</h3>
+                  <div className="chips">
+                    <button className={statsMode === "week" ? "btn active" : "btn"} onClick={() => setStatsMode("week")}>Ukesvis</button>
+                    <button className={statsMode === "month" ? "btn active" : "btn"} onClick={() => setStatsMode("month")}>Månedsvis</button>
+                    <button className={statsMode === "year" ? "btn active" : "btn"} onClick={() => setStatsMode("year")}>Årsvis</button>
+                  </div>
+                  <div className="production-date-row">
+                    <button className="btn" onClick={() => shiftStatsAnchor(-1)}>← Forrige</button>
+                    <div className="production-date-box"><b>{statsPeriod(statsMode, statsAnchor).label}</b></div>
+                    <button className="btn" onClick={() => shiftStatsAnchor(1)}>Neste →</button>
+                  </div>
+                  <table>
+                    <thead><tr><th>Kunde</th><th>Salg eks. mva</th><th></th></tr></thead>
+                    <tbody>
+                      {storkjokkenCustomers.map((customer) => {
+                        const { from, to } = statsPeriod(statsMode, statsAnchor);
+                        return (
+                          <tr key={customer.id}>
+                            <td>{customer.name}</td>
+                            <td>{currency(customerSalesSum(customer.id, from, to))}</td>
+                            <td><button className="link" onClick={() => setStatsCustomerId(customer.id)}>Se produkter →</button></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )}
             </div>
           )}
 
