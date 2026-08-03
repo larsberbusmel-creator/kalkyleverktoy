@@ -6241,6 +6241,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
 
   const deliVarekostPctResult = deliSalesNetto > 0 ? deliVarekostKr / deliSalesNetto : 0;
   const matVarekostPctResult = matSalesNetto > 0 ? matVarekostKr / matSalesNetto : 0;
+  const totalVarekostKr = matVarekostKr + deliVarekostKr;
+  const totalVarekostPctResult = totalSalesNetto > 0 ? totalVarekostKr / totalSalesNetto : 0;
   const matBruttoKr = matSalesNetto - matVarekostKr;
   const deliBruttoKr = deliSalesNetto - deliVarekostKr;
   const matMarginPct = matSalesNetto > 0 ? matBruttoKr / matSalesNetto : 0;
@@ -6895,6 +6897,11 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
             <Metric label="Mat bruttomargin %" value={`${num(matMarginPct * 100, 1)} %`} tone={marginTone(matMarginPct * 100)} />
             <Metric label="Deli bruttofortjeneste" value={currency(deliBruttoKr)} />
             <Metric label="Deli bruttomargin %" value={`${num(deliMarginPct * 100, 1)} %`} tone={marginTone(deliMarginPct * 100)} />
+          </div>
+
+          <div className="metric-row">
+            <Metric label="Varekost totalt (Mat+Deli) kr" value={currency(totalVarekostKr)} dark />
+            <Metric label="Varekost totalt (Mat+Deli) %" value={`${num(totalVarekostPctResult * 100, 1)} %`} dark />
           </div>
 
           {(!matSalesNetto || !deliSalesNetto || !varekjopMatTotalt) && (
