@@ -5123,6 +5123,7 @@ function ProductionTab({
   const [mainPanel, setMainPanel] = useState<"bakeri" | "catering">("bakeri");
   const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice">("day");
   const [categoryFilter, setCategoryFilter] = useState<"alle" | ProductionCategory>("alle");
+  const [gridSearch, setGridSearch] = useState("");
   const [invoiceFrom, setInvoiceFrom] = useState(today());
   const [invoiceTo, setInvoiceTo] = useState(today());
   const [invoiceWarning, setInvoiceWarning] = useState("");
@@ -5130,6 +5131,8 @@ function ProductionTab({
   const [newTemplateProductId, setNewTemplateProductId] = useState("");
   const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>("smabakst");
   const [expandedCateringOrderId, setExpandedCateringOrderId] = useState<string | null>(null);
+  const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
+  const [specialPriceSearch, setSpecialPriceSearch] = useState("");
 
   const productionDays = data.bakeryProductionDays || {};
   const activeDay: BakeryProductionDay = productionDays[activeDate] || {
@@ -5696,8 +5699,14 @@ ${orderPages}`;
     printWindow(`Catering ${formatDateNo(activeDate)}`, body);
   }
 
+  function hasProductionForDay(date: string) {
+    const day = productionDays[date];
+    if (!day) return false;
+    return Object.values(day.quantities || {}).some((row) => Object.values(row || {}).some((v) => Number(v) > 0));
+  }
+
   function printInvoice() {
-    const missing = listDates(invoiceFrom, invoiceTo).filter((date) => !productionDays[date]?.approved);
+    const missing = listDates(invoiceFrom, invoiceTo).filter((date) => hasProductionForDay(date) && !productionDays[date]?.approved);
     if (missing.length) { setInvoiceWarning(`Kan ikke printe fakturagrunnlag. Disse dagene må godkjennes først: ${missing.map((d) => `${weekdayNo(d)} ${formatDateNo(d)}`).join(", ")}`); return; }
     setInvoiceWarning("");
     const grouped = groupedInvoiceRows(invoiceFrom, invoiceTo);
@@ -5706,6 +5715,31 @@ ${orderPages}`;
       return `<div class="page"><div class="top"><div><img src="/logo.png" class="logo" /><h1>Fakturagrunnlag</h1><p class="muted">${escapeHtml(group.customerName)}</p></div><div class="right"><b>${formatDateNo(invoiceFrom)} – ${formatDateNo(invoiceTo)}</b><br>MVA 15 %</div></div><table><thead><tr><th>Produkt</th><th class="right">Antall totalt</th><th class="right">Pris eks.</th><th class="right">Sum eks.</th><th class="right">MVA 15%</th><th class="right">Sum inkl.</th></tr></thead><tbody>${rows}</tbody><tfoot><tr class="total"><td colspan="3">Sum</td><td class="right">${currency(group.sumExVat)}</td><td class="right">${currency(group.vat)}</td><td class="right">${currency(group.sumIncVat)}</td></tr></tfoot></table></div>`;
     }).join("");
     printWindow(`Fakturagrunnlag ${invoiceFrom} - ${invoiceTo}`, body || "<p>Ingen fakturalinjer i perioden.</p>");
+  }
+
+  function startOfWeek(date: string) {
+    return addDays(date, -(weekdayNumber(date) - 1));
+  }
+
+  function copyProductionWeekToNext() {
+    const monday = startOfWeek(activeDate);
+    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+    if (!window.confirm(`Kopiere produksjonen for uken ${formatDateNo(monday)}–${formatDateNo(addDays(monday, 6))} til neste uke? Dette overskriver eventuelle tall som allerede er lagt inn neste uke (fastordre beholder likevel prioritet).`)) return;
+    const nextDays: Record<string, BakeryProductionDay> = { ...productionDays };
+    weekDates.forEach((date) => {
+      const sourceDay = productionDays[date];
+      if (!sourceDay) return;
+      const targetDate = addDays(date, 7);
+      const dayNo = weekdayNumber(targetDate);
+      const targetQuantities: BakeryProductionDay["quantities"] = JSON.parse(JSON.stringify(sourceDay.quantities || {}));
+      (data.recurringStorkjokkenOrders || []).filter((order) => order.active && order.weekdays.includes(dayNo)).forEach((order) => {
+        order.lines.forEach((line) => {
+          targetQuantities[line.productId] = { ...(targetQuantities[line.productId] || {}), [order.customerId]: Number(line.quantity || 0) };
+        });
+      });
+      nextDays[targetDate] = { date: targetDate, approved: false, quantities: targetQuantities };
+    });
+    updateData({ bakeryProductionDays: nextDays });
   }
 
   function applyRecurringOrdersForDay() {
@@ -5792,6 +5826,13 @@ ${orderPages}`;
                   ))}
                 </div>
 
+                <input
+                  value={gridSearch}
+                  onChange={(e) => setGridSearch(e.target.value)}
+                  placeholder="Søk produkt, f.eks. bolle"
+                  style={{ maxWidth: 280, margin: "8px 0" }}
+                />
+
                 <div style={{ overflowX: "auto" }}>
                   <table>
                     <thead>
@@ -5803,7 +5844,13 @@ ${orderPages}`;
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleTemplateLines.map((line) => {
+                      {visibleTemplateLines
+                        .filter((line) => {
+                          if (!gridSearch.trim()) return true;
+                          const product = data.products.find((p) => p.id === line.productId);
+                          return product?.name.toLowerCase().includes(gridSearch.trim().toLowerCase());
+                        })
+                        .map((line) => {
                         const product = data.products.find((p) => p.id === line.productId);
                         if (!product) return null;
                         const qtyRow = activeDay.quantities[product.id] || {};
@@ -5890,26 +5937,67 @@ ${orderPages}`;
                 </tbody>
               </table>
               <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
-              {storkjokkenCustomers.map((customer) => (
-                <div key={customer.id} className="soft-box">
-                  <h3>{customer.name}</h3>
-                  <table>
-                    <thead><tr><th>Produkt</th><th>Standardpris eks. mva</th><th>Spesialpris eks. mva</th></tr></thead>
-                    <tbody>
-                      {data.products.map((product) => {
-                        const special = (data.storkjokkenSpecialPrices || []).find((x) => x.customerId === customer.id && x.productId === product.id);
-                        return (
-                          <tr key={product.id}>
-                            <td>{product.name}</td>
-                            <td>{currency(product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat))}</td>
-                            <td><input type="number" value={special?.priceExVat || ""} onChange={(e) => setSpecialPrice(customer.id, product.id, Number(e.target.value) || 0)} placeholder="Standard" /></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
+              {storkjokkenCustomers.map((customer) => {
+                const isOpen = expandedCustomerId === customer.id;
+                const specialPrices = (data.storkjokkenSpecialPrices || []).filter((x) => x.customerId === customer.id);
+                return (
+                  <div key={customer.id} className="soft-box">
+                    <div className="between" style={{ cursor: "pointer" }} onClick={() => { setExpandedCustomerId(isOpen ? null : customer.id); setSpecialPriceSearch(""); }}>
+                      <h3>{customer.name}</h3>
+                      <span>{specialPrices.length} spesialpris{specialPrices.length === 1 ? "" : "er"} {isOpen ? "▲" : "▼"}</span>
+                    </div>
+                    {isOpen && (
+                      <>
+                        <table>
+                          <thead><tr><th>Produkt</th><th>Standardpris eks. mva</th><th>Spesialpris eks. mva</th><th></th></tr></thead>
+                          <tbody>
+                            {specialPrices.map((special) => {
+                              const product = data.products.find((p) => p.id === special.productId);
+                              if (!product) return null;
+                              return (
+                                <tr key={product.id}>
+                                  <td>{product.name}</td>
+                                  <td>{currency(product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat))}</td>
+                                  <td><input type="number" value={special.priceExVat} onChange={(e) => setSpecialPrice(customer.id, product.id, Number(e.target.value) || 0)} /></td>
+                                  <td><button className="link danger" onClick={() => setSpecialPrice(customer.id, product.id, 0)}>Fjern</button></td>
+                                </tr>
+                              );
+                            })}
+                            {!specialPrices.length && <tr><td colSpan={4} style={{ color: "#94a3b8" }}>Ingen spesialpriser satt for denne kunden ennå.</td></tr>}
+                          </tbody>
+                        </table>
+
+                        <div className="search-picker" style={{ marginTop: 10, maxWidth: 320 }}>
+                          <input
+                            value={specialPriceSearch}
+                            onChange={(e) => setSpecialPriceSearch(e.target.value)}
+                            placeholder="Søk produkt for å legge til spesialpris"
+                          />
+                          {specialPriceSearch && (
+                            <div className="search-dropdown inline">
+                              {data.products
+                                .filter((p) => !specialPrices.some((s) => s.productId === p.id))
+                                .filter((p) => p.name.toLowerCase().includes(specialPriceSearch.toLowerCase()))
+                                .slice(0, 12)
+                                .map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    className="search-result"
+                                    onClick={() => { setSpecialPrice(customer.id, p.id, p.storkjokkenPriceExVat || exVatFromIncVat(p.customerPrice || 0, data.settings.foodVat)); setSpecialPriceSearch(""); }}
+                                  >
+                                    <b>{p.name}</b>
+                                    <small>Standard: {currency(p.storkjokkenPriceExVat || exVatFromIncVat(p.customerPrice || 0, data.settings.foodVat))}</small>
+                                  </button>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -5937,11 +6025,18 @@ ${orderPages}`;
                 <div><h3>Fakturagrunnlag</h3><p style={{ color: "#64748b" }}>Alle dager i perioden må være godkjent før print.</p></div>
                 <button className="btn active" onClick={printInvoice}>Print fakturagrunnlag</button>
               </div>
-              <div className="form-grid three">
+              <div className="form-grid two">
                 <label>Fra dato<input type="date" value={invoiceFrom} onChange={(e) => setInvoiceFrom(e.target.value)} /></label>
                 <label>Til dato<input type="date" value={invoiceTo} onChange={(e) => setInvoiceTo(e.target.value)} /></label>
-                <Metric label="Godkjente dager i perioden" value={String(listDates(invoiceFrom, invoiceTo).filter((d) => productionDays[d]?.approved).length)} />
               </div>
+              {(() => {
+                const unapprovedDates = listDates(invoiceFrom, invoiceTo).filter((d) => hasProductionForDay(d) && !productionDays[d]?.approved);
+                return unapprovedDates.length ? (
+                  <div className="warning">Ikke godkjent: {unapprovedDates.map((d) => `${weekdayNo(d)} ${formatDateNo(d)}`).join(", ")}</div>
+                ) : (
+                  <p style={{ color: "#16a34a" }}>✓ Alle dager med produksjon i perioden er godkjent.</p>
+                );
+              })()}
               {invoiceWarning && <div className="warning">{invoiceWarning}</div>}
               {groupedInvoiceRows(invoiceFrom, invoiceTo).map((group) => (
                 <div key={group.customerName} className="soft-box">
