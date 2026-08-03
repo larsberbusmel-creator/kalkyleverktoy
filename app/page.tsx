@@ -6394,18 +6394,22 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
       const items = countsByMonth[monthKey]?.items || {};
       return data.products.filter((p) => p.category === bucket).reduce((sum, p) => {
         const c = items[`product_${p.id}`] as any || { packages: 0, loose: 0 };
+        const packages = Number(c.packages || 0);
+        const loose = Number(c.loose || 0);
         const unitCost = monthIsFrozen && c.frozenUnitCost != null ? c.frozenUnitCost : productUnitCost(p);
-        return sum + (c.packages * Number(p.unitsPerCase || 1) + c.loose) * unitCost;
+        return sum + (packages * Number(p.unitsPerCase || 1) + loose) * unitCost;
       }, 0);
     }
     const items = countsByMonth[monthKey]?.items || {};
     return data.materials.reduce((sum, m) => {
       if (!belongsToBucket(m, bucket)) return sum;
       const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
+      const packages = Number(c.packages || 0);
+      const loose = Number(c.loose || 0);
       const packagePrice = c.packagePrice ?? m.packagePrice;
       const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
-      const looseVal2 = m.category === "Brennevin" ? c.loose * packagePrice : c.loose * pricePerUnit;
-      return sum + c.packages * packagePrice + looseVal2;
+      const looseVal2 = m.category === "Brennevin" ? loose * packagePrice : loose * pricePerUnit;
+      return sum + packages * packagePrice + looseVal2;
     }, 0);
   }
 
