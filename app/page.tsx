@@ -6218,44 +6218,28 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     updateInventoryRpc(inventoryMonth, { profitability: { ...profitability, ...patch } });
   }
 
-  // Deli varekost% beregnes live: vektet snitt av (pricePerUnit / retailPriceExVat) for alle Deli-råvarer som har retailPrice satt
-  function deliVarekostPctLive(): number {
-    const deliMaterials = data.materials.filter((m) => m.category === "Deli" && m.retailPrice && m.retailPrice > 0);
-    if (!deliMaterials.length) return 0;
-    let weightedCostSum = 0;
-    let weightedRetailSum = 0;
-    deliMaterials.forEach((m) => {
-      const retailExVat = exVatFromIncVat(m.retailPrice || 0, data.settings.foodVat);
-      if (retailExVat <= 0) return;
-      // Vekt: bruk faktisk talt mengde denne måneden om den finnes, ellers vekt 1 (enkelt snitt)
-      const c = counts[m.id] as any;
-      const qty = c ? Number(c.packages || 0) + Number(c.loose || 0) : 0;
-      const weight = qty > 0 ? qty : 1;
-      weightedCostSum += m.pricePerUnit * weight;
-      weightedRetailSum += retailExVat * weight;
-    });
-    if (weightedRetailSum <= 0) return 0;
-    return weightedCostSum / weightedRetailSum;
-  }
-
-  const deliVarekostPct = deliVarekostPctLive();
   const matSalesNetto = profitability.matSalesNetto || 0;
   const deliSalesNetto = profitability.deliSalesNetto || 0;
   const varekjopMatTotalt = profitability.varekjopMatTotalt || 0;
 
   // Ekte varekost via lagerbevegelse: Åpningsbeholdning + Innkjøp − Sluttbeholdning.
-  // Innkjøpet (fra regnskap) er kun kjent samlet for mat+deli, så vi bruker Deli sin
-  // proxy-kost% til å anslå Delis andel av innkjøpet, og gir resten til Mat.
+  // Innkjøpet (fra regnskap) er kun kjent samlet for mat+deli, så vi fordeler det
+  // proporsjonalt med salgsandel — vi har full dekning på salgstall og innkjøpspris,
+  // i motsetning til utsalgspris som langt fra alle råvarer har registrert.
   const deliOpening = valueForBucketInMonth(prevMonthKey, "Deli");
   const deliClosing = valueForBucketInMonth(inventoryMonth, "Deli");
   const matOpening = valueForBucketInMonth(prevMonthKey, "Mat");
   const matClosing = valueForBucketInMonth(inventoryMonth, "Mat");
 
-  const deliVarekostKr = deliSalesNetto * deliVarekostPct;
-  const deliInnkjopEstimat = deliVarekostKr - deliOpening + deliClosing;
+  const totalSalesNetto = matSalesNetto + deliSalesNetto;
+  const deliSalesShare = totalSalesNetto > 0 ? deliSalesNetto / totalSalesNetto : 0;
+  const deliInnkjopEstimat = varekjopMatTotalt * deliSalesShare;
   const matInnkjopEstimat = varekjopMatTotalt - deliInnkjopEstimat;
+
+  const deliVarekostKr = deliOpening + deliInnkjopEstimat - deliClosing;
   const matVarekostKr = matOpening + matInnkjopEstimat - matClosing;
 
+  const deliVarekostPctResult = deliSalesNetto > 0 ? deliVarekostKr / deliSalesNetto : 0;
   const matVarekostPctResult = matSalesNetto > 0 ? matVarekostKr / matSalesNetto : 0;
   const matBruttoKr = matSalesNetto - matVarekostKr;
   const deliBruttoKr = deliSalesNetto - deliVarekostKr;
@@ -6900,7 +6884,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
           </div>
 
           <div className="metric-row">
-            <Metric label="Deli varekost % (live, fra råvarer)" value={`${num(deliVarekostPct * 100, 1)} %`} />
+            <Metric label="Deli varekost % (beregnet)" value={`${num(deliVarekostPctResult * 100, 1)} %`} />
             <Metric label="Deli varekost kr" value={currency(deliVarekostKr)} />
             <Metric label="Mat varekost % (beregnet)" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
             <Metric label="Mat varekost kr" value={currency(matVarekostKr)} dark />
