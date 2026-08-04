@@ -6032,15 +6032,18 @@ function printProductionDay() {
     const dayOrders = data.orders.filter((o) => o.date === activeDate && !o.deletedAt);
     const orderPackingPages = dayOrders.map((order) => {
       const customerName = order.customerType === "bedrift" ? order.companyName || order.customer : order.customer;
-      const subtotal = order.orderLines.reduce((sum, ol) => { const p = data.products.find((x) => x.id === ol.productId); return sum + (p?.customerPrice || 0) * ol.quantity; }, 0);
+      const matchedStorkjokkenCustomer = storkjokkenCustomers.find((c) => c.name.trim().toLowerCase() === (customerName || "").trim().toLowerCase());
+      const priceFor = (productId: string) => matchedStorkjokkenCustomer ? priceForCustomer(productId, matchedStorkjokkenCustomer.id) : (data.products.find((x) => x.id === productId)?.customerPrice || 0);
+      const subtotal = order.orderLines.reduce((sum, ol) => sum + priceFor(ol.productId) * ol.quantity, 0);
       const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
       const total = subtotal - discount;
       const rows = order.orderLines.map((ol) => {
         const p = data.products.find((x) => x.id === ol.productId);
-        const lineTotal = (p?.customerPrice || 0) * ol.quantity;
-        return `<tr><td>${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${ol.quantity} stk</td><td class="right">${currency(p?.customerPrice || 0)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
+        const price = priceFor(ol.productId);
+        const lineTotal = price * ol.quantity;
+        return `<tr><td>${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${ol.quantity} stk</td><td class="right">${currency(price)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customerName || "Ukjent kunde")}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div><div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div></div><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Pris inkl. mva</th><th class="right">Sum inkl. mva</th></tr></thead><tbody>${rows}</tbody><tfoot>${order.discountPercent ? `<tr><td colspan="3">Rabatt ${order.discountPercent}%</td><td class="right">-${currency(discount)}</td></tr>` : ""}<tr class="total"><td colspan="3">Total inkl. mva</td><td class="right"><b>${currency(total)}</b></td></tr></tfoot></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customerName || "Ukjent kunde")}${matchedStorkjokkenCustomer ? " · Storkjøkkenpris" : ""}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div><div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div></div><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Pris${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</th><th class="right">Sum${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</th></tr></thead><tbody>${rows}</tbody><tfoot>${order.discountPercent ? `<tr><td colspan="3">Rabatt ${order.discountPercent}%</td><td class="right">-${currency(discount)}</td></tr>` : ""}<tr class="total"><td colspan="3">Total${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</td><td class="right"><b>${currency(total)}</b></td></tr></tfoot></table></div>`;
     }).join("");
 
     const packingPages = storkjokkenCustomers.map((customer) => {
