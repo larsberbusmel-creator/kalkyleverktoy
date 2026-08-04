@@ -6029,10 +6029,32 @@ function printProductionDay() {
       return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${instructionsHtml}<table><thead><tr><th>Innhold</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="2">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
     }).join("");
 
+    const dayOrders = data.orders.filter((o) => o.date === activeDate && !o.deletedAt);
+    const orderPackingPages = dayOrders.map((order) => {
+      const customerName = order.customerType === "bedrift" ? order.companyName || order.customer : order.customer;
+      const subtotal = order.orderLines.reduce((sum, ol) => { const p = data.products.find((x) => x.id === ol.productId); return sum + (p?.customerPrice || 0) * ol.quantity; }, 0);
+      const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
+      const total = subtotal - discount;
+      const rows = order.orderLines.map((ol) => {
+        const p = data.products.find((x) => x.id === ol.productId);
+        const lineTotal = (p?.customerPrice || 0) * ol.quantity;
+        return `<tr><td>${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${ol.quantity} stk</td><td class="right">${currency(p?.customerPrice || 0)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
+      }).join("");
+      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customerName || "Ukjent kunde")}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div><div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div></div><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Pris inkl. mva</th><th class="right">Sum inkl. mva</th></tr></thead><tbody>${rows}</tbody><tfoot>${order.discountPercent ? `<tr><td colspan="3">Rabatt ${order.discountPercent}%</td><td class="right">-${currency(discount)}</td></tr>` : ""}<tr class="total"><td colspan="3">Total inkl. mva</td><td class="right"><b>${currency(total)}</b></td></tr></tfoot></table></div>`;
+    }).join("");
+
     const packingPages = storkjokkenCustomers.map((customer) => {
-      const rows = data.products.map((product) => { const qty = Number(activeDay.quantities?.[product.id]?.[customer.id] || 0); if (!qty) return ""; return `<tr><td class="right"><b>${qty}</b></td><td>${escapeHtml(product.name)}</td></tr>`; }).join("");
+      let customerTotal = 0;
+      const rows = data.products.map((product) => {
+        const qty = Number(activeDay.quantities?.[product.id]?.[customer.id] || 0);
+        if (!qty) return "";
+        const price = priceForCustomerOnDate(product.id, customer.id, activeDate);
+        const sum = qty * price;
+        customerTotal += sum;
+        return `<tr><td class="right"><b>${qty}</b></td><td>${escapeHtml(product.name)}</td><td class="right">${currency(price)}</td><td class="right">${currency(sum)}</td></tr>`;
+      }).join("");
       if (!rows) return "";
-      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customer.name)}</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th class="right">Antall</th><th>Produkt</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customer.name)}</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th class="right">Antall</th><th>Produkt</th><th class="right">Pris eks. mva</th><th class="right">Sum eks. mva</th></tr></thead><tbody>${rows}</tbody><tfoot><tr class="total"><td colspan="3">Sum eks. mva</td><td class="right"><b>${currency(customerTotal)}</b></td></tr></tfoot></table></div>`;
     }).join("");
 
     const body = `
@@ -6047,7 +6069,7 @@ function printProductionDay() {
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
 </div>
-${baseRecipePages}${productPages}${packingPages}`;
+${baseRecipePages}${productPages}${packingPages}${orderPackingPages}`;
 
     printWindow(`Produksjon ${activeDate}`, body);
   }
