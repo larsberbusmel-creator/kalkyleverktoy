@@ -6003,9 +6003,15 @@ function printProductionDay() {
       return `<tr><td><b>${escapeHtml(row.product.name)}</b><br><small>${escapeHtml(row.product.productNumber || "")}</small></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${formatAmountUnit(unitSize, "kg", 3)}/stk` : "-"}</td></tr>`;
     }).join("");
 
-    const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number }[] }> = {};
+    const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number; extraLines: { name: string; amount: number; unit: string }[] }[] }> = {};
     activeRows.forEach((row) => {
       const productYield = Number(row.product.recipeYieldAmount || 0);
+      const extraLines = row.product.lines.filter((l) => l.itemType !== "recipe").map((l) => {
+        let name = "Ukjent";
+        if (l.itemType === "material") name = data.materials.find((m) => m.id === l.itemId)?.name || "Ukjent råvare";
+        if (l.itemType === "product") name = data.products.find((p) => p.id === l.itemId)?.name || "Ukjent produkt";
+        return { name, amount: Number(l.amount || 0) * row.quantity, unit: l.unit };
+      });
       row.product.lines.forEach((line) => {
         if (line.itemType !== "recipe") return;
         const recipe = data.recipes.find((r) => r.id === line.itemId); if (!recipe) return;
@@ -6015,7 +6021,7 @@ function printProductionDay() {
         const amount = perUnitAmount * row.quantity;
         if (!recipeMap[recipe.id]) recipeMap[recipe.id] = { recipe, totalAmount: 0, unit: line.unit, sources: [] };
         recipeMap[recipe.id].totalAmount += amount;
-        recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit, unitWeightKg: row.product.unitWeightKg });
+        recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit, unitWeightKg: row.product.unitWeightKg, extraLines });
       });
     });
 
@@ -6023,7 +6029,12 @@ function printProductionDay() {
       const recipe = entry.recipe;
       const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
       const scale = recipeBaseAmount > 0 ? entry.totalAmount / recipeBaseAmount : 0;
-      const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`).join("");
+      const sourceRows = entry.sources.map((source) => {
+        const extra = source.extraLines.length
+          ? `<br><small style="color:#64748b">+ ${source.extraLines.map((e) => `${formatAmountUnit(e.amount, e.unit, 3)} ${escapeHtml(e.name)}`).join(", ")}</small>`
+          : "";
+        return `<tr><td>${escapeHtml(source.productName)}${extra}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`;
+      }).join("");
       const ingredientRows = recipe.lines.map((line) => {
         let name = "Ukjent"; let unit = recipe.yieldUnit;
         if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
