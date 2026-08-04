@@ -2068,12 +2068,12 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     const rows = recipe.lines.map((l) => {
       const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
       const waste = l.wastePercent ? ` (${l.wastePercent}% svinn)` : "";
-      return `<tr><td>${l.itemType === "material" ? "Råvare" : "Grunnoppskrift"}</td><td>${name}${waste}</td><td>${num(l.amount, 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
+      return `<tr><td>${name}${waste}</td><td>${num(l.amount, 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
     }).join("");
     const allergens = recipeAllergens(recipe).join(", ") || "Ingen registrert";
     const w = window.open("", "_blank");
     if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${recipe.name}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">GRUNNOPPSKRIFT</div><h1>${recipe.name}</h1><p>${recipe.category}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(recipeCost(recipe))}</b></div><div class="metric">Totalvekt / yield<b>${num(recipeTotalAmount(recipe), 3)} ${recipe.yieldUnit}</b></div><div class="metric">Pris per ${recipe.yieldUnit}<b>${currency(recipeUnitCost(recipe))}</b></div><div class="metric">Allergener<b>${allergens}</b></div></div><h2>Ingredienser</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${recipe.name}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">GRUNNOPPSKRIFT</div><h1>${recipe.name}</h1><p>${recipe.category}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(recipeCost(recipe))}</b></div><div class="metric">Totalvekt / yield<b>${num(recipeTotalAmount(recipe), 3)} ${recipe.yieldUnit}</b></div><div class="metric">Pris per ${recipe.yieldUnit}<b>${currency(recipeUnitCost(recipe))}</b></div><div class="metric">Allergener<b>${allergens}</b></div></div><h2>Ingredienser</h2><table><thead><tr><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
     w.document.close();
     w.focus();
   }
@@ -3248,11 +3248,11 @@ function printProductLabel(product: Product) {
       ? (product.menuCourses || []).map((course) => {
           const optionRows = course.options.map((opt) => {
             const p = data.products.find((x) => x.id === opt.productId);
-            return `<tr><td>Alternativ</td><td>${escapeHtml(p?.name || "Ukjent")}</td><td>-</td><td>${currency(p ? productUnitCost(p) : 0)}</td></tr>`;
+            return `<tr><td>${escapeHtml(p?.name || "Ukjent")}</td><td>-</td><td>${currency(p ? productUnitCost(p) : 0)}</td></tr>`;
           }).join("");
-          return `<tr><td colspan="4" style="background:#111827;color:white;font-weight:800;">${escapeHtml(course.name)}</td></tr>${optionRows}`;
+          return `<tr><td colspan="3" style="background:#111827;color:white;font-weight:800;">${escapeHtml(course.name)}</td></tr>${optionRows}`;
         }).join("")
-      : product.lines.map((l) => `<tr><td>${l.itemType}</td><td>${escapeHtml(lineItemName(l.itemType, l.itemId) || "Ukjent")}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`).join("");
+      : product.lines.map((l) => `<tr><td>${escapeHtml(lineItemName(l.itemType, l.itemId) || "Ukjent")}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`).join("");
     const allergens = productAllergens(product).join(", ") || "Ingen registrert";
     const priceExVat = exVatFromIncVat(product.customerPrice, data.settings.foodVat);
     const menuCostRange = isMenu ? menuCourseCostRange(product.menuCourses || []) : null;
@@ -3261,7 +3261,7 @@ function printProductLabel(product: Product) {
     const w = window.open("", "_blank");
     if (!w) return;
 
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo-img{height:120px;width:auto;object-fit:contain}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><img src="/logo.png" class="logo-img" /><h1>${escapeHtml(product.name)}</h1><p>${escapeHtml(product.type)} · ${escapeHtml(product.category)}</p></div><div class="metrics"><div class="metric">Total kost eks. mva${isMenu ? " (min–max)" : ""}<b>${totalCostDisplay}</b></div><div class="metric">Kost per ${product.yieldUnit}${isMenu ? " (snitt)" : ""}<b>${currency(unitCostForMargin)}</b></div><div class="metric">Kundepris inkl. mva<b>${currency(product.customerPrice)}</b></div><div class="metric">Varekost / margin${isMenu ? " (snitt)" : ""}<b>${num(foodCostPercentFrom(priceExVat, unitCostForMargin), 1)}% / ${num(marginPercentFrom(priceExVat, unitCostForMargin), 1)}%</b></div></div><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><h2>Innhold</h2><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo-img{height:120px;width:auto;object-fit:contain}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px;margin-bottom:24px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><img src="/logo.png" class="logo-img" /><h1>${escapeHtml(product.name)}</h1><p>${escapeHtml(product.type)} · ${escapeHtml(product.category)}</p></div><div class="metrics"><div class="metric">Total kost eks. mva${isMenu ? " (min–max)" : ""}<b>${totalCostDisplay}</b></div><div class="metric">Kost per ${product.yieldUnit}${isMenu ? " (snitt)" : ""}<b>${currency(unitCostForMargin)}</b></div><div class="metric">Kundepris inkl. mva<b>${currency(product.customerPrice)}</b></div><div class="metric">Varekost / margin${isMenu ? " (snitt)" : ""}<b>${num(foodCostPercentFrom(priceExVat, unitCostForMargin), 1)}% / ${num(marginPercentFrom(priceExVat, unitCostForMargin), 1)}%</b></div></div><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><h2>Innhold</h2><table><thead><tr><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
     w.document.close();
     w.focus();
   }
@@ -3321,7 +3321,7 @@ function printProductLabel(product: Product) {
 
   const rows = product.lines.map((line) => {
     const name = lineItemName(line.itemType, line.itemId) || "Ukjent";
-    return `<tr><td>${escapeHtml(line.itemType)}</td><td>${escapeHtml(name)}</td><td>${num(line.amount, 3)} ${line.unit}</td><td>${currency(lineCost(line))}</td></tr>`;
+    return `<tr><td>${escapeHtml(name)}</td><td>${num(line.amount, 3)} ${line.unit}</td><td>${currency(lineCost(line))}</td></tr>`;
   }).join("");
 
   const w = window.open("", "_blank");
@@ -3346,7 +3346,7 @@ th{background:#f3f4f6}
 <p><b>Allergener:</b> ${escapeHtml(allergens)}</p>
 <h3>Oppskrift / innhold</h3>
 <table>
-<thead><tr><th>Type</th><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead>
+<thead><tr><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead>
 <tbody>${rows}</tbody>
 </table>
 </div>
@@ -4833,10 +4833,10 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
       if (line.itemType === "material") name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
       if (line.itemType === "recipe") name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
       if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
-      return `<tr><td>${escapeHtml(line.itemType)}</td><td>${escapeHtml(name)}</td><td>${num(line.amount)} ${line.unit}</td></tr>`;
+      return `<tr><td>${escapeHtml(name)}</td><td>${num(line.amount)} ${line.unit}</td></tr>`;
     }).join("");
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.card{max-width:620px;border:2px solid #111827;padding:20px}.logo{height:70px;width:auto;object-fit:contain;margin-bottom:10px}h1{margin:0 0 10px;font-size:26px}table{width:100%;border-collapse:collapse;margin-top:14px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print</button><div class="card"><img src="/logo.png" class="logo" /><h1>${escapeHtml(product.name)}</h1><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><table><thead><tr><th>Type</th><th>Navn</th><th>Mengde</th></tr></thead><tbody>${rows}</tbody></table></div></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.card{max-width:620px;border:2px solid #111827;padding:20px}.logo{height:70px;width:auto;object-fit:contain;margin-bottom:10px}h1{margin:0 0 10px;font-size:26px}table{width:100%;border-collapse:collapse;margin-top:14px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print</button><div class="card"><img src="/logo.png" class="logo" /><h1>${escapeHtml(product.name)}</h1><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><table><thead><tr><th>Navn</th><th>Mengde</th></tr></thead><tbody>${rows}</tbody></table></div></body></html>`);
     w.document.close(); w.focus();
   }
 
@@ -5987,7 +5987,7 @@ function printProductionDay() {
       return `<tr><td><b>${escapeHtml(row.product.name)}</b><br><small>${escapeHtml(row.product.productNumber || "")}</small></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${num(unitSize, 3)} kg/stk` : "-"}</td></tr>`;
     }).join("");
 
-    const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string }[] }> = {};
+    const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number }[] }> = {};
     activeRows.forEach((row) => {
       row.product.lines.forEach((line) => {
         if (line.itemType !== "recipe") return;
@@ -5995,7 +5995,7 @@ function printProductionDay() {
         const amount = Number(line.amount || 0) * row.quantity;
         if (!recipeMap[recipe.id]) recipeMap[recipe.id] = { recipe, totalAmount: 0, unit: line.unit, sources: [] };
         recipeMap[recipe.id].totalAmount += amount;
-        recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit });
+        recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit, unitWeightKg: row.product.unitWeightKg });
       });
     });
 
@@ -6003,7 +6003,7 @@ function printProductionDay() {
       const recipe = entry.recipe;
       const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
       const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
-      const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk</td><td class="right">${num(source.amount, 3)} ${escapeHtml(source.unit)}</td></tr>`).join("");
+      const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${num(source.unitWeightKg, 3)} kg` : ""}</td><td class="right">${num(source.amount, 3)} ${escapeHtml(source.unit)}</td></tr>`).join("");
       const ingredientRows = recipe.lines.map((line) => {
         let name = "Ukjent"; let unit = recipe.yieldUnit;
         if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
@@ -6021,12 +6021,12 @@ function printProductionDay() {
         if (line.itemType === "material") name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
         if (line.itemType === "recipe") name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
         if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
-        return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(line.itemType)}</td><td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td></tr>`;
+        return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td></tr>`;
       }).join("");
       const instructionsHtml = product.instructions
         ? `<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin:8px 0;white-space:pre-wrap">${escapeHtml(product.instructions)}</div>`
         : "";
-      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${instructionsHtml}<table><thead><tr><th>Innhold</th><th>Type</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${instructionsHtml}<table><thead><tr><th>Innhold</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="2">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
     }).join("");
 
     const packingPages = storkjokkenCustomers.map((customer) => {
@@ -6039,7 +6039,7 @@ function printProductionDay() {
 <div class="print-header"><img src="/logo.png" class="print-logo" /></div>
 <div class="page">
   <div class="top">
-    <div><img src="/logo.png" class="logo" /><h1>Produksjon for dagen</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
+    <div><h1>Bakeriproduksjon</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
     <div class="right"><b>${totalUnits} stk totalt</b></div>
   </div>
   <table>
