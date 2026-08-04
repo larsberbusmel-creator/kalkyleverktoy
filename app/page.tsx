@@ -5473,9 +5473,16 @@ function ProductionTab({
     });
   }
 
+  function ordersQuantityForProduct(productId: string, date: string) {
+    return data.orders
+      .filter((o) => o.date === date && !o.deletedAt)
+      .reduce((sum, o) => sum + (o.orderLines || []).filter((l) => l.productId === productId).reduce((s, l) => s + Number(l.quantity || 0), 0), 0);
+  }
+
   function totalForProduct(productId: string, day: BakeryProductionDay = activeDay) {
     const row = day.quantities[productId] || {};
-    return columns.reduce((sum, col) => sum + Number(row[col.id] || 0), 0);
+    const columnsSum = columns.reduce((sum, col) => sum + Number(row[col.id] || 0), 0);
+    return columnsSum + ordersQuantityForProduct(productId, day.date || activeDate);
   }
 
   function kgForProduct(product: Product, quantity: number) {
@@ -6265,12 +6272,8 @@ ${orderPages}`;
                         <th>Produkt</th>
                         <th>Kategori</th>
                         <th style={{ textAlign: "center" }}>Sum</th>
+                        <th style={{ textAlign: "center" }}>Bestillinger</th>
                         {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
-                      </tr><tr>
-                        <th>Produkt</th>
-                        <th>Kategori</th>
-                        {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
-                        <th style={{ textAlign: "center" }}>Sum</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -6290,6 +6293,7 @@ ${orderPages}`;
                             <td><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
                             <td>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
                             <td style={{ textAlign: "center" }}><b>{total}</b></td>
+                            <td style={{ textAlign: "center", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                             {columns.map((col) => (
                               <td key={col.id}>
                                 <input type="number" value={qtyRow[col.id] || ""} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
@@ -6299,6 +6303,38 @@ ${orderPages}`;
                           </tr>
                         );
                       })}
+                      {(() => {
+                        const templateProductIds = new Set(templateLines.map((l) => l.productId));
+                        const extraProducts = data.products.filter((p) => {
+                          if (templateProductIds.has(p.id)) return false;
+                          if (ordersQuantityForProduct(p.id, activeDate) <= 0) return false;
+                          if (gridSearch.trim() && !p.name.toLowerCase().includes(gridSearch.trim().toLowerCase())) return false;
+                          return true;
+                        });
+                        if (!extraProducts.length) return null;
+                        return (
+                          <>
+                            <tr><td colSpan={4 + columns.length} style={{ background: "#fffbeb", color: "#92400e", fontWeight: 700, padding: "6px 8px" }}>⚠ Bestilt, men ikke i produksjonsmal</td></tr>
+                            {extraProducts.map((product) => {
+                              const qtyRow = activeDay.quantities[product.id] || {};
+                              const total = totalForProduct(product.id);
+                              return (
+                                <tr key={product.id} style={{ background: "#fffbeb" }}>
+                                  <td><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                                  <td><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                                  <td style={{ textAlign: "center" }}><b>{total}</b></td>
+                                  <td style={{ textAlign: "center", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                                  {columns.map((col) => (
+                                    <td key={col.id}>
+                                      <input type="number" value={qtyRow[col.id] || ""} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                                    </td>
+                                  ))}
+                                </tr>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
                     </tbody>
                   </table>
                 </div>
