@@ -240,6 +240,16 @@ type StorkjokkenPickupOrder = {
   quantity: number;
   date: string;
   createdAt: string;
+  priceExVat: number;
+};
+
+type ProductPriceLogEntry = {
+  id: string;
+  productId: string;
+  field: "customerPrice" | "storkjokkenPriceExVat";
+  fromValue: number;
+  toValue: number;
+  date: string;
 };
 
 type RecurringStorkjokkenOrder = {
@@ -255,6 +265,7 @@ type BakeryProductionDay = {
   date: string;
   approved?: boolean;
   quantities: Record<string, Record<string, number>>;
+  frozenPrices?: Record<string, Record<string, number>>;
 };
 
 type CalendarNote = {
@@ -286,6 +297,7 @@ type AppData = {
   storkjokkenCustomers: StorkjokkenCustomer[];
   storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
   storkjokkenPickupOrders: StorkjokkenPickupOrder[];
+  productPriceLog: ProductPriceLogEntry[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
   seenOrderIds: string[]
@@ -457,6 +469,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   storkjokkenCustomers: [],
   storkjokkenSpecialPrices: [],
   storkjokkenPickupOrders: [],
+  productPriceLog: [],
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
   seenOrderIds: [],
@@ -521,6 +534,9 @@ storkjokkenSpecialPrices:
 
 storkjokkenPickupOrders:
   (raw as any).storkjokkenPickupOrders || [],
+
+productPriceLog:
+  (raw as any).productPriceLog || [],
 
 recurringStorkjokkenOrders:
   (raw as any).recurringStorkjokkenOrders || [],
@@ -2461,6 +2477,19 @@ if (exists) {
   return alert("Produktnummer finnes allerede!");
 }
 
+    if (mode === "edit" && selected) {
+      const priceLogEntries: ProductPriceLogEntry[] = [];
+      if (Number(selected.customerPrice || 0) !== Number(product.customerPrice || 0)) {
+        priceLogEntries.push({ id: `pricelog-${Date.now()}-cp`, productId: product.id, field: "customerPrice", fromValue: Number(selected.customerPrice || 0), toValue: Number(product.customerPrice || 0), date: today() });
+      }
+      if (Number(selected.storkjokkenPriceExVat || 0) !== Number(product.storkjokkenPriceExVat || 0)) {
+        priceLogEntries.push({ id: `pricelog-${Date.now()}-sk`, productId: product.id, field: "storkjokkenPriceExVat", fromValue: Number(selected.storkjokkenPriceExVat || 0), toValue: Number(product.storkjokkenPriceExVat || 0), date: today() });
+      }
+      if (priceLogEntries.length) {
+        updateData({ productPriceLog: [...(data.productPriceLog || []), ...priceLogEntries] });
+      }
+    }
+
     updateListRpc("products", { [product.id]: product });
 
     setSelectedId(product.id);
@@ -3767,6 +3796,28 @@ th{background:#f3f4f6}
           <Metric label="Storkjøkken inkl. 15%" value={wideProduct.storkjokkenPriceExVat ? currency(wideProduct.storkjokkenPriceExVat * 1.15) : "-"} />
           <Metric label="Allergener" value={productAllergens(wideProduct).join(", ") || "Ingen"} />
         </div>
+
+        {(data.productPriceLog || []).some((l) => l.productId === wideProduct.id) && (
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ cursor: "pointer", color: "#64748b" }}>Prishistorikk</summary>
+            <table>
+              <thead><tr><th>Dato</th><th>Felt</th><th>Fra</th><th>Til</th></tr></thead>
+              <tbody>
+                {(data.productPriceLog || [])
+                  .filter((l) => l.productId === wideProduct.id)
+                  .sort((a, b) => b.date.localeCompare(a.date))
+                  .map((l) => (
+                    <tr key={l.id}>
+                      <td>{formatDateNo(l.date)}</td>
+                      <td>{l.field === "customerPrice" ? "Kundepris inkl. mva" : "Storkjøkkenpris eks. mva"}</td>
+                      <td>{currency(l.fromValue)}</td>
+                      <td>{currency(l.toValue)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </details>
+        )}
 
         <h3>Produktinnhold</h3>
         <table>
@@ -5310,7 +5361,7 @@ function ProductionTab({
 
   function addPickupOrder(customerId: string, productId: string, quantity: number) {
     if (!productId || !quantity) return;
-    const entry: StorkjokkenPickupOrder = { id: `pickup-${Date.now()}`, customerId, productId, quantity, date: today(), createdAt: new Date().toISOString() };
+    const entry: StorkjokkenPickupOrder = { id: `pickup-${Date.now()}`, customerId, productId, quantity, date: today(), createdAt: new Date().toISOString(), priceExVat: priceForCustomer(productId, customerId) };
     updateData({ storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), entry] });
   }
 
@@ -5327,22 +5378,36 @@ function ProductionTab({
   function customerSalesBreakdown(customerId: string, from: string, to: string) {
     return data.products.map((product) => {
       let quantity = 0;
-      listDates(from, to).forEach((date) => { const day = productionDays[date]; if (!day?.approved) return; quantity += Number(day.quantities?.[product.id]?.[customerId] || 0); });
-      quantity += pickupQuantity(product.id, customerId, from, to);
+      let sumExVat = 0;
+      listDates(from, to).forEach((date) => {
+        const day = productionDays[date];
+        if (!day?.approved) return;
+        const qty = Number(day.quantities?.[product.id]?.[customerId] || 0);
+        if (!qty) return;
+        quantity += qty;
+        sumExVat += qty * priceForCustomerOnDate(product.id, customerId, date);
+      });
+      (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customerId && p.productId === product.id && p.date >= from && p.date <= to).forEach((p) => {
+        quantity += p.quantity;
+        sumExVat += p.quantity * (p.priceExVat != null ? p.priceExVat : priceForCustomer(product.id, customerId));
+      });
       if (!quantity) return null;
-      const priceExVat = priceForCustomer(product.id, customerId);
-      return { productId: product.id, productName: product.name, quantity, priceExVat, sumExVat: quantity * priceExVat };
+      return { productId: product.id, productName: product.name, quantity, priceExVat: sumExVat / quantity, sumExVat };
     }).filter((x): x is { productId: string; productName: string; quantity: number; priceExVat: number; sumExVat: number } => !!x);
   }
 
   function customerSalesSum(customerId: string, from: string, to: string) {
     let sum = 0;
     data.products.forEach((product) => {
-      let quantity = 0;
-      listDates(from, to).forEach((date) => { const day = productionDays[date]; if (!day?.approved) return; quantity += Number(day.quantities?.[product.id]?.[customerId] || 0); });
-      quantity += pickupQuantity(product.id, customerId, from, to);
-      if (!quantity) return;
-      sum += quantity * priceForCustomer(product.id, customerId);
+      listDates(from, to).forEach((date) => {
+        const day = productionDays[date];
+        if (!day?.approved) return;
+        const qty = Number(day.quantities?.[product.id]?.[customerId] || 0);
+        if (qty) sum += qty * priceForCustomerOnDate(product.id, customerId, date);
+      });
+      (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customerId && p.productId === product.id && p.date >= from && p.date <= to).forEach((p) => {
+        sum += p.quantity * (p.priceExVat != null ? p.priceExVat : priceForCustomer(product.id, customerId));
+      });
     });
     return sum;
   }
@@ -5370,6 +5435,27 @@ function ProductionTab({
     setStatsAnchor(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
   }
 
+  function buildFrozenPrices(day: BakeryProductionDay) {
+    const frozen: Record<string, Record<string, number>> = {};
+    Object.keys(day.quantities || {}).forEach((productId) => {
+      const row = day.quantities[productId] || {};
+      Object.keys(row).forEach((customerId) => {
+        if (Number(row[customerId] || 0) <= 0) return;
+        if (!frozen[productId]) frozen[productId] = {};
+        frozen[productId][customerId] = priceForCustomer(productId, customerId);
+      });
+    });
+    return frozen;
+  }
+
+  function priceForCustomerOnDate(productId: string, customerId: string, date: string) {
+    const day = productionDays[date];
+    if (day?.approved && day.frozenPrices?.[productId]?.[customerId] != null) {
+      return day.frozenPrices[productId][customerId];
+    }
+    return priceForCustomer(productId, customerId);
+  }
+
   function priceForCustomer(productId: string, customerId: string) {
     const special = (data.storkjokkenSpecialPrices || []).find((x) => x.customerId === customerId && x.productId === productId);
     if (special) return special.priceExVat;
@@ -5391,11 +5477,22 @@ function ProductionTab({
     storkjokkenCustomers.forEach((customer) => {
       data.products.forEach((product) => {
         let quantity = 0;
-        dates.forEach((date) => { const day = productionDays[date]; if (!day?.approved) return; quantity += Number(day.quantities?.[product.id]?.[customer.id] || 0); });
-        quantity += pickupQuantity(product.id, customer.id, from, to);
+        let sumExVat = 0;
+        dates.forEach((date) => {
+          const day = productionDays[date];
+          if (!day?.approved) return;
+          const qty = Number(day.quantities?.[product.id]?.[customer.id] || 0);
+          if (!qty) return;
+          quantity += qty;
+          sumExVat += qty * priceForCustomerOnDate(product.id, customer.id, date);
+        });
+        (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customer.id && p.productId === product.id && p.date >= from && p.date <= to).forEach((p) => {
+          quantity += p.quantity;
+          sumExVat += p.quantity * (p.priceExVat != null ? p.priceExVat : priceForCustomer(product.id, customer.id));
+        });
         if (!quantity) return;
-        const priceExVat = priceForCustomer(product.id, customer.id);
-        const sumExVat = quantity * priceExVat; const vat = sumExVat * 0.15;
+        const priceExVat = sumExVat / quantity;
+        const vat = sumExVat * 0.15;
         rows.push({ customerId: customer.id, customerName: customer.name, productId: product.id, productName: product.name, quantity, priceExVat, sumExVat, vat, sumIncVat: sumExVat + vat });
       });
     });
@@ -6346,7 +6443,10 @@ ${orderPages}`;
           <div className="card">
             <div className="production-approve-box">
               <div><h3>Godkjenning av dag</h3><p style={{ color: "#64748b" }}>Dagen må godkjennes før den kan tas med i fakturagrunnlaget.</p></div>
-              <button className={activeDay.approved ? "btn active" : "btn"} onClick={() => saveDay({ ...activeDay, approved: !activeDay.approved })}>
+              <button
+                className={activeDay.approved ? "btn active" : "btn"}
+                onClick={() => saveDay({ ...activeDay, approved: !activeDay.approved, frozenPrices: !activeDay.approved ? buildFrozenPrices(activeDay) : activeDay.frozenPrices })}
+              >
                 {activeDay.approved ? "✓ Dagen er godkjent" : "Godkjenn dag"}
               </button>
             </div>
