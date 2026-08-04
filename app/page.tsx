@@ -2069,7 +2069,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     const rows = recipe.lines.map((l) => {
       const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
       const waste = l.wastePercent ? ` (${l.wastePercent}% svinn)` : "";
-      return `<tr><td>${name}${waste}</td><td>${num(l.amount, 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
+      return `<tr><td>${name}${waste}</td><td>${formatAmountUnit(l.amount, "kg", 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
     }).join("");
     const allergens = recipeAllergens(recipe).join(", ") || "Ingen registrert";
     const w = window.open("", "_blank");
@@ -3266,7 +3266,7 @@ function printProductLabel(product: Product) {
           }).join("");
           return `<tr><td colspan="3" style="background:#111827;color:white;font-weight:800;">${escapeHtml(course.name)}</td></tr>${optionRows}`;
         }).join("")
-      : product.lines.map((l) => `<tr><td>${escapeHtml(lineItemName(l.itemType, l.itemId) || "Ukjent")}</td><td>${num(l.amount, 3)} ${l.unit}</td><td>${currency(lineCost(l))}</td></tr>`).join("");
+      : product.lines.map((l) => `<tr><td>${escapeHtml(lineItemName(l.itemType, l.itemId) || "Ukjent")}</td><td>${formatAmountUnit(l.amount, l.unit, 3)}</td><td>${currency(lineCost(l))}</td></tr>`).join("");
     const allergens = productAllergens(product).join(", ") || "Ingen registrert";
     const priceExVat = exVatFromIncVat(product.customerPrice, data.settings.foodVat);
     const menuCostRange = isMenu ? menuCourseCostRange(product.menuCourses || []) : null;
@@ -3335,7 +3335,7 @@ function printProductLabel(product: Product) {
 
   const rows = product.lines.map((line) => {
     const name = lineItemName(line.itemType, line.itemId) || "Ukjent";
-    return `<tr><td>${escapeHtml(name)}</td><td>${num(line.amount, 3)} ${line.unit}</td><td>${currency(lineCost(line))}</td></tr>`;
+    return `<tr><td>${escapeHtml(name)}</td><td>${formatAmountUnit(line.amount, line.unit, 3)}</td><td>${currency(lineCost(line))}</td></tr>`;
   }).join("");
 
   const w = window.open("", "_blank");
@@ -4847,7 +4847,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
       if (line.itemType === "material") name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
       if (line.itemType === "recipe") name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
       if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
-      return `<tr><td>${escapeHtml(name)}</td><td>${num(line.amount)} ${line.unit}</td></tr>`;
+      return `<tr><td>${escapeHtml(name)}</td><td>${formatAmountUnit(line.amount, line.unit)}</td></tr>`;
     }).join("");
     const w = window.open("", "_blank"); if (!w) return;
     w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(product.name)}</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:32px}.card{max-width:620px;border:2px solid #111827;padding:20px}.logo{height:70px;width:auto;object-fit:contain;margin-bottom:10px}h1{margin:0 0 10px;font-size:26px}table{width:100%;border-collapse:collapse;margin-top:14px}td,th{border-bottom:1px solid #d1d5db;padding:7px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Print</button><div class="card"><img src="/logo.png" class="logo" /><h1>${escapeHtml(product.name)}</h1><p><b>Allergener:</b> ${escapeHtml(allergens)}</p><table><thead><tr><th>Navn</th><th>Mengde</th></tr></thead><tbody>${rows}</tbody></table></div></body></html>`);
@@ -6000,7 +6000,7 @@ ${orderPages}`;
 function printProductionDay() {
     const summaryRows = activeRows.map((row) => {
       const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
-      return `<tr><td><b>${escapeHtml(row.product.name)}</b><br><small>${escapeHtml(row.product.productNumber || "")}</small></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${num(unitSize, 3)} kg/stk` : "-"}</td></tr>`;
+      return `<tr><td><b>${escapeHtml(row.product.name)}</b><br><small>${escapeHtml(row.product.productNumber || "")}</small></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${formatAmountUnit(unitSize, "kg", 3)}/stk` : "-"}</td></tr>`;
     }).join("");
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number }[] }> = {};
@@ -6026,7 +6026,14 @@ function printProductionDay() {
         if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
         return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(line.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1><p class="muted">Summert fra alle produkter denne dagen</p></div><div class="right"><b>${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1><p class="muted">Summert fra alle produkter denne dagen</p></div><div class="right"><b>${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`).join("");
+      const ingredientRows = recipe.lines.map((line) => {
+        let name = "Ukjent"; let unit = recipe.yieldUnit;
+        if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
+        if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
+        return `<tr><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(Number(line.amount || 0) * scale, unit, 3)}</td></tr>`;
+      }).join("");
+      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1><p class="muted">Summert fra alle produkter denne dagen</p></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
     }).join("");
 
     const productPages = activeRows.map((row) => {
@@ -6037,7 +6044,7 @@ function printProductionDay() {
         if (line.itemType === "material") name = data.materials.find((m) => m.id === line.itemId)?.name || "Ukjent råvare";
         if (line.itemType === "recipe") name = data.recipes.find((r) => r.id === line.itemId)?.name || "Ukjent grunnoppskrift";
         if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
-        return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td></tr>`;
+        return `<tr><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(amount, line.unit, 3)}</td></tr>`;
       }).join("");
       const instructionsHtml = product.instructions
         ? `<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin:8px 0;white-space:pre-wrap">${escapeHtml(product.instructions)}</div>`
