@@ -6069,11 +6069,6 @@ function printProductionDay() {
         ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel:<br>${allergenDetails.map((d) => `${escapeHtml(d.name)}: ${escapeHtml(d.allergens.join(", "))}`).join("<br>")}</div>`
         : "";
 
-      const prodBoxes = order.orderLines.map((ol) => {
-        const p = data.products.find((x) => x.id === ol.productId);
-        return `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0"><h3 style="margin:0;font-size:13px">${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}</h3></div>`;
-      }).join("");
-
       return `<div class="page"><div class="top"><div><h1>Pakkseddel / kjøkkenordre</h1><p class="muted">${escapeHtml(customerName || "Ukjent kunde")}${matchedStorkjokkenCustomer ? " · Storkjøkkenpris" : ""}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div><div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div></div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
   <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Kunde</h3><p style="margin:2px 0"><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p style="margin:2px 0">Kontakt: ${escapeHtml(order.customer || "-")}</p><p style="margin:2px 0">Telefon: ${escapeHtml(order.phone || "-")}</p><p style="margin:2px 0">Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p style="margin:2px 0">Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p style="margin:2px 0"><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div>
@@ -6082,8 +6077,6 @@ function printProductionDay() {
 ${allergenWarningHtml}
 <h2>Ordrelinjer</h2>
 <table><thead><tr><th>Antall</th><th>Produkt</th><th class="right">Pris${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</th><th class="right">Sum</th></tr></thead><tbody>${rows}</tbody></table>
-<h2>Produksjonsgrunnlag</h2>
-${prodBoxes}
 <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-top:8px">
   <p style="margin:2px 0">Sum før rabatt: ${currency(subtotal)}</p>
   <p style="margin:2px 0">Rabatt ${order.discountPercent || 0}%: -${currency(discount)}</p>
@@ -6101,10 +6094,20 @@ ${prodBoxes}
         const price = priceForCustomerOnDate(product.id, customer.id, activeDate);
         const sum = qty * price;
         customerTotal += sum;
-        return `<tr><td class="right"><b>${qty}</b></td><td>${escapeHtml(product.name)}</td><td class="right">${currency(price)}</td><td class="right">${currency(sum)}</td></tr>`;
+        return `<tr><td>${qty}</td><td>${escapeHtml(product.name)}</td><td class="right">${currency(price)}</td><td class="right">${currency(sum)}</td></tr>`;
       }).join("");
       if (!rows) return "";
-      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customer.name)}</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th class="right">Antall</th><th>Produkt</th><th class="right">Pris eks. mva</th><th class="right">Sum eks. mva</th></tr></thead><tbody>${rows}</tbody><tfoot><tr class="total"><td colspan="3">Sum eks. mva</td><td class="right"><b>${currency(customerTotal)}</b></td></tr></tfoot></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Pakkseddel / kjøkkenordre</h1><p class="muted">${escapeHtml(customer.name)} · Storkjøkkenpris</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Kunde</h3><p style="margin:2px 0"><b>${escapeHtml(customer.name)}</b></p><p style="margin:2px 0">Org.nr: ${escapeHtml(customer.orgNumber || "-")}</p><p style="margin:2px 0">Telefon: ${escapeHtml(customer.phone || "-")}</p><p style="margin:2px 0">Levering: ${escapeHtml(customer.deliveryAddress || "-")}</p></div>
+  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Hensyn</h3><p style="margin:2px 0;color:#94a3b8">Ikke registrert for storkjøkkenkunder</p></div>
+</div>
+<h2>Ordrelinjer</h2>
+<table><thead><tr><th>Antall</th><th>Produkt</th><th class="right">Pris eks. mva</th><th class="right">Sum</th></tr></thead><tbody>${rows}</tbody></table>
+<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-top:8px">
+  <p class="total" style="margin:4px 0;font-size:15px">Total eks. mva: ${currency(customerTotal)}</p>
+</div>
+</div>`;
     }).join("");
 
     const body = `
