@@ -6000,7 +6000,10 @@ function printProductionDay() {
         if (line.itemType === "product") name = data.products.find((p) => p.id === line.itemId)?.name || "Ukjent produkt";
         return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(line.itemType)}</td><td class="right">${num(amount, 3)} ${escapeHtml(line.unit)}</td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div><table><thead><tr><th>Innhold</th><th>Type</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
+      const instructionsHtml = product.instructions
+        ? `<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin:8px 0;white-space:pre-wrap">${escapeHtml(product.instructions)}</div>`
+        : "";
+      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${instructionsHtml}<table><thead><tr><th>Innhold</th><th>Type</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="3">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
     }).join("");
 
     const packingPages = storkjokkenCustomers.map((customer) => {
@@ -6384,9 +6387,9 @@ ${orderPages}`;
                                   <input value={customerDraft.deliveryAddress || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
                                   <input value={customerDraft.phone || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
                                 </div>
-                                <label style={{ display: "block", marginTop: 8 }}>
+                                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
                                   <input type="checkbox" checked={!!customerDraft.internal} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
-                                  {" "}Intern (f.eks. kjøkken/catering) – vises som egen kolonne i produksjonen, men faktureres ikke
+                                  Intern
                                 </label>
                                 <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between" }}>
                                   <button className="link danger" onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
