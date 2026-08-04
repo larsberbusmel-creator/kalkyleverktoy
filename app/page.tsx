@@ -6264,6 +6264,11 @@ ${orderPages}`;
                       <tr>
                         <th>Produkt</th>
                         <th>Kategori</th>
+                        <th style={{ textAlign: "center" }}>Sum</th>
+                        {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
+                      </tr><tr>
+                        <th>Produkt</th>
+                        <th>Kategori</th>
                         {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
                         <th style={{ textAlign: "center" }}>Sum</th>
                       </tr>
@@ -6284,12 +6289,13 @@ ${orderPages}`;
                           <tr key={line.id}>
                             <td><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
                             <td>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                            <td style={{ textAlign: "center" }}><b>{total}</b></td>
                             {columns.map((col) => (
                               <td key={col.id}>
                                 <input type="number" value={qtyRow[col.id] || ""} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
                               </td>
                             ))}
-                            <td style={{ textAlign: "center" }}><b>{total}</b></td>
+                        
                           </tr>
                         );
                       })}
@@ -6387,10 +6393,12 @@ ${orderPages}`;
                                   <input value={customerDraft.deliveryAddress || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
                                   <input value={customerDraft.phone || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
                                 </div>
-                                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
-                                  <input type="checkbox" checked={!!customerDraft.internal} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
-                                  Intern
-                                </label>
+                                <div style={{ marginTop: 8 }}>
+                                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                    <input type="checkbox" checked={!!customerDraft.internal} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
+                                    Intern
+                                  </label>
+                                </div>
                                 <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between" }}>
                                   <button className="link danger" onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
                                   <div style={{ display: "flex", gap: 8 }}>
