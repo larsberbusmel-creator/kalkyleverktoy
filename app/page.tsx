@@ -1089,7 +1089,7 @@ return (
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
-        {tab === "production" && <ProductionTab data={data} updateData={updateData} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} />}
@@ -5375,9 +5375,11 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
 function ProductionTab({
   data,
   updateData,
+  productAllergens,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
+  productAllergens: (p: Product) => string[];
 }) {
   const productionCategories: { id: ProductionCategory; name: string }[] = [
     { id: "smabakst", name: "Småbakst" },
@@ -6029,21 +6031,66 @@ function printProductionDay() {
       return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${instructionsHtml}<table><thead><tr><th>Innhold</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="2">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
     }).join("");
 
+    function orderAllergenDetailsSimple(order: Order) {
+      const flagged = new Set(Object.entries(order.allergens || {}).filter(([, c]) => Number(c) > 0).map(([a]) => a));
+      if (!flagged.size) return [];
+      return order.orderLines.map((ol) => {
+        const product = data.products.find((p) => p.id === ol.productId);
+        if (!product) return null;
+        const hits = productAllergens(product).filter((a) => flagged.has(a));
+        return hits.length ? { name: product.name, allergens: hits } : null;
+      }).filter((x): x is { name: string; allergens: string[] } => !!x);
+    }
+
     const dayOrders = data.orders.filter((o) => o.date === activeDate && !o.deletedAt);
     const orderPackingPages = dayOrders.map((order) => {
       const customerName = order.customerType === "bedrift" ? order.companyName || order.customer : order.customer;
       const matchedStorkjokkenCustomer = storkjokkenCustomers.find((c) => c.name.trim().toLowerCase() === (customerName || "").trim().toLowerCase());
       const priceFor = (productId: string) => matchedStorkjokkenCustomer ? priceForCustomer(productId, matchedStorkjokkenCustomer.id) : (data.products.find((x) => x.id === productId)?.customerPrice || 0);
-      const subtotal = order.orderLines.reduce((sum, ol) => sum + priceFor(ol.productId) * ol.quantity, 0);
-      const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
-      const total = subtotal - discount;
+
       const rows = order.orderLines.map((ol) => {
         const p = data.products.find((x) => x.id === ol.productId);
         const price = priceFor(ol.productId);
-        const lineTotal = price * ol.quantity;
-        return `<tr><td>${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${ol.quantity} stk</td><td class="right">${currency(price)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
+        return `<tr><td>${ol.quantity}</td><td>${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${currency(price)}</td><td class="right">${currency(price * ol.quantity)}</td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Pakkseddel</h1><p class="muted">${escapeHtml(customerName || "Ukjent kunde")}${matchedStorkjokkenCustomer ? " · Storkjøkkenpris" : ""}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div><div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div></div><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Pris${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</th><th class="right">Sum${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</th></tr></thead><tbody>${rows}</tbody><tfoot>${order.discountPercent ? `<tr><td colspan="3">Rabatt ${order.discountPercent}%</td><td class="right">-${currency(discount)}</td></tr>` : ""}<tr class="total"><td colspan="3">Total${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</td><td class="right"><b>${currency(total)}</b></td></tr></tfoot></table></div>`;
+
+      const subtotal = order.orderLines.reduce((sum, ol) => sum + priceFor(ol.productId) * ol.quantity, 0);
+      const discount = subtotal * ((Number(order.discountPercent) || 0) / 100);
+      const total = subtotal - discount;
+      const totalEx = matchedStorkjokkenCustomer ? total : exVatFromIncVat(total, data.settings.foodVat);
+
+      const noteAllergens = order.note?.match(/Allergier \(fra bestilling\):\s*(.+)/i)?.[1]?.trim() || "";
+      const flaggedAllergens = Object.entries(order.allergens || {}).filter(([, c]) => Number(c) > 0).map(([a]) => a);
+      const allergensText = flaggedAllergens.join(", ") || noteAllergens || "Ingen registrert";
+      const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
+
+      const allergenDetails = orderAllergenDetailsSimple(order);
+      const allergenWarningHtml = allergenDetails.length
+        ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel:<br>${allergenDetails.map((d) => `${escapeHtml(d.name)}: ${escapeHtml(d.allergens.join(", "))}`).join("<br>")}</div>`
+        : "";
+
+      const prodBoxes = order.orderLines.map((ol) => {
+        const p = data.products.find((x) => x.id === ol.productId);
+        return `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0"><h3 style="margin:0;font-size:13px">${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}</h3></div>`;
+      }).join("");
+
+      return `<div class="page"><div class="top"><div><h1>Pakkseddel / kjøkkenordre</h1><p class="muted">${escapeHtml(customerName || "Ukjent kunde")}${matchedStorkjokkenCustomer ? " · Storkjøkkenpris" : ""}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div><div class="right"><b>${formatDateNo(order.date)} ${order.time || ""}</b></div></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Kunde</h3><p style="margin:2px 0"><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p style="margin:2px 0">Kontakt: ${escapeHtml(order.customer || "-")}</p><p style="margin:2px 0">Telefon: ${escapeHtml(order.phone || "-")}</p><p style="margin:2px 0">Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p style="margin:2px 0">Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p style="margin:2px 0"><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div>
+  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Hensyn</h3><p style="margin:2px 0"><b>Dietter:</b> ${escapeHtml(diets)}</p><p style="margin:2px 0"><b>Allergier:</b> ${escapeHtml(allergensText)}</p></div>
+</div>
+${allergenWarningHtml}
+<h2>Ordrelinjer</h2>
+<table><thead><tr><th>Antall</th><th>Produkt</th><th class="right">Pris${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}</th><th class="right">Sum</th></tr></thead><tbody>${rows}</tbody></table>
+<h2>Produksjonsgrunnlag</h2>
+${prodBoxes}
+<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-top:8px">
+  <p style="margin:2px 0">Sum før rabatt: ${currency(subtotal)}</p>
+  <p style="margin:2px 0">Rabatt ${order.discountPercent || 0}%: -${currency(discount)}</p>
+  <p class="total" style="margin:4px 0;font-size:15px">Total${matchedStorkjokkenCustomer ? " eks. mva" : " inkl. mva"}: ${currency(total)}</p>
+  ${!matchedStorkjokkenCustomer ? `<p style="margin:2px 0">Total eks. mva: ${currency(totalEx)}</p>` : ""}
+</div>
+</div>`;
     }).join("");
 
     const packingPages = storkjokkenCustomers.map((customer) => {
