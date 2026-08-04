@@ -6005,10 +6005,14 @@ function printProductionDay() {
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number }[] }> = {};
     activeRows.forEach((row) => {
+      const productYield = Number(row.product.recipeYieldAmount || 0);
       row.product.lines.forEach((line) => {
         if (line.itemType !== "recipe") return;
         const recipe = data.recipes.find((r) => r.id === line.itemId); if (!recipe) return;
-        const amount = Number(line.amount || 0) * row.quantity;
+        const perUnitAmount = (productYield > 0 && row.product.unitWeightKg)
+          ? (Number(line.amount || 0) / productYield) * row.product.unitWeightKg
+          : Number(line.amount || 0);
+        const amount = perUnitAmount * row.quantity;
         if (!recipeMap[recipe.id]) recipeMap[recipe.id] = { recipe, totalAmount: 0, unit: line.unit, sources: [] };
         recipeMap[recipe.id].totalAmount += amount;
         recipeMap[recipe.id].sources.push({ productName: row.product.name, quantity: row.quantity, amount, unit: line.unit, unitWeightKg: row.product.unitWeightKg });
