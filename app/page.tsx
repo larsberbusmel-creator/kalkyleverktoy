@@ -6029,20 +6029,21 @@ function printProductionDay() {
       const recipe = entry.recipe;
       const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
       const scale = recipeBaseAmount > 0 ? entry.totalAmount / recipeBaseAmount : 0;
+      const checkbox = `<span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span>`;
       const sourceRows = entry.sources.map((source) => {
         const doughLine = `<br><small style="color:#64748b">${formatAmountUnit(source.amount, source.unit, 3)} ${escapeHtml(recipe.name)}</small>`;
         const extra = source.extraLines.length
           ? `<br><small style="color:#64748b">${source.extraLines.map((e) => `${formatAmountUnit(e.amount, e.unit, 3)} ${escapeHtml(e.name)}`).join("<br>")}</small>`
           : "";
-        return `<tr><td>${escapeHtml(source.productName)}${doughLine}${extra}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`;
+        return `<tr><td style="width:14px">${checkbox}</td><td>${escapeHtml(source.productName)}${doughLine}${extra}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`;
       }).join("");
       const ingredientRows = recipe.lines.map((line) => {
         let name = "Ukjent"; let unit = recipe.yieldUnit;
         if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
         if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
-        return `<tr><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(Number(line.amount || 0) * scale, unit, 3)}</td></tr>`;
+        return `<tr><td style="width:14px">${checkbox}</td><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(Number(line.amount || 0) * scale, unit, 3)}</td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th></th><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th></th><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
     }).join("");
 
     const productPages = activeRows.filter((row) => !row.product.lines.some((l) => l.itemType === "recipe")).map((row) => {
