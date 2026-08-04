@@ -6030,10 +6030,10 @@ function printProductionDay() {
         if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
         return `<tr><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(Number(line.amount || 0) * scale, unit, 3)}</td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1><p class="muted">Summert fra alle produkter denne dagen</p></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
     }).join("");
 
-    const productPages = activeRows.map((row) => {
+    const productPages = activeRows.filter((row) => !row.product.lines.some((l) => l.itemType === "recipe")).map((row) => {
       const product = row.product;
       const lineRows = product.lines.map((line) => {
         const amount = Number(line.amount || 0) * row.quantity;
@@ -6133,14 +6133,13 @@ ${allergenWarningHtml}
 <div class="page">
   <div class="top">
     <div><h1>Bakeriproduksjon</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
-    <div class="right"><b>${totalUnits} stk totalt</b></div>
   </div>
   <table>
     <thead><tr><th>Produkt</th><th class="right">Antall stk</th><th class="right">Størrelse</th></tr></thead>
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
 </div>
-${baseRecipePages}${packingPages}${orderPackingPages}`;
+${baseRecipePages}${productPages}${packingPages}${orderPackingPages}`;
 
     printWindow(`Produksjon ${activeDate}`, body);
   }
