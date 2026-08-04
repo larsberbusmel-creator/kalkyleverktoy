@@ -6022,7 +6022,7 @@ function printProductionDay() {
     const baseRecipePages = Object.values(recipeMap).map((entry) => {
       const recipe = entry.recipe;
       const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
-      const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
+      const scale = recipeBaseAmount > 0 ? entry.totalAmount / recipeBaseAmount : 0;
       const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`).join("");
       const ingredientRows = recipe.lines.map((line) => {
         let name = "Ukjent"; let unit = recipe.yieldUnit;
