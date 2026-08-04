@@ -925,7 +925,8 @@ export default function Page() {
   }
 
   function recipeUnitCost(recipe: Recipe, visited: string[] = []) {
-    return recipeCost(recipe, visited) / Math.max(recipeTotalAmount(recipe), 1);
+    const total = recipeTotalAmount(recipe);
+    return total > 0 ? recipeCost(recipe, visited) / total : 0;
   }
 
   function recipeAllergens(recipe: Recipe, visited: string[] = []): string[] {
