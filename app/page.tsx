@@ -5417,6 +5417,12 @@ function ProductionTab({
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [specialPriceSearch, setSpecialPriceSearch] = useState("");
   const [expandedPickupCustomerId, setExpandedPickupCustomerId] = useState<string | null>(null);
+  const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
+  const [recurringDraft, setRecurringDraft] = useState<{ customerId: string; weekdays: number[]; lines: OrderLine[]; active: boolean }>({ customerId: "", weekdays: [], lines: [], active: true });
+  const [recurringLineProductId, setRecurringLineProductId] = useState("");
+  const [recurringLineProductSearch, setRecurringLineProductSearch] = useState("");
+  const [recurringLineQty, setRecurringLineQty] = useState("1");
+  const [recurringCustomerSearch, setRecurringCustomerSearch] = useState("");
   const [pickupProductSearch, setPickupProductSearch] = useState("");
   const [pickupProductId, setPickupProductId] = useState("");
   const [pickupQty, setPickupQty] = useState("1");
@@ -5427,8 +5433,19 @@ function ProductionTab({
   const [customerDraft, setCustomerDraft] = useState<Partial<StorkjokkenCustomer>>({});
 
   const productionDays = data.bakeryProductionDays || {};
+  function recurringQuantitiesForDate(date: string) {
+    const dayNo = weekdayNumber(date);
+    const quantities: BakeryProductionDay["quantities"] = {};
+    (data.recurringStorkjokkenOrders || []).filter((o) => o.active && o.weekdays.includes(dayNo)).forEach((order) => {
+      order.lines.forEach((line) => {
+        quantities[line.productId] = { ...(quantities[line.productId] || {}), [order.customerId]: Number(line.quantity || 0) };
+      });
+    });
+    return quantities;
+  }
+
   const activeDay: BakeryProductionDay = productionDays[activeDate] || {
-    date: activeDate, approved: false, quantities: {},
+    date: activeDate, approved: false, quantities: recurringQuantitiesForDate(activeDate),
   };
 
   const storkjokkenCustomers = (data.storkjokkenCustomers || []).filter((c) => c.active !== false);
@@ -6293,6 +6310,61 @@ ${orderPages}`;
     updateData({ bakeryProductionDays: nextDays });
   }
 
+  function saveRecurringOrder(order: RecurringStorkjokkenOrder) {
+    const without = (data.recurringStorkjokkenOrders || []).filter((o) => o.id !== order.id);
+    updateData({ recurringStorkjokkenOrders: [...without, order] });
+  }
+
+  function deleteRecurringOrder(id: string) {
+    if (!window.confirm("Slette denne fastordren?")) return;
+    updateData({ recurringStorkjokkenOrders: (data.recurringStorkjokkenOrders || []).filter((o) => o.id !== id) });
+  }
+
+  function startNewRecurring() {
+    setEditingRecurringId("new");
+    setRecurringDraft({ customerId: "", weekdays: [], lines: [], active: true });
+    setRecurringLineProductId(""); setRecurringLineProductSearch(""); setRecurringLineQty("1"); setRecurringCustomerSearch("");
+  }
+
+  function startEditRecurring(order: RecurringStorkjokkenOrder) {
+    setEditingRecurringId(order.id);
+    setRecurringDraft({ customerId: order.customerId, weekdays: [...order.weekdays], lines: order.lines.map((l) => ({ ...l })), active: order.active });
+    setRecurringLineProductId(""); setRecurringLineProductSearch(""); setRecurringLineQty("1"); setRecurringCustomerSearch("");
+  }
+
+  function cancelEditRecurring() {
+    setEditingRecurringId(null);
+  }
+
+  function toggleRecurringWeekday(day: number) {
+    setRecurringDraft((prev) => ({ ...prev, weekdays: prev.weekdays.includes(day) ? prev.weekdays.filter((d) => d !== day) : [...prev.weekdays, day].sort((a, b) => a - b) }));
+  }
+
+  function addRecurringLine() {
+    if (!recurringLineProductId || Number(recurringLineQty) <= 0) return;
+    setRecurringDraft((prev) => ({ ...prev, lines: [...prev.lines, { productId: recurringLineProductId, quantity: Number(recurringLineQty) }] }));
+    setRecurringLineProductId(""); setRecurringLineProductSearch(""); setRecurringLineQty("1");
+  }
+
+  function removeRecurringLine(index: number) {
+    setRecurringDraft((prev) => ({ ...prev, lines: prev.lines.filter((_, i) => i !== index) }));
+  }
+
+  function saveRecurringDraft() {
+    if (!recurringDraft.customerId || !recurringDraft.weekdays.length || !recurringDraft.lines.length) {
+      return alert("Velg kunde, minst én ukedag og minst én produktlinje.");
+    }
+    const order: RecurringStorkjokkenOrder = {
+      id: editingRecurringId && editingRecurringId !== "new" ? editingRecurringId : `recurring-${Date.now()}`,
+      customerId: recurringDraft.customerId,
+      weekdays: recurringDraft.weekdays,
+      lines: recurringDraft.lines,
+      active: recurringDraft.active,
+    };
+    saveRecurringOrder(order);
+    setEditingRecurringId(null);
+  }
+
   function applyRecurringOrdersForDay() {
     const dayNo = weekdayNumber(activeDate);
     let nextDay = { ...activeDay, quantities: { ...activeDay.quantities } };
@@ -6688,15 +6760,99 @@ ${orderPages}`;
 
           {panel === "recurring" && (
             <div className="card">
-              <h3>Fastordre</h3>
-              <p style={{ color: "#64748b" }}>Knappen i dagsbildet legger inn aktive fastordre for valgt ukedag.</p>
+              <div className="between">
+                <h3>Fastordre</h3>
+                <button className="btn active" onClick={startNewRecurring}>Ny fastordre</button>
+              </div>
+              <p style={{ color: "#64748b" }}>Aktive fastordre fylles automatisk inn på riktig ukedag i "Dagens produksjon" — juster gjerne mengden direkte der hvis en kunde bestiller mer eller mindre en gitt uke, det påvirker ikke selve fastordren.</p>
+
+              {editingRecurringId && (
+                <div className="soft-box">
+                  <h4 style={{ marginTop: 0 }}>{editingRecurringId === "new" ? "Ny fastordre" : "Rediger fastordre"}</h4>
+                  <label>Kunde</label>
+                  <div className="search-picker" style={{ maxWidth: 320 }}>
+                    <input
+                      value={recurringDraft.customerId ? (storkjokkenCustomers.find((c) => c.id === recurringDraft.customerId)?.name || "") : recurringCustomerSearch}
+                      onChange={(e) => { setRecurringCustomerSearch(e.target.value); setRecurringDraft({ ...recurringDraft, customerId: "" }); }}
+                      placeholder="Søk kunde"
+                    />
+                    {recurringCustomerSearch && !recurringDraft.customerId && (
+                      <div className="search-dropdown inline">
+                        {storkjokkenCustomers.filter((c) => c.name.toLowerCase().includes(recurringCustomerSearch.toLowerCase())).slice(0, 12).map((c) => (
+                          <button key={c.id} type="button" className="search-result" onClick={() => { setRecurringDraft({ ...recurringDraft, customerId: c.id }); setRecurringCustomerSearch(""); }}>
+                            <b>{c.name}</b>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="chips" style={{ margin: "8px 0" }}>
+                    {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                      <label key={d} className="check">
+                        <input type="checkbox" checked={recurringDraft.weekdays.includes(d)} onChange={() => toggleRecurringWeekday(d)} />
+                        {["Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag", "Søndag"][d - 1]}
+                      </label>
+                    ))}
+                  </div>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <input type="checkbox" checked={recurringDraft.active} onChange={(e) => setRecurringDraft({ ...recurringDraft, active: e.target.checked })} />
+                    Aktiv
+                  </label>
+
+                  <h4>Produktlinjer</h4>
+                  <table>
+                    <thead><tr><th>Produkt</th><th>Antall</th><th></th></tr></thead>
+                    <tbody>
+                      {recurringDraft.lines.map((l, i) => {
+                        const product = data.products.find((p) => p.id === l.productId);
+                        return (
+                          <tr key={i}>
+                            <td>{product?.name || "Ukjent"}</td>
+                            <td>{l.quantity}</td>
+                            <td><button className="link danger" onClick={() => removeRecurringLine(i)}>Slett</button></td>
+                          </tr>
+                        );
+                      })}
+                      {!recurringDraft.lines.length && <tr><td colSpan={3} style={{ color: "#94a3b8" }}>Ingen linjer lagt til ennå.</td></tr>}
+                    </tbody>
+                  </table>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 8, flexWrap: "wrap" }}>
+                    <div className="search-picker" style={{ maxWidth: 280 }}>
+                      <input
+                        value={recurringLineProductId ? (data.products.find((p) => p.id === recurringLineProductId)?.name || "") : recurringLineProductSearch}
+                        onChange={(e) => { setRecurringLineProductSearch(e.target.value); setRecurringLineProductId(""); }}
+                        placeholder="Søk produkt"
+                      />
+                      {recurringLineProductSearch && !recurringLineProductId && (
+                        <div className="search-dropdown inline">
+                          {data.products.filter((p) => p.name.toLowerCase().includes(recurringLineProductSearch.toLowerCase())).slice(0, 12).map((p) => (
+                            <button key={p.id} type="button" className="search-result" onClick={() => { setRecurringLineProductId(p.id); setRecurringLineProductSearch(""); }}>
+                              <b>{p.name}</b>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <input type="number" value={recurringLineQty} onChange={(e) => setRecurringLineQty(e.target.value)} style={{ maxWidth: 90 }} placeholder="Antall" />
+                    <button className="btn" onClick={addRecurringLine}>Legg til linje</button>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
+                    <button className="btn" onClick={cancelEditRecurring}>Avbryt</button>
+                    <button className="btn active" onClick={saveRecurringDraft}>Lagre fastordre</button>
+                  </div>
+                </div>
+              )}
+
               {(data.recurringStorkjokkenOrders || []).length ? (
                 (data.recurringStorkjokkenOrders || []).map((order) => {
                   const customer = data.storkjokkenCustomers.find((c) => c.id === order.customerId);
                   return (
                     <div key={order.id} className="editable-row">
-                      <div><b>{customer?.name || "Ukjent kunde"}</b><br /><small>Dager: {order.weekdays.join(", ")} · Linjer: {order.lines.length}</small></div>
+                      <div><b>{customer?.name || "Ukjent kunde"}</b><br /><small>Dager: {order.weekdays.map((d) => ["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"][d - 1]).join(", ")} · Linjer: {order.lines.length}</small></div>
                       <span>{order.active ? "Aktiv" : "Inaktiv"}</span>
+                      <button className="btn" onClick={() => startEditRecurring(order)}>Rediger</button>
+                      <button className="link danger" onClick={() => deleteRecurringOrder(order.id)}>Slett</button>
                     </div>
                   );
                 })
