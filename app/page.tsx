@@ -3356,8 +3356,9 @@ th{background:#f3f4f6}
   w.focus();
 }
 
+  const portionsDivisor = form.type === "pasmuurt" && Number(form.portionsPerWhole) > 0 ? Number(form.portionsPerWhole) : 1;
   const activeCost = activeProduct ? productCost(activeProduct) : 0;
-  const activeUnitCost = activeProduct ? productUnitCost(activeProduct) : 0;
+  const activeUnitCost = activeProduct ? productUnitCost(activeProduct) / portionsDivisor : 0;
   const priceExVat = activeProduct ? exVatFromIncVat(activeProduct.customerPrice, data.settings.foodVat) : 0;
   const finalFoodCost = activeProduct ? foodCostPercentFrom(priceExVat, activeUnitCost) : 0;
   const finalMargin = activeProduct ? marginPercentFrom(priceExVat, activeUnitCost) : 0;
@@ -3477,8 +3478,8 @@ th{background:#f3f4f6}
 </div>
 
         <div className="metric-row">
-          <Metric label="Total kost eks. mva" value={currency(activeCost)} />
-          <Metric label={`Kost per ${form.yieldUnit}`} value={currency(activeUnitCost)} dark />
+          <Metric label={portionsDivisor > 1 ? "Total kost eks. mva (hele oppskriften)" : "Total kost eks. mva"} value={currency(activeCost)} />
+          <Metric label={portionsDivisor > 1 ? "Kost per porsjon" : `Kost per ${form.yieldUnit}`} value={currency(activeUnitCost)} dark />
           <Metric label="Anbefalt 70% inkl. 15% mva" value={currency(priceIncVatFromCost(activeUnitCost, 70, 15))} />
           <Metric label="Anbefalt 70% inkl. 25% mva" value={currency(priceIncVatFromCost(activeUnitCost, 70, 25))} />
         </div>
@@ -5474,9 +5475,24 @@ function ProductionTab({
   }
 
   function ordersQuantityForProduct(productId: string, date: string) {
-    return data.orders
-      .filter((o) => o.date === date && !o.deletedAt)
-      .reduce((sum, o) => sum + (o.orderLines || []).filter((l) => l.productId === productId).reduce((s, l) => s + Number(l.quantity || 0), 0), 0);
+    let directUnits = 0;
+    let consumedWholeUnits = 0;
+    data.orders.filter((o) => o.date === date && !o.deletedAt).forEach((order) => {
+      (order.orderLines || []).forEach((ol) => {
+        const orderedQty = Number(ol.quantity || 0);
+        if (!orderedQty) return;
+        if (ol.productId === productId) { directUnits += orderedQty; return; }
+        const parent = data.products.find((p) => p.id === ol.productId);
+        if (!parent) return;
+        const divisor = parent.type === "pasmuurt" && Number(parent.portionsPerWhole) > 0 ? Number(parent.portionsPerWhole) : 1;
+        parent.lines.forEach((line) => {
+          if (line.itemType === "product" && line.itemId === productId) {
+            consumedWholeUnits += (Number(line.amount || 0) * orderedQty) / divisor;
+          }
+        });
+      });
+    });
+    return directUnits + Math.ceil(consumedWholeUnits - 1e-9);
   }
 
   function totalForProduct(productId: string, day: BakeryProductionDay = activeDay) {
