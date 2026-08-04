@@ -6019,14 +6019,7 @@ function printProductionDay() {
       const recipe = entry.recipe;
       const recipeBaseAmount = recipe.lines.reduce((sum, line) => sum + Number(line.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
       const scale = entry.totalAmount / Math.max(recipeBaseAmount, 1);
-      const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${num(source.unitWeightKg, 3)} kg` : ""}</td><td class="right">${num(source.amount, 3)} ${escapeHtml(source.unit)}</td></tr>`).join("");
-      const ingredientRows = recipe.lines.map((line) => {
-        let name = "Ukjent"; let unit = recipe.yieldUnit;
-        if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
-        if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
-        return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(line.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
-      }).join("");
-      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1><p class="muted">Summert fra alle produkter denne dagen</p></div><div class="right"><b>${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`).join("");
+      const sourceRows = entry.sources.map((source) => `<tr><td>${escapeHtml(source.productName)}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`).join("");
       const ingredientRows = recipe.lines.map((line) => {
         let name = "Ukjent"; let unit = recipe.yieldUnit;
         if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
