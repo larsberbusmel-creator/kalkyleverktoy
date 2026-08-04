@@ -252,6 +252,14 @@ type ProductPriceLogEntry = {
   date: string;
 };
 
+type ScheduledPriceChange = {
+  id: string;
+  effectiveDate: string;
+  changes: { productId: string; customerPrice?: number; storkjokkenPriceExVat?: number }[];
+  applied?: boolean;
+  createdAt: string;
+};
+
 type RecurringStorkjokkenOrder = {
   id: string;
   customerId: string;
@@ -298,6 +306,7 @@ type AppData = {
   storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
   storkjokkenPickupOrders: StorkjokkenPickupOrder[];
   productPriceLog: ProductPriceLogEntry[];
+  scheduledPriceChanges: ScheduledPriceChange[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
   seenOrderIds: string[]
@@ -470,6 +479,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   storkjokkenSpecialPrices: [],
   storkjokkenPickupOrders: [],
   productPriceLog: [],
+  scheduledPriceChanges: [],
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
   seenOrderIds: [],
@@ -537,6 +547,9 @@ storkjokkenPickupOrders:
 
 productPriceLog:
   (raw as any).productPriceLog || [],
+
+scheduledPriceChanges:
+  (raw as any).scheduledPriceChanges || [],
 
 recurringStorkjokkenOrders:
   (raw as any).recurringStorkjokkenOrders || [],
@@ -664,6 +677,39 @@ export default function Page() {
   }, []);
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    const due = (data.scheduledPriceChanges || []).filter((s) => !s.applied && s.effectiveDate <= today());
+    if (!due.length) return;
+    const patch: Record<string, any> = {};
+    const logEntries: ProductPriceLogEntry[] = [];
+    due.forEach((sched) => {
+      sched.changes.forEach((c) => {
+        const product = data.products.find((p) => p.id === c.productId);
+        if (!product) return;
+        const updated = { ...(patch[c.productId] || product) };
+        if (c.customerPrice != null && c.customerPrice !== product.customerPrice) {
+          logEntries.push({ id: `pricelog-${Date.now()}-${c.productId}-cp`, productId: c.productId, field: "customerPrice", fromValue: Number(product.customerPrice || 0), toValue: c.customerPrice, date: today() });
+          updated.customerPrice = c.customerPrice;
+        }
+        if (c.storkjokkenPriceExVat != null && c.storkjokkenPriceExVat !== product.storkjokkenPriceExVat) {
+          logEntries.push({ id: `pricelog-${Date.now()}-${c.productId}-sk`, productId: c.productId, field: "storkjokkenPriceExVat", fromValue: Number(product.storkjokkenPriceExVat || 0), toValue: c.storkjokkenPriceExVat, date: today() });
+          updated.storkjokkenPriceExVat = c.storkjokkenPriceExVat;
+        }
+        patch[c.productId] = updated;
+      });
+    });
+    if (Object.keys(patch).length) updateListRpc("products", patch);
+    updateData({
+      productPriceLog: [...(data.productPriceLog || []), ...logEntries],
+      scheduledPriceChanges: (data.scheduledPriceChanges || []).map((s) => (due.some((d) => d.id === s.id) ? { ...s, applied: true } : s)),
+      calendarNotes: [
+        ...(data.calendarNotes || []),
+        ...due.map((s) => ({ id: `note-priceapplied-${s.id}`, date: today(), title: "Planlagt prisendring utført", text: `${s.changes.length} produkt(er) fikk oppdatert pris i dag (planlagt ${formatDateNo(s.effectiveDate)}).` })),
+      ],
+    });
+  }, [isLoaded, data.scheduledPriceChanges]);
 
   useEffect(() => {
     let localBuildId = BUILD_ID;
@@ -2355,6 +2401,9 @@ const [lineSearch, setLineSearch] = useState("");
   const [courseOptionSearch, setCourseOptionSearch] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Alle");
+  const [showPriceEditor, setShowPriceEditor] = useState(false);
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, { customerPrice?: string; storkjokkenPriceExVat?: string }>>({});
+  const [scheduledDate, setScheduledDate] = useState("");
   const [productPage, setProductPage] = useState(1);
   const [wideProductId, setWideProductId] = useState<string | null>(null);
   const [listMode, setListMode] = useState<ProductListKind>("bakst");
@@ -2456,6 +2505,57 @@ setForm((f) => {
     productNumber: mode === "new" ? getNextProductNumber(next.category || f.category) : f.productNumber,
   };
 });  }
+
+  function setPriceDraft(productId: string, field: "customerPrice" | "storkjokkenPriceExVat", value: string) {
+    setPriceDrafts((prev) => ({ ...prev, [productId]: { ...prev[productId], [field]: value } }));
+  }
+
+  function varekostPctFor(product: Product, customerPriceIncVat: number) {
+    const cost = productUnitCost(product);
+    const priceExVat = exVatFromIncVat(customerPriceIncVat, data.settings.foodVat);
+    return priceExVat > 0 ? (cost / priceExVat) * 100 : 0;
+  }
+
+  function saveBulkPriceChanges() {
+    const entries = Object.entries(priceDrafts).filter(([, d]) => (d.customerPrice && d.customerPrice.trim() !== "") || (d.storkjokkenPriceExVat && d.storkjokkenPriceExVat.trim() !== ""));
+    if (!entries.length) return alert("Ingen priser er fylt ut.");
+    const changes = entries.map(([productId, d]) => ({
+      productId,
+      ...(d.customerPrice && d.customerPrice.trim() !== "" ? { customerPrice: Number(d.customerPrice) } : {}),
+      ...(d.storkjokkenPriceExVat && d.storkjokkenPriceExVat.trim() !== "" ? { storkjokkenPriceExVat: Number(d.storkjokkenPriceExVat) } : {}),
+    }));
+
+    if (scheduledDate && scheduledDate > today()) {
+      const scheduled: ScheduledPriceChange = { id: `priceschedule-${Date.now()}`, effectiveDate: scheduledDate, changes, applied: false, createdAt: new Date().toISOString() };
+      updateData({
+        scheduledPriceChanges: [...(data.scheduledPriceChanges || []), scheduled],
+        calendarNotes: [...(data.calendarNotes || []), { id: `note-pricesched-${scheduled.id}`, date: scheduledDate, title: "Planlagt prisendring", text: `${changes.length} produkt(er) får ny pris denne dagen.` }],
+      });
+      alert(`Prisendring planlagt til ${formatDateNo(scheduledDate)} for ${changes.length} produkt(er).`);
+    } else {
+      const patch: Record<string, any> = {};
+      const logEntries: ProductPriceLogEntry[] = [];
+      changes.forEach((c) => {
+        const product = data.products.find((p) => p.id === c.productId);
+        if (!product) return;
+        const updated = { ...product };
+        if (c.customerPrice != null && c.customerPrice !== product.customerPrice) {
+          logEntries.push({ id: `pricelog-${Date.now()}-${c.productId}-cp`, productId: c.productId, field: "customerPrice", fromValue: Number(product.customerPrice || 0), toValue: c.customerPrice, date: today() });
+          updated.customerPrice = c.customerPrice;
+        }
+        if (c.storkjokkenPriceExVat != null && c.storkjokkenPriceExVat !== product.storkjokkenPriceExVat) {
+          logEntries.push({ id: `pricelog-${Date.now()}-${c.productId}-sk`, productId: c.productId, field: "storkjokkenPriceExVat", fromValue: Number(product.storkjokkenPriceExVat || 0), toValue: c.storkjokkenPriceExVat, date: today() });
+          updated.storkjokkenPriceExVat = c.storkjokkenPriceExVat;
+        }
+        patch[c.productId] = updated;
+      });
+      updateListRpc("products", patch);
+      if (logEntries.length) updateData({ productPriceLog: [...(data.productPriceLog || []), ...logEntries] });
+    }
+    setPriceDrafts({});
+    setScheduledDate("");
+    setShowPriceEditor(false);
+  }
 
   function saveProduct() {
     if (!form.name.trim()) return alert("Legg inn produktnavn.");
@@ -3670,6 +3770,10 @@ th{background:#f3f4f6}
             Lag produktliste
           </button>
 
+          <button className="btn" onClick={() => setShowPriceEditor(!showPriceEditor)}>
+            {showPriceEditor ? "Lukk prisredigering" : "Rediger flere priser"}
+          </button>
+
           <button className="btn active" onClick={startNewProduct}>
             Nytt produkt
           </button>
@@ -3706,6 +3810,56 @@ th{background:#f3f4f6}
         Viser {pagedProducts.length} av {filtered.length} produkter. Side {productPage} av {totalProductPages}.
       </p>
 
+      {showPriceEditor ? (
+        <div className="soft-box">
+          <div className="form-grid three">
+            <label>Planlagt dato (valgfritt – stå tom for å endre med en gang)
+              <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} min={today()} />
+            </label>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Produktnr</th>
+                <th>Produkt</th>
+                <th>Varekost produkt</th>
+                <th>Kundepris (nå)</th>
+                <th>Storkjøkkenpris (nå)</th>
+                <th>Oppdatert kundepris</th>
+                <th>Oppdatert storkjøkkenpris</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((p) => {
+                const draft = priceDrafts[p.id] || {};
+                const newCustomerPrice = draft.customerPrice && draft.customerPrice.trim() !== "" ? Number(draft.customerPrice) : p.customerPrice;
+                const nowPct = varekostPctFor(p, p.customerPrice);
+                const updatedPct = varekostPctFor(p, newCustomerPrice);
+                return (
+                  <tr key={p.id}>
+                    <td>{p.productNumber || "-"}</td>
+                    <td>{p.name}</td>
+                    <td>{currency(productUnitCost(p))}</td>
+                    <td>{currency(p.customerPrice)}</td>
+                    <td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td>
+                    <td>
+                      <input type="number" value={draft.customerPrice || ""} onChange={(e) => setPriceDraft(p.id, "customerPrice", e.target.value)} placeholder={String(p.customerPrice)} />
+                      <div style={{ color: "#94a3b8", fontSize: 11 }}>Varekost nå: {num(nowPct, 1)}% → Oppdatert: {num(updatedPct, 1)}%</div>
+                    </td>
+                    <td>
+                      <input type="number" value={draft.storkjokkenPriceExVat || ""} onChange={(e) => setPriceDraft(p.id, "storkjokkenPriceExVat", e.target.value)} placeholder={p.storkjokkenPriceExVat ? String(p.storkjokkenPriceExVat) : ""} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <button className="btn active" style={{ marginTop: 10 }} onClick={saveBulkPriceChanges}>
+            {scheduledDate && scheduledDate > today() ? `Planlegg endring til ${formatDateNo(scheduledDate)}` : "Lagre endringer nå"}
+          </button>
+        </div>
+      ) : (
+      <>
       <table>
         <thead>
           <tr>
@@ -3786,6 +3940,8 @@ th{background:#f3f4f6}
         <span>Side {productPage} av {totalProductPages}</span>
         <button className="btn" disabled={productPage >= totalProductPages} onClick={() => setProductPage(productPage + 1)}>Neste</button>
       </div>
+      </>
+      )}
     </div>
 
     {wideProduct && (
