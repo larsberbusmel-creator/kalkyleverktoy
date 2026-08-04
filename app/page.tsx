@@ -6140,7 +6140,7 @@ ${allergenWarningHtml}
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
 </div>
-${baseRecipePages}${productPages}${packingPages}${orderPackingPages}`;
+${baseRecipePages}${packingPages}${orderPackingPages}`;
 
     printWindow(`Produksjon ${activeDate}`, body);
   }
