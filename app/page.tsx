@@ -109,6 +109,7 @@ type Product = {
   unitWeightKg?: number;
   unitsPerCase?: number;
   menuCourses?: MenuCourse[];
+  instructions?: string;
 };
 
 type MenuCourseSelection = { courseId: string; productId: string; guestCount: number };
@@ -225,6 +226,7 @@ type StorkjokkenCustomer = {
   deliveryAddress?: string;
   phone?: string;
   active?: boolean;
+  internal?: boolean;
 };
 
 type StorkjokkenSpecialPrice = {
@@ -2300,6 +2302,9 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             <button className="plain" onClick={() => setSelectedId(r.id)}>
               <b>{r.name}</b><br />
               <small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small>
+              {Math.abs(recipeTotalAmount(r) - Number(r.yieldAmount || 0)) > 0.01 && (
+                <div style={{ color: "#b45309", fontSize: 12 }}>⚠ Utbytte stemmer ikke: linjene summerer til {num(recipeTotalAmount(r), 3)} {r.yieldUnit}, men utbytte er satt til {r.yieldAmount} {r.yieldUnit}</div>
+              )}
             </button>
             <button className="link" onClick={() => editRecipe(r)}>Rediger</button>
             <button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button>
@@ -2376,8 +2381,10 @@ unitWeightKg: "1",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
   unitsPerCase: "",
-});  const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
-  const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
+  instructions: "",
+});  
+const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
+const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
 const [line, setLine] = useState<{
   itemType: ProductLine["itemType"];
   itemId: string;
@@ -2454,6 +2461,7 @@ productNumber: form.productNumber || getNextProductNumber(form.category),    nam
 unitWeightKg: Number(form.unitWeightKg) || 0,
   unitsPerCase: Number(form.unitsPerCase) || undefined,
   menuCourses: form.type === "selskapsmeny" ? draftMenuCourses : undefined,
+  instructions: form.instructions || undefined,
   };
 
   const activeProduct = mode === "view" ? selected : draftProduct;
@@ -2481,6 +2489,7 @@ unitWeightKg: "1",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
   unitsPerCase: "",
+  instructions: "",
 });    
 setDraftLines([]);
     setDraftPackaging([]);
@@ -2611,6 +2620,7 @@ unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
       storkjokkenPriceExVat: String(p.storkjokkenPriceExVat || ""),
       targetMargin: String(p.targetMargin || 70),
       unitsPerCase: String(p.unitsPerCase || ""),
+      instructions: p.instructions || "",
     });
     setDraftLines(p.lines.map((l) => ({ ...l })));
     setDraftPackaging(p.packaging.map((x) => ({ ...x })));
@@ -2674,6 +2684,7 @@ unitWeightKg: "1",
     storkjokkenPriceExVat: String(copy.storkjokkenPriceExVat || ""),
     targetMargin: String(copy.targetMargin || 70),
     unitsPerCase: String(copy.unitsPerCase || ""),
+    instructions: copy.instructions || "",
   });
 
   setDraftLines(copy.lines.map((l) => ({ ...l })));
@@ -3477,6 +3488,18 @@ th{background:#f3f4f6}
           <Metric label="Endelig varekost" value={`${num(finalFoodCost, 1)} %`} />
           <Metric label="Storkjøkkenpris eks. mva" value={form.storkjokkenPriceExVat ? currency(Number(form.storkjokkenPriceExVat)) : "Ikke satt"} />
           <Metric label="Storkjøkken inkl. 15%" value={form.storkjokkenPriceExVat ? currency(Number(form.storkjokkenPriceExVat) * 1.15) : "-"} />
+        </div>
+
+        <div className="soft-box" style={{ marginTop: 12 }}>
+          <label>Instruksjoner (fremgangsmåte/notater for kjøkken/bakeri)
+            <textarea
+              value={form.instructions || ""}
+              onChange={(e) => setForm({ ...form, instructions: e.target.value })}
+              placeholder="F.eks. 'Bløtlegges dagen før', 'Elt 5+7 minutter', 'Hvile 30 min'..."
+              rows={4}
+              style={{ width: "100%" }}
+            />
+          </label>
         </div>
 
         {mode === "edit" && selected && (data.productPriceLog || []).some((l) => l.productId === selected.id) && (
@@ -5394,7 +5417,7 @@ function ProductionTab({
   const storkjokkenCustomers = (data.storkjokkenCustomers || []).filter((c) => c.active !== false);
   const columns = [
     { id: "butikk", name: "Butikk", invoice: false },
-    ...storkjokkenCustomers.map((c) => ({ id: c.id, name: c.name, invoice: true })),
+    ...storkjokkenCustomers.map((c) => ({ id: c.id, name: c.name, invoice: !c.internal })),
   ];
 
   // Cateringordre for valgt dag
@@ -5499,7 +5522,7 @@ function ProductionTab({
 
   function startEditCustomer(customer: StorkjokkenCustomer) {
     setEditingCustomerId(customer.id);
-    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone });
+    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal });
   }
 
   function cancelEditCustomer() {
@@ -6361,6 +6384,10 @@ ${orderPages}`;
                                   <input value={customerDraft.deliveryAddress || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
                                   <input value={customerDraft.phone || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
                                 </div>
+                                <label style={{ display: "block", marginTop: 8 }}>
+                                  <input type="checkbox" checked={!!customerDraft.internal} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
+                                  {" "}Intern (f.eks. kjøkken/catering) – vises som egen kolonne i produksjonen, men faktureres ikke
+                                </label>
                                 <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between" }}>
                                   <button className="link danger" onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
                                   <div style={{ display: "flex", gap: 8 }}>
