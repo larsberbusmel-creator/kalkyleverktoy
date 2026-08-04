@@ -824,7 +824,7 @@ export default function Page() {
         p_items: itemsPatch,
       }).then(({ error }: any) => {
         if (error) console.error(`Supabase RPC error (${listKey}):`, error);
-        setTimeout(() => { isSavingRef.current = false; }, 500);
+        setTimeout(() => { isSavingRef.current = false; }, 2000);
       });
 
       return next;
