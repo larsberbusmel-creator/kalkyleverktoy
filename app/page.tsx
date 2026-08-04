@@ -2906,7 +2906,10 @@ function recipeNutrition(recipe: Recipe, multiplier = 1, visited: string[] = [])
 
     if (line.itemType === "recipe") {
       const subRecipe = data.recipes.find((r) => r.id === line.itemId);
-      if (subRecipe) mergeNutrition(total, recipeNutrition(subRecipe, amount, [...visited, recipe.id]));
+      if (subRecipe) {
+        const subBase = subRecipe.lines.reduce((s, l) => s + Number(l.amount || 0), 0) || Number(subRecipe.yieldAmount || 1) || 1;
+        mergeNutrition(total, recipeNutrition(subRecipe, amount / subBase, [...visited, recipe.id]));
+      }
     }
   });
 
@@ -2927,12 +2930,18 @@ function productNutrition(product: Product, multiplier = 1, visited: string[] = 
 
     if (line.itemType === "recipe") {
       const recipe = data.recipes.find((r) => r.id === line.itemId);
-      if (recipe) mergeNutrition(total, recipeNutrition(recipe, amount));
+      if (recipe) {
+        const recipeBase = recipe.lines.reduce((s, l) => s + Number(l.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+        mergeNutrition(total, recipeNutrition(recipe, amount / recipeBase));
+      }
     }
 
     if (line.itemType === "product") {
       const subProduct = data.products.find((p) => p.id === line.itemId);
-      if (subProduct) mergeNutrition(total, productNutrition(subProduct, amount, [...visited, product.id]));
+      if (subProduct) {
+        const subBase = Number(subProduct.recipeYieldAmount || subProduct.yieldAmount || 1) || 1;
+        mergeNutrition(total, productNutrition(subProduct, amount / subBase, [...visited, product.id]));
+      }
     }
   });
 
