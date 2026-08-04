@@ -2303,7 +2303,11 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
               <b>{r.name}</b><br />
               <small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small>
               {Math.abs(recipeTotalAmount(r) - Number(r.yieldAmount || 0)) > 0.01 && (
-                <div style={{ color: "#b45309", fontSize: 12 }}>⚠ Utbytte stemmer ikke: linjene summerer til {num(recipeTotalAmount(r), 3)} {r.yieldUnit}, men utbytte er satt til {r.yieldAmount} {r.yieldUnit}</div>
+                <div style={{ color: "#b45309", fontSize: 12 }}>
+                  ⚠ Utbytte stemmer ikke: linjene summerer til {num(recipeTotalAmount(r), 3)} {r.yieldUnit}, men utbytte er satt til {r.yieldAmount} {r.yieldUnit}
+                  {" "}
+                  <button className="link" onClick={() => updateListRpc("recipes", { [r.id]: { ...r, yieldAmount: recipeTotalAmount(r) } })}>Fiks automatisk</button>
+                </div>
               )}
             </button>
             <button className="link" onClick={() => editRecipe(r)}>Rediger</button>
