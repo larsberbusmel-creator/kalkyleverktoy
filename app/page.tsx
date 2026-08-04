@@ -2477,6 +2477,8 @@ if (exists) {
   return alert("Produktnummer finnes allerede!");
 }
 
+    updateListRpc("products", { [product.id]: product });
+
     if (mode === "edit" && selected) {
       const priceLogEntries: ProductPriceLogEntry[] = [];
       if (Number(selected.customerPrice || 0) !== Number(product.customerPrice || 0)) {
@@ -2489,8 +2491,6 @@ if (exists) {
         updateData({ productPriceLog: [...(data.productPriceLog || []), ...priceLogEntries] });
       }
     }
-
-    updateListRpc("products", { [product.id]: product });
 
     setSelectedId(product.id);
     setMode("view");
