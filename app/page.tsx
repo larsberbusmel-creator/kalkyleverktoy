@@ -3379,6 +3379,28 @@ th{background:#f3f4f6}
           <Metric label="Storkjøkken inkl. 15%" value={form.storkjokkenPriceExVat ? currency(Number(form.storkjokkenPriceExVat) * 1.15) : "-"} />
         </div>
 
+        {mode === "edit" && selected && (data.productPriceLog || []).some((l) => l.productId === selected.id) && (
+          <details style={{ marginTop: 4, marginBottom: 12 }}>
+            <summary style={{ cursor: "pointer", color: "#64748b" }}>Prishistorikk</summary>
+            <table>
+              <thead><tr><th>Dato</th><th>Felt</th><th>Fra</th><th>Til</th></tr></thead>
+              <tbody>
+                {(data.productPriceLog || [])
+                  .filter((l) => l.productId === selected.id)
+                  .sort((a, b) => b.date.localeCompare(a.date))
+                  .map((l) => (
+                    <tr key={l.id}>
+                      <td>{formatDateNo(l.date)}</td>
+                      <td>{l.field === "customerPrice" ? "Kundepris inkl. mva" : "Storkjøkkenpris eks. mva"}</td>
+                      <td>{currency(l.fromValue)}</td>
+                      <td>{currency(l.toValue)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+
         <div className="soft-box">
           <h2>Ingredienser / innhold</h2>
           <div className="form-grid five">
