@@ -6044,7 +6044,7 @@ function printProductionDay() {
       const parts = columns.filter((col) => Number(qtyRow[col.id] || 0) > 0).map((col) => `${escapeHtml(col.name)} ${qtyRow[col.id]} stk`);
       const ordersQty = ordersQuantityForProduct(row.product.id, activeDate);
       if (ordersQty > 0) parts.push(`Bestillinger ${ordersQty} stk`);
-      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td>${parts.join(", ")}</td><td class="right"><b>Totalt ${row.quantity} stk</b></td></tr>`;
+      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td>${parts.join(", ")}</td><td class="right"><b>${row.quantity} stk</b></td></tr>`;
     }).join("");
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number; extraLines: { name: string; amount: number; unit: string }[] }[] }> = {};
