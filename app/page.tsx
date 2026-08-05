@@ -501,7 +501,13 @@ function migrateData(raw: Partial<AppData>): AppData {
     category: recipe.category || "Grunnoppskrift",
     yieldAmount: Number(recipe.yieldAmount || recipe.batchUnits || 1),
     yieldUnit: recipe.yieldUnit || "kg",
-    lines: (recipe.lines || []).map((line: any) => ({ itemType: line.itemType || "material", itemId: line.itemId || line.materialId || "", amount: Number(line.amount || 0) })),
+    lines: (recipe.lines || []).map((line: any) => ({
+      itemType: line.itemType || "material",
+      itemId: line.itemId || line.materialId || "",
+      amount: Number(line.amount || 0),
+      wastePercent: line.wastePercent !== undefined && line.wastePercent !== "" ? Number(line.wastePercent) : undefined,
+      groupLabel: line.groupLabel || undefined,
+    })),
   }));
 
   const oldMenus = ((raw as any).menus || []).map((m: any) => ({
