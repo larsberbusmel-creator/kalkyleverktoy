@@ -262,11 +262,16 @@ type ScheduledPriceChange = {
   createdAt: string;
 };
 
+type RecurringOrderLine = {
+  productId: string;
+  quantityByDay: Record<number, number>; // ukedag (1=mandag...7=søndag) -> antall
+};
+
 type RecurringStorkjokkenOrder = {
   id: string;
   customerId: string;
   weekdays: number[]; // 1=mandag, 2=tirsdag osv
-  lines: OrderLine[];
+  lines: RecurringOrderLine[];
   active: boolean;
   note?: string;
 };
@@ -5418,7 +5423,7 @@ function ProductionTab({
   const [specialPriceSearch, setSpecialPriceSearch] = useState("");
   const [expandedPickupCustomerId, setExpandedPickupCustomerId] = useState<string | null>(null);
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
-  const [recurringDraft, setRecurringDraft] = useState<{ customerId: string; weekdays: number[]; lines: OrderLine[]; active: boolean }>({ customerId: "", weekdays: [], lines: [], active: true });
+  const [recurringDraft, setRecurringDraft] = useState<{ customerId: string; weekdays: number[]; lines: RecurringOrderLine[]; active: boolean }>({ customerId: "", weekdays: [], lines: [], active: true });
   const [recurringLineProductId, setRecurringLineProductId] = useState("");
   const [recurringLineProductSearch, setRecurringLineProductSearch] = useState("");
   const [recurringLineQty, setRecurringLineQty] = useState("1");
@@ -5438,7 +5443,7 @@ function ProductionTab({
     const quantities: BakeryProductionDay["quantities"] = {};
     (data.recurringStorkjokkenOrders || []).filter((o) => o.active && o.weekdays.includes(dayNo)).forEach((order) => {
       order.lines.forEach((line) => {
-        quantities[line.productId] = { ...(quantities[line.productId] || {}), [order.customerId]: Number(line.quantity || 0) };
+        quantities[line.productId] = { ...(quantities[line.productId] || {}), [order.customerId]: Number(line.quantityByDay?.[dayNo] || 0) };
       });
     });
     return quantities;
@@ -6302,7 +6307,7 @@ ${orderPages}`;
       const targetQuantities: BakeryProductionDay["quantities"] = JSON.parse(JSON.stringify(sourceDay.quantities || {}));
       (data.recurringStorkjokkenOrders || []).filter((order) => order.active && order.weekdays.includes(dayNo)).forEach((order) => {
         order.lines.forEach((line) => {
-          targetQuantities[line.productId] = { ...(targetQuantities[line.productId] || {}), [order.customerId]: Number(line.quantity || 0) };
+          targetQuantities[line.productId] = { ...(targetQuantities[line.productId] || {}), [order.customerId]: Number(line.quantityByDay?.[dayNo] || 0) };
         });
       });
       nextDays[targetDate] = { date: targetDate, approved: false, quantities: targetQuantities };
@@ -6337,13 +6342,34 @@ ${orderPages}`;
   }
 
   function toggleRecurringWeekday(day: number) {
-    setRecurringDraft((prev) => ({ ...prev, weekdays: prev.weekdays.includes(day) ? prev.weekdays.filter((d) => d !== day) : [...prev.weekdays, day].sort((a, b) => a - b) }));
+    setRecurringDraft((prev) => {
+      const isRemoving = prev.weekdays.includes(day);
+      const weekdays = isRemoving ? prev.weekdays.filter((d) => d !== day) : [...prev.weekdays, day].sort((a, b) => a - b);
+      const lines = prev.lines.map((l) => {
+        const quantityByDay = { ...l.quantityByDay };
+        if (isRemoving) delete quantityByDay[day];
+        else quantityByDay[day] = quantityByDay[day] ?? 0;
+        return { ...l, quantityByDay };
+      });
+      return { ...prev, weekdays, lines };
+    });
   }
 
   function addRecurringLine() {
-    if (!recurringLineProductId || Number(recurringLineQty) <= 0) return;
-    setRecurringDraft((prev) => ({ ...prev, lines: [...prev.lines, { productId: recurringLineProductId, quantity: Number(recurringLineQty) }] }));
+    if (!recurringLineProductId) return;
+    if (!recurringDraft.weekdays.length) return alert("Velg minst én ukedag først.");
+    const qty = Number(recurringLineQty) || 0;
+    const quantityByDay: Record<number, number> = {};
+    recurringDraft.weekdays.forEach((d) => { quantityByDay[d] = qty; });
+    setRecurringDraft((prev) => ({ ...prev, lines: [...prev.lines, { productId: recurringLineProductId, quantityByDay }] }));
     setRecurringLineProductId(""); setRecurringLineProductSearch(""); setRecurringLineQty("1");
+  }
+
+  function updateRecurringLineQty(lineIndex: number, day: number, value: number) {
+    setRecurringDraft((prev) => ({
+      ...prev,
+      lines: prev.lines.map((l, i) => i === lineIndex ? { ...l, quantityByDay: { ...l.quantityByDay, [day]: value } } : l),
+    }));
   }
 
   function removeRecurringLine(index: number) {
@@ -6370,7 +6396,7 @@ ${orderPages}`;
     let nextDay = { ...activeDay, quantities: { ...activeDay.quantities } };
     (data.recurringStorkjokkenOrders || []).filter((order) => order.active && order.weekdays.includes(dayNo)).forEach((order) => {
       order.lines.forEach((line) => {
-        nextDay.quantities[line.productId] = { ...(nextDay.quantities[line.productId] || {}), [order.customerId]: Number(nextDay.quantities[line.productId]?.[order.customerId] || 0) + Number(line.quantity || 0) };
+        nextDay.quantities[line.productId] = { ...(nextDay.quantities[line.productId] || {}), [order.customerId]: Number(nextDay.quantities[line.productId]?.[order.customerId] || 0) + Number(line.quantityByDay?.[dayNo] || 0) };
       });
     });
     saveDay(nextDay);
@@ -6801,19 +6827,29 @@ ${orderPages}`;
 
                   <h4>Produktlinjer</h4>
                   <table>
-                    <thead><tr><th>Produkt</th><th>Antall</th><th></th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>Produkt</th>
+                        {recurringDraft.weekdays.map((d) => <th key={d}>{["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"][d - 1]}</th>)}
+                        <th></th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {recurringDraft.lines.map((l, i) => {
                         const product = data.products.find((p) => p.id === l.productId);
                         return (
                           <tr key={i}>
                             <td>{product?.name || "Ukjent"}</td>
-                            <td>{l.quantity}</td>
+                            {recurringDraft.weekdays.map((d) => (
+                              <td key={d}>
+                                <input type="number" value={l.quantityByDay[d] ?? 0} onChange={(e) => updateRecurringLineQty(i, d, Number(e.target.value) || 0)} style={{ width: 64 }} />
+                              </td>
+                            ))}
                             <td><button className="link danger" onClick={() => removeRecurringLine(i)}>Slett</button></td>
                           </tr>
                         );
                       })}
-                      {!recurringDraft.lines.length && <tr><td colSpan={3} style={{ color: "#94a3b8" }}>Ingen linjer lagt til ennå.</td></tr>}
+                      {!recurringDraft.lines.length && <tr><td colSpan={recurringDraft.weekdays.length + 2} style={{ color: "#94a3b8" }}>Ingen linjer lagt til ennå. Velg ukedager over først.</td></tr>}
                     </tbody>
                   </table>
                   <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 8, flexWrap: "wrap" }}>
