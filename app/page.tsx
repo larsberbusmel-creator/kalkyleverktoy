@@ -2066,6 +2066,24 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setDraftLines((prev) => prev.map((l) => (l.groupLabel === oldLabel ? { ...l, groupLabel: trimmed || undefined } : l)));
   }
 
+  function moveGroup(index: number, direction: -1 | 1) {
+    setDraftLines((prev) => {
+      const { start, end } = groupBounds(prev, index);
+      const block = prev.slice(start, end + 1);
+      if (direction === -1) {
+        if (start === 0) return prev;
+        const { start: prevStart } = groupBounds(prev, start - 1);
+        const prevBlock = prev.slice(prevStart, start);
+        return [...prev.slice(0, prevStart), ...block, ...prevBlock, ...prev.slice(end + 1)];
+      } else {
+        if (end === prev.length - 1) return prev;
+        const { end: nextEnd } = groupBounds(prev, end + 1);
+        const nextBlock = prev.slice(end + 1, nextEnd + 1);
+        return [...prev.slice(0, start), ...nextBlock, ...block, ...prev.slice(nextEnd + 1)];
+      }
+    });
+  }
+
   const groupOptions = Array.from(new Set(draftLines.map((l) => l.groupLabel).filter((g): g is string => !!g)));
 
   function toggleStepInput(kind: "group" | "step", ref: string) {
@@ -2272,10 +2290,16 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                     />
                   </td>
                   <td>{currency(lineCost(l))}</td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>
                       Slett
                     </button>
+                    {isGroupFirstLine(draftLines, i) && (
+                      <>
+                        <button className="btn" style={{ marginLeft: 6, fontSize: 15, padding: "4px 10px" }} disabled={i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
+                        <button className="btn" style={{ marginLeft: 4, fontSize: 15, padding: "4px 10px" }} disabled={i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
+                      </>
+                    )}
                   </td>
                 </tr>
                 </React.Fragment>
