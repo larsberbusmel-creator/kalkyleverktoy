@@ -2234,7 +2234,6 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                 <th>Navn</th>
                 <th>Mengde</th>
                 <th>Svinn %</th>
-                <th>Gruppe</th>
                 <th>Kost</th>
                 <th></th>
               </tr>
@@ -2244,7 +2243,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                 <React.Fragment key={i}>
                 {isGroupFirstLine(draftLines, i) && l.groupLabel && (
                   <tr style={{ background: Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#e2e8f0" : "#c7d2fe", borderTop: i > 0 ? "3px solid #94a3b8" : undefined }}>
-                    <td colSpan={7} style={{ padding: "6px 10px" }}>
+                    <td colSpan={6} style={{ padding: "6px 10px" }}>
                       <input
                         value={l.groupLabel}
                         onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
@@ -2285,14 +2284,6 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                       value={l.wastePercent || ""}
                       onChange={(e) => updateDraftLine(i, { wastePercent: Number(e.target.value) || 0 })}
                       placeholder="%"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={l.groupLabel || ""}
-                      onChange={(e) => updateDraftLine(i, { groupLabel: e.target.value || undefined })}
-                      placeholder="-"
-                      style={{ minWidth: 100 }}
                     />
                   </td>
                   <td>{currency(lineCost(l))}</td>
