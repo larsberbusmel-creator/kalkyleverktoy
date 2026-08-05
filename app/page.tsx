@@ -5800,6 +5800,8 @@ body{font-family:Arial,sans-serif;color:#111827;padding:24px;line-height:1.35}
 .print-logo{max-width:220px;max-height:90px;object-fit:contain}
 .logo{height:90px;width:auto;object-fit:contain;margin-bottom:8px}
 .page{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
+.frontpage{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px}
+.frontpage table td,.frontpage table th{padding:1px 5px;line-height:1.15}
 .subpage{border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
 .page:last-child{break-after:auto}
 .top{border-bottom:2px solid #111827;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;gap:12px}
@@ -6183,11 +6185,11 @@ ${allergenWarningHtml}
     }).join("");
 
     const body = `
-<div class="page">
+<div class="frontpage">
   <div class="top">
     <div><h1>Bakeriproduksjon <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
   </div>
-  <table>
+  <table style="font-size:9px">
     <thead><tr><th>Produkt</th><th>Fordeling</th><th class="right">Totalt</th></tr></thead>
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
