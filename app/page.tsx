@@ -5801,7 +5801,7 @@ body{font-family:Arial,sans-serif;color:#111827;padding:24px;line-height:1.35}
 .logo{height:90px;width:auto;object-fit:contain;margin-bottom:8px}
 .page{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
 .frontpage{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px}
-.frontpage table td,.frontpage table th{padding:1px 5px;line-height:1.4}
+.frontpage table td,.frontpage table th{padding:6px 8px}
 .subpage{border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
 .page:last-child{break-after:auto}
 .top{border-bottom:2px solid #111827;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;gap:12px}
@@ -6046,7 +6046,7 @@ function printProductionDay() {
       const parts = columns.filter((col) => Number(qtyRow[col.id] || 0) > 0).map((col) => `${escapeHtml(col.name)} ${qtyRow[col.id]} stk`);
       const ordersQty = ordersQuantityForProduct(row.product.id, activeDate);
       if (ordersQty > 0) parts.push(`Bestillinger ${ordersQty} stk`);
-      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td>${parts.join(", ")}</td><td class="right"><b>${row.quantity} stk</b></td></tr>`;
+      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td>${parts.join("<br>")}</td><td class="right"><b>${row.quantity} stk</b></td></tr>`;
     }).join("");
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number; extraLines: { name: string; amount: number; unit: string }[] }[] }> = {};
@@ -6189,7 +6189,7 @@ ${allergenWarningHtml}
   <div class="top" style="border-bottom:none">
     <div><h1 style="font-size:50%"><span style="font-size:200%">Bakeriproduksjon</span> <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
   </div>
-  <table style="font-size:11px">
+  <table>
     <thead><tr><th>Produkt</th><th>Fordeling</th><th class="right">Totalt</th></tr></thead>
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
