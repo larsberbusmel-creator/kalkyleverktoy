@@ -5796,6 +5796,8 @@ function ProductionTab({
   }
 
   function priceForCustomer(productId: string, customerId: string) {
+    const customer = (data.storkjokkenCustomers || []).find((c) => c.id === customerId);
+    if (customer?.internal) return 0;
     const special = (data.storkjokkenSpecialPrices || []).find((x) => x.customerId === customerId && x.productId === productId);
     if (special) return special.priceExVat;
     const product = data.products.find((p) => p.id === productId);
