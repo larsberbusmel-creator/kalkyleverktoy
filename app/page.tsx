@@ -6145,11 +6145,16 @@ function printProductionDay() {
           : "";
         return `<tr><td style="width:14px">${checkbox}</td><td>${escapeHtml(source.productName)}${doughLine}${extra}</td><td class="right">${source.quantity} stk${source.unitWeightKg ? ` × ${formatAmountUnit(source.unitWeightKg, "kg", 3)}` : ""}</td><td class="right">${formatAmountUnit(source.amount, source.unit, 3)}</td></tr>`;
       }).join("");
+      let lastIngredientGroup: string | undefined = undefined;
       const ingredientRows = recipe.lines.map((line) => {
         let name = "Ukjent"; let unit = recipe.yieldUnit;
         if (line.itemType === "material") { const material = data.materials.find((m) => m.id === line.itemId); name = material?.name || "Ukjent råvare"; unit = material?.unit || recipe.yieldUnit; }
         if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
-        return `<tr><td style="width:14px">${checkbox}</td><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(Number(line.amount || 0) * scale, unit, 3)}</td></tr>`;
+        const groupHeader = line.groupLabel && line.groupLabel !== lastIngredientGroup
+          ? `<tr><td colspan="3" style="background:#e2e8f0;font-weight:700;padding:6px 8px">${escapeHtml(line.groupLabel)}</td></tr>`
+          : "";
+        lastIngredientGroup = line.groupLabel;
+        return `${groupHeader}<tr><td style="width:14px">${checkbox}</td><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(Number(line.amount || 0) * scale, unit, 3)}</td></tr>`;
       }).join("");
       return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2 style="font-size:67%">Produkter</h2><table><thead><tr><th></th><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2 style="font-size:67%">Oppskrift</h2><table><thead><tr><th></th><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
     }).join("");
