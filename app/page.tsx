@@ -5428,6 +5428,7 @@ function ProductionTab({
   const [recurringLineProductSearch, setRecurringLineProductSearch] = useState("");
   const [recurringLineQty, setRecurringLineQty] = useState("1");
   const [recurringCustomerSearch, setRecurringCustomerSearch] = useState("");
+  const [templateProductSearch, setTemplateProductSearch] = useState("");
   const [pickupProductSearch, setPickupProductSearch] = useState("");
   const [pickupProductId, setPickupProductId] = useState("");
   const [pickupQty, setPickupQty] = useState("1");
@@ -5565,6 +5566,7 @@ function ProductionTab({
     };
     updateData({ bakeryProductionTemplateLines: [...(data.bakeryProductionTemplateLines || []), nextLine] });
     setNewTemplateProductId("");
+    setTemplateProductSearch("");
   }
 
   function removeTemplateLine(id: string) {
@@ -6568,10 +6570,23 @@ ${orderPages}`;
                 <select value={newTemplateCategory} onChange={(e) => setNewTemplateCategory(e.target.value as ProductionCategory)}>
                   {productionCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
                 </select>
-                <select value={newTemplateProductId} onChange={(e) => setNewTemplateProductId(e.target.value)}>
-                  <option value="">Velg produkt</option>
-                  {data.products.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.productNumber || "-"}</option>)}
-                </select>
+                <div className="search-picker">
+                  <input
+                    value={newTemplateProductId ? (data.products.find((p) => p.id === newTemplateProductId)?.name || "") : templateProductSearch}
+                    onChange={(e) => { setTemplateProductSearch(e.target.value); setNewTemplateProductId(""); }}
+                    placeholder="Søk produkt"
+                  />
+                  {templateProductSearch && !newTemplateProductId && (
+                    <div className="search-dropdown inline">
+                      {data.products.filter((p) => p.name.toLowerCase().includes(templateProductSearch.toLowerCase())).slice(0, 12).map((p) => (
+                        <button key={p.id} type="button" className="search-result" onClick={() => { setNewTemplateProductId(p.id); setTemplateProductSearch(""); }}>
+                          <b>{p.name}</b>
+                          <small>{p.productNumber || "-"}</small>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button className="btn active" onClick={addTemplateLine}>Legg til i mal</button>
               </div>
               <div className="grid two">
