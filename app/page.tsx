@@ -6040,7 +6040,7 @@ ${orderPages}`;
 function printProductionDay() {
     const summaryRows = activeRows.map((row) => {
       const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
-      return `<tr><td><b>${escapeHtml(row.product.name)}</b> ${row.product.productNumber ? escapeHtml(row.product.productNumber) : ""}</td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${formatAmountUnit(unitSize, "kg", 3)}/stk` : "-"}</td></tr>`;
+      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${formatAmountUnit(unitSize, "kg", 3)}/stk` : "-"}</td></tr>`;
     }).join("");
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number; extraLines: { name: string; amount: number; unit: string }[] }[] }> = {};
@@ -6083,7 +6083,7 @@ function printProductionDay() {
         if (line.itemType === "recipe") { const subRecipe = data.recipes.find((r) => r.id === line.itemId); name = subRecipe?.name || "Ukjent grunnoppskrift"; unit = subRecipe?.yieldUnit || recipe.yieldUnit; }
         return `<tr><td style="width:14px">${checkbox}</td><td>${escapeHtml(name)}</td><td class="right">${formatAmountUnit(Number(line.amount || 0) * scale, unit, 3)}</td></tr>`;
       }).join("");
-      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2>Brukes til</h2><table><thead><tr><th></th><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2>Skalert oppskrift</h2><table><thead><tr><th></th><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
+      return `<div class="page"><div class="top"><div><h1>Grunnoppskrift: ${escapeHtml(recipe.name)}</h1></div><div class="right"><b>${formatAmountUnit(entry.totalAmount, entry.unit, 3)}</b><br>${formatDateNo(activeDate)}</div></div><h2 style="font-size:67%">Produkter</h2><table><thead><tr><th></th><th>Produkt</th><th class="right">Antall</th><th class="right">Mengde</th></tr></thead><tbody>${sourceRows}</tbody></table><h2 style="font-size:67%">Oppskrift</h2><table><thead><tr><th></th><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
     }).join("");
 
     const productPages = activeRows.filter((row) => !row.product.lines.some((l) => l.itemType === "recipe")).map((row) => {
@@ -6182,7 +6182,6 @@ ${allergenWarningHtml}
     }).join("");
 
     const body = `
-<div class="print-header"><img src="/logo.png" class="print-logo" /></div>
 <div class="page">
   <div class="top">
     <div><h1>Bakeriproduksjon <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
