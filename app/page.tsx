@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -5503,14 +5503,30 @@ function ProductionTab({
     updateData({ bakeryProductionDays: { ...productionDays, [nextDay.date]: nextDay } });
   }
 
+  const [localQuantities, setLocalQuantities] = useState<BakeryProductionDay["quantities"]>(() => activeDay.quantities);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setLocalQuantities(activeDay.quantities);
+  }, [activeDate]);
+
   function setCell(productId: string, columnId: string, value: number) {
-    saveDay({
-      ...activeDay,
-      quantities: {
-        ...activeDay.quantities,
-        [productId]: { ...(activeDay.quantities[productId] || {}), [columnId]: value },
-      },
+    setLocalQuantities((prev) => {
+      const next = { ...prev, [productId]: { ...(prev[productId] || {}), [columnId]: value } };
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
+        saveDay({ ...activeDay, quantities: next });
+      }, 600);
+      return next;
     });
+  }
+
+  function flushPendingQuantities() {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
   }
 
   function ordersQuantityForProduct(productId: string, date: string) {
@@ -5783,7 +5799,7 @@ body{font-family:Arial,sans-serif;color:#111827;padding:24px;line-height:1.35}
 .print-header{display:flex;justify-content:center;align-items:center;margin-bottom:20px}
 .print-logo{max-width:220px;max-height:90px;object-fit:contain}
 .logo{height:90px;width:auto;object-fit:contain;margin-bottom:8px}
-.page{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px}
+.page{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
 .page:last-child{break-after:auto}
 .top{border-bottom:2px solid #111827;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;gap:12px}
 h1,h2,h3{margin-top:0}
@@ -6024,7 +6040,7 @@ ${orderPages}`;
 function printProductionDay() {
     const summaryRows = activeRows.map((row) => {
       const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
-      return `<tr><td><b>${escapeHtml(row.product.name)}</b><br><small>${escapeHtml(row.product.productNumber || "")}</small></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${formatAmountUnit(unitSize, "kg", 3)}/stk` : "-"}</td></tr>`;
+      return `<tr><td><b>${escapeHtml(row.product.name)}</b> ${row.product.productNumber ? escapeHtml(row.product.productNumber) : ""}</td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${formatAmountUnit(unitSize, "kg", 3)}/stk` : "-"}</td></tr>`;
     }).join("");
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number; extraLines: { name: string; amount: number; unit: string }[] }[] }> = {};
@@ -6169,7 +6185,7 @@ ${allergenWarningHtml}
 <div class="print-header"><img src="/logo.png" class="print-logo" /></div>
 <div class="page">
   <div class="top">
-    <div><h1>Bakeriproduksjon</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
+    <div><h1>Bakeriproduksjon <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
   </div>
   <table>
     <thead><tr><th>Produkt</th><th class="right">Antall stk</th><th class="right">Størrelse</th></tr></thead>
@@ -6507,8 +6523,8 @@ ${orderPages}`;
                         .map((line) => {
                         const product = data.products.find((p) => p.id === line.productId);
                         if (!product) return null;
-                        const qtyRow = activeDay.quantities[product.id] || {};
-                        const total = totalForProduct(product.id);
+                        const qtyRow = localQuantities[product.id] || {};
+                        const total = totalForProduct(product.id, { ...activeDay, quantities: localQuantities });
                         return (
                           <tr key={line.id}>
                             <td><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
@@ -6537,7 +6553,7 @@ ${orderPages}`;
                           <>
                             <tr><td colSpan={4 + columns.length} style={{ background: "#fffbeb", color: "#92400e", fontWeight: 700, padding: "6px 8px" }}>⚠ Bestilt, men ikke i produksjonsmal</td></tr>
                             {extraProducts.map((product) => {
-                              const qtyRow = activeDay.quantities[product.id] || {};
+                              const qtyRow = localQuantities[product.id] || {};
                               const total = totalForProduct(product.id);
                               return (
                                 <tr key={product.id} style={{ background: "#fffbeb" }}>
@@ -7025,7 +7041,11 @@ ${orderPages}`;
               <div><h3>Godkjenning av dag</h3><p style={{ color: "#64748b" }}>Dagen må godkjennes før den kan tas med i fakturagrunnlaget.</p></div>
               <button
                 className={activeDay.approved ? "btn active" : "btn"}
-                onClick={() => saveDay({ ...activeDay, approved: !activeDay.approved, frozenPrices: !activeDay.approved ? buildFrozenPrices(activeDay) : activeDay.frozenPrices })}
+                onClick={() => {
+                  flushPendingQuantities();
+                  const dayToSave = { ...activeDay, quantities: localQuantities };
+                  saveDay({ ...dayToSave, approved: !dayToSave.approved, frozenPrices: !dayToSave.approved ? buildFrozenPrices(dayToSave) : dayToSave.frozenPrices });
+                }}
               >
                 {activeDay.approved ? "✓ Dagen er godkjent" : "Godkjenn dag"}
               </button>
