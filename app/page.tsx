@@ -5802,6 +5802,8 @@ body{font-family:Arial,sans-serif;color:#111827;padding:24px;line-height:1.35}
 .page{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
 .frontpage{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px}
 .frontpage table td,.frontpage table th{padding:1px 5px;line-height:1.15}
+.frontpage{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px}
+.frontpage table td,.frontpage table th{padding:1px 5px;line-height:1.15}
 .subpage{border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
 .page:last-child{break-after:auto}
 .top{border-bottom:2px solid #111827;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;gap:12px}
@@ -6186,8 +6188,8 @@ ${allergenWarningHtml}
 
     const body = `
 <div class="frontpage">
-  <div class="top">
-    <div><h1>Bakeriproduksjon <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
+  <div class="top" style="border-bottom:none">
+    <div><h1 style="font-size:50%"><span style="font-size:200%">Bakeriproduksjon</span> <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
   </div>
   <table style="font-size:9px">
     <thead><tr><th>Produkt</th><th>Fordeling</th><th class="right">Totalt</th></tr></thead>
