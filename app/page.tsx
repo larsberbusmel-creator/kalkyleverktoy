@@ -5800,6 +5800,7 @@ body{font-family:Arial,sans-serif;color:#111827;padding:24px;line-height:1.35}
 .print-logo{max-width:220px;max-height:90px;object-fit:contain}
 .logo{height:90px;width:auto;object-fit:contain;margin-bottom:8px}
 .page{break-after:page;border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
+.subpage{border:2px solid #111827;border-radius:14px;padding:18px;margin-bottom:18px;break-inside:avoid;page-break-inside:avoid}
 .page:last-child{break-after:auto}
 .top{border-bottom:2px solid #111827;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;gap:12px}
 h1,h2,h3{margin-top:0}
@@ -6039,8 +6040,11 @@ ${orderPages}`;
 }
 function printProductionDay() {
     const summaryRows = activeRows.map((row) => {
-      const unitSize = Number(row.product.unitWeightKg || row.product.yieldAmount || 0);
-      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td class="right">${row.quantity} stk</td><td class="right">${unitSize ? `${formatAmountUnit(unitSize, "kg", 3)}/stk` : "-"}</td></tr>`;
+      const qtyRow = activeDay.quantities[row.product.id] || {};
+      const parts = columns.filter((col) => Number(qtyRow[col.id] || 0) > 0).map((col) => `${escapeHtml(col.name)} ${qtyRow[col.id]} stk`);
+      const ordersQty = ordersQuantityForProduct(row.product.id, activeDate);
+      if (ordersQty > 0) parts.push(`Bestillinger ${ordersQty} stk`);
+      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td>${parts.join(", ")}</td><td class="right"><b>Totalt ${row.quantity} stk</b></td></tr>`;
     }).join("");
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number; extraLines: { name: string; amount: number; unit: string }[] }[] }> = {};
@@ -6099,7 +6103,7 @@ function printProductionDay() {
       const instructionsHtml = product.instructions
         ? `<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin:8px 0;white-space:pre-wrap">${escapeHtml(product.instructions)}</div>`
         : "";
-      return `<div class="page"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${instructionsHtml}<table><thead><tr><th>Innhold</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="2">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
+      return `<div class="subpage"><div class="top"><div><h1>Produkt: ${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(product.category)} · ${row.quantity} stk</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${instructionsHtml}<table><thead><tr><th>Innhold</th><th class="right">Mengde</th></tr></thead><tbody>${lineRows || `<tr><td colspan="2">Ingen linjer registrert.</td></tr>`}</tbody></table></div>`;
     }).join("");
 
     function orderAllergenDetailsSimple(order: Order) {
@@ -6169,10 +6173,7 @@ ${allergenWarningHtml}
       }).join("");
       if (!rows) return "";
       return `<div class="page"><div class="top"><div><h1>Pakkseddel / kjøkkenordre</h1><p class="muted">${escapeHtml(customer.name)} · Storkjøkkenpris</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Kunde</h3><p style="margin:2px 0"><b>${escapeHtml(customer.name)}</b></p><p style="margin:2px 0">Org.nr: ${escapeHtml(customer.orgNumber || "-")}</p><p style="margin:2px 0">Telefon: ${escapeHtml(customer.phone || "-")}</p><p style="margin:2px 0">Levering: ${escapeHtml(customer.deliveryAddress || "-")}</p></div>
-  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Hensyn</h3><p style="margin:2px 0;color:#94a3b8">Ikke registrert for storkjøkkenkunder</p></div>
-</div>
+<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Kunde</h3><p style="margin:2px 0"><b>${escapeHtml(customer.name)}</b></p><p style="margin:2px 0">Org.nr: ${escapeHtml(customer.orgNumber || "-")}</p><p style="margin:2px 0">Telefon: ${escapeHtml(customer.phone || "-")}</p><p style="margin:2px 0">Levering: ${escapeHtml(customer.deliveryAddress || "-")}</p></div>
 <h2>Ordrelinjer</h2>
 <table><thead><tr><th>Antall</th><th>Produkt</th><th class="right">Pris eks. mva</th><th class="right">Sum</th></tr></thead><tbody>${rows}</tbody></table>
 <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-top:8px">
@@ -6187,7 +6188,7 @@ ${allergenWarningHtml}
     <div><h1>Bakeriproduksjon <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
   </div>
   <table>
-    <thead><tr><th>Produkt</th><th class="right">Antall stk</th><th class="right">Størrelse</th></tr></thead>
+    <thead><tr><th>Produkt</th><th>Fordeling</th><th class="right">Totalt</th></tr></thead>
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
 </div>
