@@ -6191,7 +6191,7 @@ ${allergenWarningHtml}
   <div class="top" style="border-bottom:none">
     <div><h1 style="font-size:50%"><span style="font-size:200%">Bakeriproduksjon</span> <span style="font-size:16px;font-weight:400;color:#64748b">– ${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</span></h1></div>
   </div>
-  <table style="font-size:9px">
+  <table style="font-size:11px">
     <thead><tr><th>Produkt</th><th>Fordeling</th><th class="right">Totalt</th></tr></thead>
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
