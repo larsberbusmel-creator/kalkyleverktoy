@@ -6099,6 +6099,44 @@ ${orderPages}`;
 
   printWindow(`Catering ${formatDateNo(order.date)} – ${customerName}`, body);
 }
+function collectProductionMaterials(): Record<string, { name: string; category: string; amount: number; unit: string }> {
+  const acc: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
+  function addMaterial(id: string, amount: number, fallbackUnit: string) {
+    const m = data.materials.find((x) => x.id === id);
+    if (!m) return;
+    if (!acc[m.id]) acc[m.id] = { name: m.name, category: m.category, amount: 0, unit: m.unit || fallbackUnit };
+    acc[m.id].amount += amount;
+  }
+  function expandRecipe(recipeId: string, totalAmount: number, path: string[]) {
+    const recipe = data.recipes.find((r) => r.id === recipeId);
+    if (!recipe || path.includes(recipeId)) return;
+    const base = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+    const scale = totalAmount / Math.max(base, 1);
+    recipe.lines.forEach((rl) => {
+      const amt = Number(rl.amount || 0) * scale;
+      if (rl.itemType === "material") addMaterial(rl.itemId, amt, recipe.yieldUnit);
+      if (rl.itemType === "recipe") expandRecipe(rl.itemId, amt, [...path, recipeId]);
+    });
+  }
+  function expandProduct(product: Product, multiplier: number, path: string[]) {
+    if (path.includes(product.id)) return;
+    product.lines.forEach((pl) => {
+      const amt = Number(pl.amount || 0) * multiplier;
+      if (pl.itemType === "material") addMaterial(pl.itemId, amt, pl.unit);
+      if (pl.itemType === "recipe") expandRecipe(pl.itemId, amt, []);
+      if (pl.itemType === "product") {
+        const sub = data.products.find((x) => x.id === pl.itemId);
+        if (sub) {
+          const subYield = Number(sub.recipeYieldAmount || sub.yieldAmount || 1) || 1;
+          expandProduct(sub, amt / subYield, [...path, product.id]);
+        }
+      }
+    });
+  }
+  activeRows.forEach((row) => expandProduct(row.product, row.quantity, []));
+  return acc;
+}
+
 function printProductionDay() {
     const summaryRows = activeRows.map((row) => {
       const qtyRow = activeDay.quantities[row.product.id] || {};
@@ -6248,6 +6286,21 @@ ${allergenWarningHtml}
 </div>`;
     }).join("");
 
+    const materialsAgg = collectProductionMaterials();
+    const byCategoryProd: Record<string, { name: string; amount: number; unit: string }[]> = {};
+    Object.values(materialsAgg).forEach((entry) => {
+      if (!byCategoryProd[entry.category]) byCategoryProd[entry.category] = [];
+      byCategoryProd[entry.category].push(entry);
+    });
+    const shoppingCheckbox = `<span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span>`;
+    const shoppingRows = Object.keys(byCategoryProd).sort((a, b) => a.localeCompare(b, "no-NO")).map((cat) => {
+      const rows = byCategoryProd[cat]
+        .sort((a, b) => a.name.localeCompare(b.name, "no-NO"))
+        .map((e) => `<tr><td style="width:14px">${shoppingCheckbox}</td><td>${escapeHtml(e.name)}</td><td class="right">${formatAmountUnit(e.amount, e.unit, 3)}</td></tr>`).join("");
+      return `<div class="recipe-block"><h3>${escapeHtml(cat)}</h3><table><thead><tr><th></th><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }).join("");
+    const shoppingPage = shoppingRows ? `<div class="page"><div class="top"><div><h1>Varebestilling</h1></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>${shoppingRows}</div>` : "";
+
     const body = `
 <div class="frontpage">
   <div class="top" style="border-bottom:none">
@@ -6258,7 +6311,7 @@ ${allergenWarningHtml}
     <tbody>${summaryRows || `<tr><td colspan="3">Ingen produksjon registrert.</td></tr>`}</tbody>
   </table>
 </div>
-${baseRecipePages}${productPages}${packingPages}${orderPackingPages}`;
+${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPage}`;
 
     printWindow(`Produksjon ${activeDate}`, body);
   }
