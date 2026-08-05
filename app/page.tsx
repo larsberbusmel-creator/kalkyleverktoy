@@ -2045,7 +2045,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
         groupLabel: line.groupLabel.trim() || undefined,
       },
     ]);
-    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
+    setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: line.groupLabel });
     setLineSearch("");
   }
 
