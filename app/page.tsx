@@ -2047,6 +2047,25 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setDraftLines((prev) => prev.map((l, i) => i === index ? { ...l, ...partial } : l));
   }
 
+  function groupBounds(lines: RecipeLine[], index: number) {
+    const label = lines[index].groupLabel;
+    let start = index; let end = index;
+    if (label) {
+      while (start > 0 && lines[start - 1].groupLabel === label) start--;
+      while (end < lines.length - 1 && lines[end + 1].groupLabel === label) end++;
+    }
+    return { start, end };
+  }
+
+  function isGroupFirstLine(lines: RecipeLine[], index: number) {
+    return groupBounds(lines, index).start === index;
+  }
+
+  function renameGroup(oldLabel: string, newLabel: string) {
+    const trimmed = newLabel.trim();
+    setDraftLines((prev) => prev.map((l) => (l.groupLabel === oldLabel ? { ...l, groupLabel: trimmed || undefined } : l)));
+  }
+
   const groupOptions = Array.from(new Set(draftLines.map((l) => l.groupLabel).filter((g): g is string => !!g)));
 
   function toggleStepInput(kind: "group" | "step", ref: string) {
@@ -2071,10 +2090,15 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   }
 
   function printRecipe(recipe: Recipe) {
+    let lastGroup: string | undefined = undefined;
     const rows = recipe.lines.map((l) => {
       const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
       const waste = l.wastePercent ? ` (${l.wastePercent}% svinn)` : "";
-      return `<tr><td>${name}${waste}</td><td>${formatAmountUnit(l.amount, "kg", 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
+      const groupHeader = l.groupLabel && l.groupLabel !== lastGroup
+        ? `<tr><td colspan="3" style="background:#e2e8f0;font-weight:700;padding:8px 9px">${escapeHtml(l.groupLabel)}</td></tr>`
+        : "";
+      lastGroup = l.groupLabel;
+      return `${groupHeader}<tr><td>${escapeHtml(name)}${waste}</td><td>${formatAmountUnit(l.amount, "kg", 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
     }).join("");
     const allergens = recipeAllergens(recipe).join(", ") || "Ingen registrert";
     const w = window.open("", "_blank");
@@ -2193,7 +2217,20 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             </thead>
             <tbody>
               {draftLines.map((l, i) => (
-                <tr key={i}>
+                <React.Fragment key={i}>
+                {isGroupFirstLine(draftLines, i) && l.groupLabel && (
+                  <tr style={{ background: Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#e2e8f0" : "#c7d2fe", borderTop: i > 0 ? "3px solid #94a3b8" : undefined }}>
+                    <td colSpan={7} style={{ padding: "6px 10px" }}>
+                      <input
+                        value={l.groupLabel}
+                        onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
+                        style={{ fontWeight: 700, fontSize: 14, border: "none", background: "transparent", width: "100%", outline: "none" }}
+                        placeholder="Gruppenavn"
+                      />
+                    </td>
+                  </tr>
+                )}
+                <tr style={{ background: l.groupLabel ? (Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#f8fafc" : "#eef2ff") : "white", borderTop: isGroupFirstLine(draftLines, i) && i > 0 && !l.groupLabel ? "3px solid #94a3b8" : undefined }}>
                   <td>
                     <select
                       value={l.itemType}
@@ -2241,6 +2278,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                     </button>
                   </td>
                 </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
