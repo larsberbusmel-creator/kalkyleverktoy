@@ -5788,6 +5788,8 @@ function ProductionTab({
   }
 
   function priceForCustomerOnDate(productId: string, customerId: string, date: string) {
+    const customer = (data.storkjokkenCustomers || []).find((c) => c.id === customerId);
+    if (customer?.internal) return 0;
     const day = productionDays[date];
     if (day?.approved && day.frozenPrices?.[productId]?.[customerId] != null) {
       return day.frozenPrices[productId][customerId];
