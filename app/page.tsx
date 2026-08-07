@@ -4664,8 +4664,11 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     }
 
    if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+    const batchMultiplier = product.unitWeightKg && product.yieldAmount
+      ? (multiplier * product.unitWeightKg) / product.yieldAmount
+      : multiplier;
     return product.lines.flatMap((line) => {
-      const amount = line.amount * multiplier;
+      const amount = line.amount * batchMultiplier;
       const effectiveCourseName = line.groupLabel || courseName;
       if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
       if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
@@ -4751,8 +4754,11 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     }
     function expandProduct(product: Product, multiplier: number, path: string[]) {
       if (path.includes(product.id) || bakeryNoExpand.includes(product.category)) return;
+      const batchMultiplier = product.unitWeightKg && product.yieldAmount
+        ? (multiplier * product.unitWeightKg) / product.yieldAmount
+        : multiplier;
       product.lines.forEach((pl) => {
-        const amt = Number(pl.amount || 0) * multiplier;
+        const amt = Number(pl.amount || 0) * batchMultiplier;
         if (pl.itemType === "material") addMaterial(pl.itemId, amt, pl.unit);
         if (pl.itemType === "recipe") expandRecipe(pl.itemId, amt, []);
         if (pl.itemType === "product") {
