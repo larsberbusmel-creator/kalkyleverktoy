@@ -4664,8 +4664,8 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     }
 
    if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
-    const batchMultiplier = product.unitWeightKg && product.yieldAmount
-      ? (multiplier * product.unitWeightKg) / product.yieldAmount
+    const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
+      ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
       : multiplier;
     return product.lines.flatMap((line) => {
       const amount = line.amount * batchMultiplier;
@@ -4754,8 +4754,8 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     }
     function expandProduct(product: Product, multiplier: number, path: string[]) {
       if (path.includes(product.id) || bakeryNoExpand.includes(product.category)) return;
-      const batchMultiplier = product.unitWeightKg && product.yieldAmount
-        ? (multiplier * product.unitWeightKg) / product.yieldAmount
+      const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
+        ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
         : multiplier;
       product.lines.forEach((pl) => {
         const amt = Number(pl.amount || 0) * batchMultiplier;
