@@ -165,6 +165,11 @@ type RentalOffer = {
   waiterAfterMidnightHours: number;
   productLines: RentalProductLine[];
   extraLines: RentalExtraLine[];
+  allergens?: Record<string, number>;
+  dietVegan?: string;
+  dietVegetarian?: string;
+  dietPregnant?: string;
+  dietOther?: string;
   runSheetEnabled?: boolean;
   runSheet?: RunSheetItem[];
 };
@@ -1109,7 +1114,7 @@ return (
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
-        {tab === "rental"     && <RentalTab data={data} updateData={updateData} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} />}
+        {tab === "rental"     && <RentalTab data={data} updateData={updateData} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
@@ -4603,7 +4608,6 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
 
   function editOrder(order: Order) {
     if (order.id.startsWith("rental-order-")) {
-      alert("Denne ordren styres fra Utleie av lokale. Du sendes dit for å redigere, slik at endringene ikke går tapt.");
       setRentalOfferToOpen(order.id.replace("rental-order-", ""));
       setTab("rental");
       return;
@@ -8464,7 +8468,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     </section>
   );
 }
-function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId }: { data: AppData; updateData: (p: Partial<AppData>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void }) {
+function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[] }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -8628,7 +8632,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         orderLines: rental.productLines.filter((l) => l.productId).map((l) => ({ productId: l.productId, quantity: l.guests })),
         discountPercent: 0, isRecurring: false, recurringDays: [],
         recurringNote: `Leieavtale: ${rental.venueExternal ? (rental.venueExternalName || "Eksternt") : rental.venue}`,
-        allergens: {}, dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
+        allergens: offer.allergens || {}, dietVegan: offer.dietVegan || "0", dietVegetarian: offer.dietVegetarian || "0", dietPregnant: offer.dietPregnant || "0", dietOther: offer.dietOther || "",
       };
       const orders = data.orders || [];
       const existingOrderIdx = orders.findIndex((o) => o.id === rentalOrder.id);
@@ -8695,6 +8699,145 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     updateData({ deletedRentalOffers: nextDeleted } as any);
   }
 
+  function rentalProductAllergenBreakdown(product: Product, visited: string[] = []): { name: string; allergens: string[] }[] {
+    if (visited.includes(product.id)) return [];
+    const nextVisited = [...visited, product.id];
+    return product.lines.map((line) => {
+      if (line.itemType === "material") {
+        const m = data.materials.find((x) => x.id === line.itemId);
+        return m && (m.allergens || []).length ? { name: m.name, allergens: m.allergens } : null;
+      }
+      if (line.itemType === "recipe") {
+        const r = data.recipes.find((x) => x.id === line.itemId);
+        const allergens = r ? recipeAllergens(r) : [];
+        return r && allergens.length ? { name: r.name, allergens } : null;
+      }
+      const p = data.products.find((x) => x.id === line.itemId);
+      const allergens = p ? productAllergens(p, nextVisited) : [];
+      return p && allergens.length ? { name: p.name, allergens } : null;
+    }).filter((x): x is { name: string; allergens: string[] } => !!x);
+  }
+
+  function rentalLineAllergenBreakdown(line: RentalProductLine): { dish: string; name: string; allergens: string[] }[] {
+    const product = data.products.find((p) => p.id === line.productId);
+    if (!product) return [];
+    const breakdown = rentalProductAllergenBreakdown(product);
+    return (breakdown.length ? breakdown : [{ name: product.name, allergens: productAllergens(product) }])
+      .filter((b) => b.allergens.length)
+      .map((b) => ({ dish: product.name, name: b.name, allergens: b.allergens }));
+  }
+
+  function rentalAllergenWarningDetails() {
+    const flagged = new Set(Object.entries(rental.allergens || {}).filter(([, c]) => Number(c) > 0).map(([a]) => a));
+    if (!flagged.size) return [];
+    return rental.productLines.flatMap((line) =>
+      rentalLineAllergenBreakdown(line)
+        .map((b) => ({ ...b, allergens: b.allergens.filter((a) => flagged.has(a)) }))
+        .filter((b) => b.allergens.length)
+    );
+  }
+
+  function expandRentalProductForProduction(product: Product, multiplier: number, path: string[] = [], courseName?: string): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
+    if (path.includes(product.id)) return [];
+    const bakeryNoExpandCategories = ["Søtbakst", "Bakeri, egenprodusert"];
+    if (bakeryNoExpandCategories.includes(product.category)) {
+      return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+    }
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
+      return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+    }
+    if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+    const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
+      ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
+      : multiplier;
+    return product.lines.flatMap((line) => {
+      const amount = line.amount * batchMultiplier;
+      const effectiveCourseName = line.groupLabel || courseName;
+      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
+      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
+      const p = data.products.find((x) => x.id === line.itemId);
+      if (!p) return [];
+      return [{ name: p.name, amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }];
+    });
+  }
+
+  function rentalProductionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
+    type Group = { key?: string; rows: typeof items };
+    const groups: Group[] = [];
+    items.forEach((r) => {
+      const last = groups[groups.length - 1];
+      if (!last || last.key !== r.courseName) {
+        groups.push({ key: r.courseName, rows: [r] });
+      } else {
+        last.rows.push(r);
+      }
+    });
+    const colA: Group[] = []; const colB: Group[] = [];
+    let heightA = 0; let heightB = 0;
+    groups.forEach((g) => {
+      const h = g.rows.length + (g.key ? 1 : 0);
+      if (heightA <= heightB) { colA.push(g); heightA += h; } else { colB.push(g); heightB += h; }
+    });
+    function renderGroups(list: Group[]) {
+      return list.map((g) => {
+        const header = g.key ? `<tr><td colspan="3" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
+        const rows = g.rows.map((r) => {
+          const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${escapeHtml(formatAmountUnit(r.perUnit, r.unit, 3))}</span>` : "";
+          const checkbox = `<td style="width:12px;padding:1px 3px 1px 0"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td>`;
+          return `<tr>${checkbox}<td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${escapeHtml(formatAmountUnit(r.amount, r.unit))}</td></tr>`;
+        }).join("");
+        const groupTable = `<table style="width:100%;border-collapse:collapse">${header}${rows}</table>`;
+        return `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
+      }).join("");
+    }
+    return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px"><tr><td style="vertical-align:top;width:50%;padding-right:8px;border-right:1px solid #e5e7eb;font-size:10px">${renderGroups(colA)}</td><td style="vertical-align:top;width:50%;padding-left:8px;font-size:10px">${renderGroups(colB)}</td></tr></table>`;
+  }
+
+  function collectRentalMaterials(): Record<string, { name: string; category: string; amount: number; unit: string }> {
+    const acc: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
+    const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
+    function addMaterial(id: string, amount: number, fallbackUnit: string) {
+      const m = data.materials.find((x) => x.id === id);
+      if (!m) return;
+      if (!acc[m.id]) acc[m.id] = { name: m.name, category: m.category, amount: 0, unit: m.unit || fallbackUnit };
+      acc[m.id].amount += amount;
+    }
+    function expandRecipe(recipeId: string, totalAmount: number, path: string[]) {
+      const recipe = data.recipes.find((r) => r.id === recipeId);
+      if (!recipe || path.includes(recipeId)) return;
+      const base = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+      const scale = totalAmount / Math.max(base, 1);
+      recipe.lines.forEach((rl) => {
+        const amt = Number(rl.amount || 0) * scale;
+        if (rl.itemType === "material") addMaterial(rl.itemId, amt, recipe.yieldUnit);
+        if (rl.itemType === "recipe") expandRecipe(rl.itemId, amt, [...path, recipeId]);
+      });
+    }
+    function expandProduct(product: Product, multiplier: number, path: string[]) {
+      if (path.includes(product.id) || bakeryNoExpand.includes(product.category)) return;
+      const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
+        ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
+        : multiplier;
+      product.lines.forEach((pl) => {
+        const amt = Number(pl.amount || 0) * batchMultiplier;
+        if (pl.itemType === "material") addMaterial(pl.itemId, amt, pl.unit);
+        if (pl.itemType === "recipe") expandRecipe(pl.itemId, amt, []);
+        if (pl.itemType === "product") {
+          const sub = data.products.find((x) => x.id === pl.itemId);
+          if (sub) {
+            const subYield = Number(sub.recipeYieldAmount || sub.yieldAmount || 1) || 1;
+            expandProduct(sub, amt / subYield, [...path, product.id]);
+          }
+        }
+      });
+    }
+    rental.productLines.forEach((line) => {
+      const product = data.products.find((p) => p.id === line.productId);
+      if (product) expandProduct(product, Number(line.guests) || 0, []);
+    });
+    return acc;
+  }
+
   function scaledRecipeHtmlForRental(product: Product, quantity: number, includeMaterials = false): string {
     const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
     if (bakeryNoExpand.includes(product.category)) return "";
@@ -8736,7 +8879,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     return html;
   }
 
-  function printOffer(printLevel: "tilbud" | "recipes" | "kjoreplan" | "full" = "full") {
+  function printOffer(printLevel: "tilbud" | "recipes" | "kjoreplan" | "produksjon" | "full" = "full") {
     const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
     const productRows = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
@@ -8764,6 +8907,37 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
       if (!html) return "";
       return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${l.guests} × ${escapeHtml(p.name)}</div>${html}</div>`;
     }).join("");
+    const productionItems = rental.productLines.flatMap((l) => {
+      const p = data.products.find((x) => x.id === l.productId);
+      return p ? expandRentalProductForProduction(p, Number(l.guests) || 0, []) : [];
+    });
+    const productionHtml = rentalProductionTwoColumnHtml(productionItems);
+    const materialsAggR = collectRentalMaterials();
+    const byCategoryR: Record<string, { name: string; amount: number; unit: string }[]> = {};
+    Object.values(materialsAggR).forEach((entry) => {
+      if (!byCategoryR[entry.category]) byCategoryR[entry.category] = [];
+      byCategoryR[entry.category].push(entry);
+    });
+    const shoppingRowsR = Object.keys(byCategoryR).sort((a, b) => a.localeCompare(b, "no-NO")).map((cat) => {
+      const rows = byCategoryR[cat].sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((e) => `<tr><td>${escapeHtml(e.name)}</td><td class="right">${formatAmountUnit(e.amount, e.unit, 3)}</td></tr>`).join("");
+      return `<h3 style="margin-top:12px">${escapeHtml(cat)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }).join("");
+    const rentalAllergenDetails = rentalAllergenWarningDetails();
+    const rentalAllergenWarningHtml = rentalAllergenDetails.length
+      ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel:<br>${rentalAllergenDetails.map((d) => `${escapeHtml(d.dish)}${d.name !== d.dish ? ` – ${escapeHtml(d.name)}` : ""}: ${escapeHtml(d.allergens.join(", "))}`).join("<br>")}</div>`
+      : "";
+    const rentalDietsText = `Vegetar: ${rental.dietVegetarian || 0}, Vegan: ${rental.dietVegan || 0}, Gravid: ${rental.dietPregnant || 0}${rental.dietOther ? `, Annet: ${rental.dietOther}` : ""}`;
+    const rentalAllergensText = Object.entries(rental.allergens || {}).filter(([, c]) => Number(c) > 0).map(([a, c]) => `${a}: ${c}`).join(", ") || "Ingen registrert";
+    const productionPageHtml = `<div class="page-break"></div>
+<h2>Produksjonsgrunnlag</h2>
+<div class="info-box">
+  <p><b>Dietter:</b> ${escapeHtml(rentalDietsText)}</p>
+  <p><b>Allergier:</b> ${escapeHtml(rentalAllergensText)}</p>
+</div>
+${rentalAllergenWarningHtml}
+${productionHtml}
+${recipePagesHtml ? `<h2 style="margin-top:20px">Oppskrifter</h2>${recipePagesHtml}` : ""}
+${shoppingRowsR ? `<h2 style="margin-top:20px">Varebestilling</h2>${shoppingRowsR}` : ""}`;
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
@@ -8802,7 +8976,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
   ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim())}</p>` : ""}
 </div>
-${printLevel !== "kjoreplan" ? `<div class="page-break"></div><h2>Spesifikasjon</h2>
+${printLevel !== "kjoreplan" && printLevel !== "produksjon" ? `<div class="page-break"></div><h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
   <tbody>${venueRow}${productRows}${waiterRow}${addonRows}</tbody>
@@ -8815,6 +8989,7 @@ ${showTerms ? `<div class="page-break"></div>
 <p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}` : ""}
 ${(printLevel === "recipes" || printLevel === "full") && recipePagesHtml ? `<div class="page-break"></div><h2>Oppskrifter</h2>${recipePagesHtml}` : ""}
 ${(printLevel === "kjoreplan" || printLevel === "full") && rental.runSheetEnabled && runSheetItems.length ? `<div class="page-break"></div>${runSheetHtml()}` : ""}
+${printLevel === "produksjon" ? productionPageHtml : ""}
 <div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
 </body></html>`);
     w.document.close();
@@ -8970,6 +9145,21 @@ ${(printLevel === "kjoreplan" || printLevel === "full") && rental.runSheetEnable
               })}
             </div>
 
+            <h3 style={{ marginTop: 16 }}>Dietter / hensyn</h3>
+            <div className="form-grid four">
+              <label>Vegetar<input type="number" value={rental.dietVegetarian || "0"} onChange={(e) => setRental({ ...rental, dietVegetarian: e.target.value })} /></label>
+              <label>Vegan<input type="number" value={rental.dietVegan || "0"} onChange={(e) => setRental({ ...rental, dietVegan: e.target.value })} /></label>
+              <label>Gravid<input type="number" value={rental.dietPregnant || "0"} onChange={(e) => setRental({ ...rental, dietPregnant: e.target.value })} /></label>
+              <label>Andre hensyn<input value={rental.dietOther || ""} onChange={(e) => setRental({ ...rental, dietOther: e.target.value })} placeholder="Fritekst" /></label>
+            </div>
+            <h3>Allergier</h3>
+            <div className="chips">
+              {defaultAllergens.map((a) => {
+                const active = ((rental.allergens || {})[a] || 0) > 0;
+                return <div key={a}><button type="button" className={active ? "btn active" : "btn"} onClick={() => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={(rental.allergens || {})[a]} onChange={(e) => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: Number(e.target.value) } })} />}</div>;
+              })}
+            </div>
+
             <div style={{ marginTop: 12 }}>
               <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
               <textarea
@@ -9094,6 +9284,7 @@ ${(printLevel === "kjoreplan" || printLevel === "full") && rental.runSheetEnable
                 <option value="recipes">Print tilbud + oppskrift</option>
                 {rental.runSheetEnabled && <option value="kjoreplan">Print kjøreplan</option>}
                 <option value="full">Print alt {rental.runSheetEnabled ? "(tilbud + oppskrift + kjøreplan)" : "(tilbud + oppskrift)"}</option>
+                <option value="produksjon">Print produksjonsgrunnlag (kjøkken)</option>
               </select>
               <button className="btn" onClick={cancelEdit}>Avbryt</button>
             </div>
