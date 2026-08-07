@@ -149,6 +149,8 @@ note?: string;
 type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
 type RentalProductLine = { productId: string; guests: number };
 
+type RunSheetItem = { id: string; task: string; responsible?: string; time?: string; groupLabel?: string };
+
 type RentalOffer = {
   id?: string;
   customer: string;
@@ -163,6 +165,8 @@ type RentalOffer = {
   waiterAfterMidnightHours: number;
   productLines: RentalProductLine[];
   extraLines: RentalExtraLine[];
+  runSheetEnabled?: boolean;
+  runSheet?: RunSheetItem[];
 };
 
 type Venue = { id: string; name: string; price: number };
@@ -589,6 +593,7 @@ rentalOffers: (raw as any).rentalOffers || [],
 export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [rentalOfferToOpen, setRentalOfferToOpen] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -1101,10 +1106,10 @@ return (
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
-        {tab === "rental"     && <RentalTab data={data} updateData={updateData} />}
+        {tab === "rental"     && <RentalTab data={data} updateData={updateData} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
@@ -4344,12 +4349,14 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productAllergens: (p: Product, visited?: string[]) => string[];
   recipeAllergens: (r: Recipe) => string[];
+  setTab: (t: Tab) => void;
+  setRentalOfferToOpen: (id: string | null) => void;
 }) {
   const emptyOrder = (): Order => ({
     id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
@@ -5418,6 +5425,8 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                 <b>{formatDateNo(o.date)} {o.time || ""}</b>
                 <span>{displayName}</span>
                 {o.orderNumber && <span style={{ background: "#f1f5f9", borderRadius: 6, padding: "2px 8px", fontSize: 12 }}>#{o.orderNumber}</span>}
+                {o.id.startsWith("rental-order-") && <span style={{ background: "#ede9fe", color: "#6d28d9", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>🔗 Fra Utleie</span>}
+                {o.id.startsWith("rental-order-") && <span style={{ background: "#ede9fe", color: "#6d28d9", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>🔗 Fra Utleie</span>}
                 {warnings.length > 0 && <span style={{ color: "#dc2626", fontSize: 12 }}>⚠ Allergi</span>}
                 <span style={{ color: "#64748b", fontSize: 13 }}>{o.type}</span>
                 <span style={{ color: "#64748b", fontSize: 13 }}>{o.orderLines.map((l) => `${l.quantity}×${productName(l.productId)}`).join(", ")}</span>
@@ -8450,7 +8459,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     </section>
   );
 }
-function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partial<AppData>) => void }) {
+function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId }: { data: AppData; updateData: (p: Partial<AppData>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -8458,6 +8467,7 @@ function RentalTab({ data, updateData }: { data: AppData; updateData: (p: Partia
   const [showTrash, setShowTrash] = useState(false);
   const [offerSearch, setOfferSearch] = useState("");
   const [showTerms, setShowTerms] = useState(false);
+  const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
     ((data as any).deletedRentalOffers || []) as RentalOffer[]
   );
@@ -8525,6 +8535,69 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     setRental({ ...rental, extraLines: addonLines.map((line) => line.text === addonName ? { ...line, amount, unitPrice: addonUsesQuantity(line.text) ? Number(line.unitPrice ?? amount) : undefined } : line) });
   }
 
+  const runSheetItems = rental.runSheet || [];
+
+  function runSheetGroups() {
+    const seen = new Set<string>();
+    const groups: string[] = [];
+    runSheetItems.forEach((item) => {
+      if (item.groupLabel && !seen.has(item.groupLabel)) { seen.add(item.groupLabel); groups.push(item.groupLabel); }
+    });
+    return groups;
+  }
+
+  function runSheetGroupColor(label: string) {
+    const palette = ["#e2e8f0", "#c7d2fe", "#bbf7d0", "#fecaca", "#fde68a", "#a5f3fc", "#fbcfe8", "#ddd6fe"];
+    return palette[Math.abs(hashCode(label)) % palette.length];
+  }
+
+  function addRunSheetItem() {
+    if (!runSheetForm.task.trim()) return;
+    const groupLabel = runSheetForm.groupLabel === "__new__" ? runSheetForm.newGroupLabel.trim() : runSheetForm.groupLabel;
+    const item: RunSheetItem = {
+      id: `rs-${Date.now()}`,
+      task: runSheetForm.task.trim(),
+      responsible: runSheetForm.responsible.trim() || undefined,
+      time: runSheetForm.time.trim() || undefined,
+      groupLabel: groupLabel || undefined,
+    };
+    setRental({ ...rental, runSheet: [...runSheetItems, item] });
+    setRunSheetForm({ task: "", responsible: "", time: "", groupLabel: groupLabel || "", newGroupLabel: "" });
+  }
+
+  function updateRunSheetItem(id: string, patch: Partial<RunSheetItem>) {
+    setRental({ ...rental, runSheet: runSheetItems.map((it) => it.id === id ? { ...it, ...patch } : it) });
+  }
+
+  function removeRunSheetItem(id: string) {
+    setRental({ ...rental, runSheet: runSheetItems.filter((it) => it.id !== id) });
+  }
+
+  function moveRunSheetItem(index: number, dir: -1 | 1) {
+    const list = [...runSheetItems];
+    const target = index + dir;
+    if (target < 0 || target >= list.length) return;
+    [list[index], list[target]] = [list[target], list[index]];
+    setRental({ ...rental, runSheet: list });
+  }
+
+  function runSheetHtml() {
+    if (!runSheetItems.length) return "";
+    let lastGroup: string | undefined;
+    const rows = runSheetItems.map((it) => {
+      let header = "";
+      if (it.groupLabel !== lastGroup) {
+        if (it.groupLabel) {
+          header = `<tr><td colspan="3" style="background:${runSheetGroupColor(it.groupLabel)};font-weight:700;padding:6px 10px">${escapeHtml(it.groupLabel)}</td></tr>`;
+        }
+        lastGroup = it.groupLabel;
+      }
+      return `${header}<tr><td style="padding:6px 10px">${escapeHtml(it.task)}</td><td style="padding:6px 10px">${escapeHtml(it.responsible || "-")}</td><td style="padding:6px 10px;white-space:nowrap">${escapeHtml(it.time || "-")}</td></tr>`;
+    }).join("");
+    return `<h2 style="border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:16px">Kjøreplan</h2>
+<table><thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
   function saveOffer() {
     if (!rental.customer.trim()) return alert("Legg inn kundenavn.");
     const offer: RentalOffer = { ...rental, id: rental.id || `rental-${Date.now()}` };
@@ -8572,6 +8645,13 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  useEffect(() => {
+    if (!pendingOfferId) return;
+    const offer = (((data as any).rentalOffers || []) as RentalOffer[]).find((o) => o.id === pendingOfferId);
+    if (offer) loadOffer(offer);
+    clearPendingOfferId?.();
+  }, [pendingOfferId]);
+
   function cancelEdit() {
     setRental({ ...initialData.rental });
     setEditingOfferId(null);
@@ -8610,7 +8690,48 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     updateData({ deletedRentalOffers: nextDeleted } as any);
   }
 
-  function printOffer() {
+  function scaledRecipeHtmlForRental(product: Product, quantity: number, includeMaterials = false): string {
+    const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
+    if (bakeryNoExpand.includes(product.category)) return "";
+    let html = "";
+    product.lines.forEach((pl) => {
+      if (pl.itemType === "recipe") {
+        const recipe = data.recipes.find((r) => r.id === pl.itemId);
+        if (!recipe) return;
+        const totalAmount = Number(pl.amount || 0) * quantity;
+        const recipeBase = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+        const scale = totalAmount / Math.max(recipeBase, 1);
+        const ingredientRows = recipe.lines.map((rl) => {
+          let name = "Ukjent"; let unit = recipe.yieldUnit;
+          if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
+          if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
+          return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(rl.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
+        }).join("");
+        html += `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(recipe.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
+      }
+      if (pl.itemType === "product") {
+        const subProduct = data.products.find((x) => x.id === pl.itemId);
+        if (subProduct && subProduct.id !== product.id) {
+          const totalAmount = Number(pl.amount || 0) * quantity;
+          const subYield = Number(subProduct.recipeYieldAmount || subProduct.yieldAmount || 1) || 1;
+          const subScale = totalAmount / subYield;
+          html += `<div class="recipe-block"><h3>Produkt: ${escapeHtml(subProduct.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3>${scaledRecipeHtmlForRental(subProduct, subScale, true)}</div>`;
+        }
+      }
+    });
+    const materialRows = product.lines
+      .filter((pl) => pl.itemType === "material")
+      .map((pl) => {
+        const m = data.materials.find((x) => x.id === pl.itemId);
+        return `<tr><td>${escapeHtml(m?.name || "Ukjent råvare")}</td><td class="right">${num(Number(pl.amount || 0) * quantity, 3)} ${escapeHtml(pl.unit)}</td></tr>`;
+      }).join("");
+    if (materialRows && includeMaterials) {
+      html += `<table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${materialRows}</tbody></table>`;
+    }
+    return html;
+  }
+
+  function printOffer(printLevel: "tilbud" | "recipes" | "kjoreplan" | "full" = "full") {
     const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
     const productRows = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
@@ -8631,6 +8752,13 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const venueRow = rental.venuePrice > 0
       ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
       : "";
+    const recipePagesHtml = rental.productLines.map((l) => {
+      const p = data.products.find((x) => x.id === l.productId);
+      if (!p) return "";
+      const html = scaledRecipeHtmlForRental(p, l.guests);
+      if (!html) return "";
+      return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${l.guests} × ${escapeHtml(p.name)}</div>${html}</div>`;
+    }).join("");
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
@@ -8650,6 +8778,9 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
 .disclaimer{font-size:10px;color:#94a3b8;margin-top:8px;text-align:center}
 .footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
+.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}
+.recipe-block h3{margin:0 0 8px;font-size:14px}
+.right{text-align:right}
 @media print{button{display:none}body{padding:0}.page-break{page-break-before:always}}*{-webkit-print-color-adjust:exact}</style></head><body>
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
 <div class="header">
@@ -8666,7 +8797,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
   ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim())}</p>` : ""}
 </div>
-<div class="page-break"></div><h2>Spesifikasjon</h2>
+${printLevel !== "kjoreplan" ? `<div class="page-break"></div><h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
   <tbody>${venueRow}${productRows}${waiterRow}${addonRows}</tbody>
@@ -8676,7 +8807,9 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
 <p class="disclaimer">Skrivefeil kan forekomme.</p>
 ${showTerms ? `<div class="page-break"></div>
 <h2 style="border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:16px">Vilkår for leie av Bodøgaard</h2>
-<p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}
+<p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}` : ""}
+${(printLevel === "recipes" || printLevel === "full") && recipePagesHtml ? `<div class="page-break"></div><h2>Oppskrifter</h2>${recipePagesHtml}` : ""}
+${(printLevel === "kjoreplan" || printLevel === "full") && rental.runSheetEnabled && runSheetItems.length ? `<div class="page-break"></div>${runSheetHtml()}` : ""}
 <div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
 </body></html>`);
     w.document.close();
@@ -8685,7 +8818,7 @@ ${showTerms ? `<div class="page-break"></div>
 
   const filteredProducts = data.products.filter((p) =>
     productSearch === "" || p.name.toLowerCase().includes(productSearch.toLowerCase())
-  ).slice(0, 10);
+  ).slice(0, 50);
 
   const offers = (((data as any).rentalOffers || []) as RentalOffer[])
     .filter((o) => offerSearch === "" ||
@@ -8775,7 +8908,7 @@ ${showTerms ? `<div class="page-break"></div>
             <div className="soft-box">
               <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk produkt eller meny..." style={{ marginBottom: 8 }} />
               {productSearch && (
-                <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "auto", maxHeight: 280, marginBottom: 10 }}>
                   {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
                   {filteredProducts.map((p) => (
                     <button key={p.id} style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: 0, borderBottom: "1px solid #f1f5f9", background: "white", cursor: "pointer" }}
@@ -8843,6 +8976,72 @@ ${showTerms ? `<div class="page-break"></div>
             </div>
           </div>
 
+          {rental.runSheetEnabled && (
+            <div className="card">
+              <h2>Kjøreplan</h2>
+              <div className="form-grid four">
+                <label>Oppgave
+                  <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
+                </label>
+                <label>Ansvar (valgfritt)
+                  <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
+                </label>
+                <label>Tidspunkt (valgfritt)
+                  <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
+                </label>
+                <label>Gruppe
+                  <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
+                    <option value="">(Ingen gruppe)</option>
+                    {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                    <option value="__new__">+ Ny gruppe...</option>
+                  </select>
+                </label>
+              </div>
+              {runSheetForm.groupLabel === "__new__" && (
+                <label>Navn på ny gruppe
+                  <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
+                </label>
+              )}
+              <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
+
+              {runSheetItems.length > 0 && (
+                <table style={{ marginTop: 16 }}>
+                  <thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th><th>Gruppe</th><th></th></tr></thead>
+                  <tbody>
+                    {runSheetItems.map((item, i) => {
+                      const showGroupHeader = item.groupLabel && item.groupLabel !== runSheetItems[i - 1]?.groupLabel;
+                      return (
+                        <React.Fragment key={item.id}>
+                          {showGroupHeader && (
+                            <tr style={{ background: runSheetGroupColor(item.groupLabel!) }}>
+                              <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700 }}>{item.groupLabel}</td>
+                            </tr>
+                          )}
+                          <tr>
+                            <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
+                            <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
+                            <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} placeholder="-" /></td>
+                            <td>
+                              <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
+                                <option value="">(Ingen gruppe)</option>
+                                {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                              </select>
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
+                              <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
+                              <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
+                            </td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
           <div className="card">
             <h2>Tilbud</h2>
             <div className="soft-box">
@@ -8854,6 +9053,10 @@ ${showTerms ? `<div class="page-break"></div>
               <label className="check" style={{ marginTop: 8 }}>
                 <input type="checkbox" checked={showTerms} onChange={(e) => setShowTerms(e.target.checked)} />
                 Vilkår for leie Bodøgaard
+              </label>
+              <label className="check" style={{ marginTop: 8 }}>
+                <input type="checkbox" checked={!!rental.runSheetEnabled} onChange={(e) => setRental({ ...rental, runSheetEnabled: e.target.checked })} />
+                Lag kjøreplan
               </label>
             </div>
             {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
@@ -8871,7 +9074,22 @@ ${showTerms ? `<div class="page-break"></div>
               <button className="btn active" onClick={saveOffer}>
                 {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
               </button>
-              <button className="btn" onClick={printOffer}>Last ned / print tilbud</button>
+              <select
+                className="btn"
+                defaultValue=""
+                style={{ width: "auto", maxWidth: 240 }}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) printOffer(v as "tilbud" | "recipes" | "kjoreplan" | "full");
+                  e.target.value = "";
+                }}
+              >
+                <option value="" disabled>Skriv ut...</option>
+                <option value="tilbud">Print tilbud</option>
+                <option value="recipes">Print tilbud + oppskrift</option>
+                {rental.runSheetEnabled && <option value="kjoreplan">Print kjøreplan</option>}
+                <option value="full">Print alt {rental.runSheetEnabled ? "(tilbud + oppskrift + kjøreplan)" : "(tilbud + oppskrift)"}</option>
+              </select>
               <button className="btn" onClick={cancelEdit}>Avbryt</button>
             </div>
           </div>
