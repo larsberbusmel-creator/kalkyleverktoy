@@ -24,6 +24,7 @@ type Material = {
   pricePerUnit: number;
   retailPrice?: number;
   isForResale?: boolean;
+  productNumber?: string;
   allergens: string[];
   kcal: number;
   protein: number;
@@ -1097,7 +1098,7 @@ return (
       {/* ── INNHOLD ── */}
       <div className="main-content">
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
-        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} />}
+        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
@@ -1607,7 +1608,7 @@ const bg = isToday ? "#dcfce7"
   );
 }
 
-function MaterialsTab({ data, updateData, updateMaterialsRpc }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateMaterialsRpc: (patch: Record<string, any>) => void }) {
+function MaterialsTab({ data, updateData, updateMaterialsRpc, updateListRpc }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateMaterialsRpc: (patch: Record<string, any>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void }) {
   const blank = {
     id: "",
     name: "",
@@ -1651,6 +1652,59 @@ breadScaleFlourPercent: "0",
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleMaterials = filtered.slice((materialPage - 1) * pageSize, materialPage * pageSize);
+
+  const resaleCategories = ["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"];
+
+  function materialCategoryPrefix(category: string) {
+    const map: Record<string, string> = {
+      "Deli": "DL",
+      "Mineralvann": "MV",
+      "Øl": "OL",
+      "Vin": "VI",
+      "Brennevin": "BV",
+      "Cider": "CI",
+    };
+    return map[category] || "";
+  }
+
+  function getNextResaleProductNumber(category: string) {
+    const prefix = materialCategoryPrefix(category);
+    if (!prefix) return "";
+    const numbers = data.products
+      .filter((p) => p.productNumber?.startsWith(prefix))
+      .map((p) => p.productNumber.replace(prefix, ""))
+      .map((n) => Number(n))
+      .filter((n) => !isNaN(n));
+    const next = numbers.length ? Math.max(...numbers) + 1 : 1;
+    return prefix + String(next).padStart(6, "0");
+  }
+
+  function withResaleProductNumber(material: Material): Material {
+    if (resaleCategories.includes(material.category) && material.retailPrice && !material.productNumber) {
+      return { ...material, productNumber: getNextResaleProductNumber(material.category) };
+    }
+    return material;
+  }
+
+  function syncResaleProduct(material: Material) {
+    if (!material.productNumber) return;
+    const existingProduct = data.products.find((p) => p.productNumber === material.productNumber);
+    const shadowProduct: Product = {
+      id: existingProduct?.id || `resale-${material.id}`,
+      productNumber: material.productNumber,
+      name: material.name,
+      type: "egenprodusert",
+      subType: "",
+      category: material.category,
+      yieldAmount: 1,
+      yieldUnit: material.unit,
+      customerPrice: material.retailPrice || 0,
+      targetMargin: existingProduct?.targetMargin || 0,
+      lines: [{ itemType: "material", itemId: material.id, amount: 1, unit: material.unit }],
+      packaging: existingProduct?.packaging || [],
+    };
+    updateListRpc("products", { [shadowProduct.id]: shadowProduct });
+  }
 
   function reset() {
     setForm(blank);
@@ -1720,11 +1774,14 @@ breadScaleFlourPercent:
       priceUpdatedAt: priceChanged ? new Date().toISOString() : oldMaterial?.priceUpdatedAt,
     };
 
+    const finalMaterial = withResaleProductNumber(m);
+
     if (editingId) {
-      updateMaterialsRpc({ [m.id]: m });
+      updateMaterialsRpc({ [finalMaterial.id]: finalMaterial });
     } else {
-      updateData({ materials: [m, ...data.materials] });
+      updateData({ materials: [finalMaterial, ...data.materials] });
     }
+    if (finalMaterial.productNumber) syncResaleProduct(finalMaterial);
     reset();
     setShowForm(false);
   }
@@ -1732,13 +1789,15 @@ breadScaleFlourPercent:
   function updateMaterialInline(materialId: string, patch: Partial<Material>, priceChanged = false) {
     const existing = data.materials.find((m) => m.id === materialId);
     if (!existing) return;
-    const updated = {
+    const merged = {
       ...existing,
       ...patch,
       updatedAt: new Date().toISOString(),
       priceUpdatedAt: priceChanged ? new Date().toISOString() : existing.priceUpdatedAt,
     };
+    const updated = withResaleProductNumber(merged);
     updateMaterialsRpc({ [materialId]: updated });
+    if (updated.productNumber) syncResaleProduct(updated);
 }
 
 function defaultRetailMargin(category: string) {
@@ -1783,7 +1842,7 @@ function defaultRetailMargin(category: string) {
         const finalMargin = marginPercentFrom(retailExVat, costExVat);
         const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
 
-        return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="0" value={form.deliMargin || String(defaultRetailMargin(form.category))} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label>{isMineralvann ? (<><Metric label="Anbefalt pris inkl. 15% mva (med seg)" value={currency(suggested15)} dark /><Metric label="Anbefalt pris inkl. 25% mva (i lokalet)" value={currency(suggested25)} dark /></>) : (<Metric label={`Anbefalt utsalgspris inkl. mva${isAlcohol ? " (25%)" : ""}`} value={currency(suggestedIncVat)} dark />)}<label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label>{isMineralvann ? (<div style={{ display: "flex", gap: 8 }}><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested15) })}>Bruk 15%-pris</button><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested25) })}>Bruk 25%-pris</button></div>) : (<button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button>)}</div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label={`Valgt pris eks. mva${isMineralvann ? " (ved 15%)" : ""}`} value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /></div></div>;
+        return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="0" value={form.deliMargin || String(defaultRetailMargin(form.category))} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label>{isMineralvann ? (<><Metric label="Anbefalt pris inkl. 15% mva (med seg)" value={currency(suggested15)} dark /><Metric label="Anbefalt pris inkl. 25% mva (i lokalet)" value={currency(suggested25)} dark /></>) : (<Metric label={`Anbefalt utsalgspris inkl. mva${isAlcohol ? " (25%)" : ""}`} value={currency(suggestedIncVat)} dark />)}<label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label>{isMineralvann ? (<div style={{ display: "flex", gap: 8 }}><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested15) })}>Bruk 15%-pris</button><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested25) })}>Bruk 25%-pris</button></div>) : (<button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button>)}</div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label={`Valgt pris eks. mva${isMineralvann ? " (ved 15%)" : ""}`} value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /><Metric label="Varenr (til nettbutikk)" value={(editingId && data.materials.find((x) => x.id === editingId)?.productNumber) || "Genereres ved lagring"} /></div></div>;
       })()}
 
       <label>
@@ -1898,6 +1957,12 @@ function defaultRetailMargin(category: string) {
         return <tr key={m.id}>
           <td>
   <b>{m.name}</b>
+  {m.productNumber && (
+    <>
+      <br />
+      <small style={{ color: "#64748b" }}>Varenr: {m.productNumber}</small>
+    </>
+  )}
   {m.isForResale && (
     <>
       <br />
