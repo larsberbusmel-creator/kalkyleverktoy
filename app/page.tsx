@@ -4602,6 +4602,12 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   }
 
   function editOrder(order: Order) {
+    if (order.id.startsWith("rental-order-")) {
+      alert("Denne ordren styres fra Utleie av lokale. Du sendes dit for å redigere, slik at endringene ikke går tapt.");
+      setRentalOfferToOpen(order.id.replace("rental-order-", ""));
+      setTab("rental");
+      return;
+    }
     setForm({ ...emptyOrder(), ...order });
     setEditingOrderId(order.id);
     setShowNewOrder(true);
@@ -5425,7 +5431,6 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                 <b>{formatDateNo(o.date)} {o.time || ""}</b>
                 <span>{displayName}</span>
                 {o.orderNumber && <span style={{ background: "#f1f5f9", borderRadius: 6, padding: "2px 8px", fontSize: 12 }}>#{o.orderNumber}</span>}
-                {o.id.startsWith("rental-order-") && <span style={{ background: "#ede9fe", color: "#6d28d9", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>🔗 Fra Utleie</span>}
                 {o.id.startsWith("rental-order-") && <span style={{ background: "#ede9fe", color: "#6d28d9", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>🔗 Fra Utleie</span>}
                 {warnings.length > 0 && <span style={{ color: "#dc2626", fontSize: 12 }}>⚠ Allergi</span>}
                 <span style={{ color: "#64748b", fontSize: 13 }}>{o.type}</span>
