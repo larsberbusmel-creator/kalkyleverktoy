@@ -8564,6 +8564,32 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     return palette[Math.abs(hashCode(label)) % palette.length];
   }
 
+  function parseRunSheetTime(t?: string): number {
+    if (!t) return Infinity;
+    const digits = t.replace(/[^0-9]/g, "");
+    if (!digits) return Infinity;
+    return Number(digits.padEnd(4, "0").slice(0, 4));
+  }
+
+  function sortRunSheetByTime(list: RunSheetItem[]): RunSheetItem[] {
+    const groupOrder: string[] = [];
+    list.forEach((it) => {
+      const key = it.groupLabel || "";
+      if (!groupOrder.includes(key)) groupOrder.push(key);
+    });
+    const byGroup: Record<string, RunSheetItem[]> = {};
+    list.forEach((it) => {
+      const key = it.groupLabel || "";
+      if (!byGroup[key]) byGroup[key] = [];
+      byGroup[key].push(it);
+    });
+    return groupOrder.flatMap((key) => [...byGroup[key]].sort((a, b) => parseRunSheetTime(a.time) - parseRunSheetTime(b.time)));
+  }
+
+  function sortRunSheetNow() {
+    setRental({ ...rental, runSheet: sortRunSheetByTime(runSheetItems) });
+  }
+
   function addRunSheetItem() {
     if (!runSheetForm.task.trim()) return;
     const groupLabel = runSheetForm.groupLabel === "__new__" ? runSheetForm.newGroupLabel.trim() : runSheetForm.groupLabel;
@@ -8574,7 +8600,16 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
       time: runSheetForm.time.trim() || undefined,
       groupLabel: groupLabel || undefined,
     };
-    setRental({ ...rental, runSheet: [...runSheetItems, item] });
+    let nextRunSheet: RunSheetItem[];
+    if (groupLabel) {
+      const lastIndex = runSheetItems.map((it) => it.groupLabel).lastIndexOf(groupLabel);
+      nextRunSheet = lastIndex >= 0
+        ? [...runSheetItems.slice(0, lastIndex + 1), item, ...runSheetItems.slice(lastIndex + 1)]
+        : [...runSheetItems, item];
+    } else {
+      nextRunSheet = [...runSheetItems, item];
+    }
+    setRental({ ...rental, runSheet: sortRunSheetByTime(nextRunSheet) });
     setRunSheetForm({ task: "", responsible: "", time: "", groupLabel: groupLabel || "", newGroupLabel: "" });
   }
 
@@ -9324,7 +9359,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                         <tr>
                           <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
                           <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
-                          <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} placeholder="-" /></td>
+                          <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} onBlur={sortRunSheetNow} placeholder="-" /></td>
                           <td>
                             <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
                               <option value="">(Ingen gruppe)</option>
