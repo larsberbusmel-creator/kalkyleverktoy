@@ -9047,6 +9047,7 @@ ${opts.produksjon ? productionPageHtml : ""}
       )}
 
       {showNewOffer && (
+        <>
         <div className="grid two">
           <div className="card">
             <div className="between">
@@ -9061,11 +9062,22 @@ ${opts.produksjon ? productionPageHtml : ""}
             )}
 
             <div className="tabs-row" style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
-              <button className={rentalSubTab === "forside" ? "btn active" : "btn"} onClick={() => setRentalSubTab("forside")}>Forside</button>
-              <button className={rentalSubTab === "meny" ? "btn active" : "btn"} onClick={() => setRentalSubTab("meny")}>Meny og allergier</button>
-              <button className={rentalSubTab === "tillegg" ? "btn active" : "btn"} onClick={() => setRentalSubTab("tillegg")}>Tillegg</button>
-              <button className={rentalSubTab === "kjoreplan" ? "btn active" : "btn"} onClick={() => setRentalSubTab("kjoreplan")}>Kjøreplan</button>
-              <button className={rentalSubTab === "vilkar" ? "btn active" : "btn"} onClick={() => setRentalSubTab("vilkar")}>Vilkår</button>
+              {[
+                { key: "forside", label: "Forside" },
+                { key: "meny", label: "Meny og allergier" },
+                { key: "tillegg", label: "Tillegg" },
+                { key: "kjoreplan", label: "Kjøreplan" },
+                { key: "vilkar", label: "Vilkår" },
+              ].map((t) => (
+                <button
+                  key={t.key}
+                  className={rentalSubTab === t.key ? "btn active" : "btn"}
+                  style={rentalSubTab === t.key ? undefined : { background: "#ede9fe", borderColor: "#c4b5fd", color: "#5b21b6" }}
+                  onClick={() => setRentalSubTab(t.key as typeof rentalSubTab)}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
 
             {rentalSubTab === "forside" && (
@@ -9205,70 +9217,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                   <input type="checkbox" checked={!!rental.runSheetEnabled} onChange={(e) => setRental({ ...rental, runSheetEnabled: e.target.checked })} />
                   Lag kjøreplan
                 </label>
-                {rental.runSheetEnabled && (
-                  <>
-                    <div className="form-grid four">
-                      <label>Oppgave
-                        <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
-                      </label>
-                      <label>Ansvar (valgfritt)
-                        <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
-                      </label>
-                      <label>Tidspunkt (valgfritt)
-                        <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
-                      </label>
-                      <label>Gruppe
-                        <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
-                          <option value="">(Ingen gruppe)</option>
-                          {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
-                          <option value="__new__">+ Ny gruppe...</option>
-                        </select>
-                      </label>
-                    </div>
-                    {runSheetForm.groupLabel === "__new__" && (
-                      <label>Navn på ny gruppe
-                        <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
-                      </label>
-                    )}
-                    <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
-
-                    {runSheetItems.length > 0 && (
-                      <table style={{ marginTop: 16 }}>
-                        <thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th><th>Gruppe</th><th></th></tr></thead>
-                        <tbody>
-                          {runSheetItems.map((item, i) => {
-                            const showGroupHeader = item.groupLabel && item.groupLabel !== runSheetItems[i - 1]?.groupLabel;
-                            return (
-                              <React.Fragment key={item.id}>
-                                {showGroupHeader && (
-                                  <tr style={{ background: runSheetGroupColor(item.groupLabel!) }}>
-                                    <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700 }}>{item.groupLabel}</td>
-                                  </tr>
-                                )}
-                                <tr>
-                                  <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
-                                  <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
-                                  <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} placeholder="-" /></td>
-                                  <td>
-                                    <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
-                                      <option value="">(Ingen gruppe)</option>
-                                      {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
-                                    </select>
-                                  </td>
-                                  <td style={{ whiteSpace: "nowrap" }}>
-                                    <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
-                                    <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
-                                    <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
-                                  </td>
-                                </tr>
-                              </React.Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-                  </>
-                )}
+                {rental.runSheetEnabled && <p style={{ color: "#64748b", fontSize: 13 }}>Selve kjøreplanen redigerer du i boksen under (mer plass der).</p>}
               </>
             )}
 
@@ -9288,7 +9237,7 @@ ${opts.produksjon ? productionPageHtml : ""}
           </div>
 
           <div className="card">
-            <h2>Tilbud</h2>
+            <h2 style={{ fontWeight: 900, fontSize: 28 }}>Tilbud</h2>
             {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
             <p>Mat/produkter: <b>{currency(food)}</b></p>
             <p>Servitører: <b>{currency(waiterCost)}</b></p>
@@ -9330,6 +9279,73 @@ ${opts.produksjon ? productionPageHtml : ""}
             </div>
           </div>
         </div>
+
+        {rentalSubTab === "kjoreplan" && rental.runSheetEnabled && (
+          <div className="card" style={{ marginTop: 18 }}>
+            <h2>Kjøreplan</h2>
+            <div className="form-grid four">
+              <label>Oppgave
+                <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
+              </label>
+              <label>Ansvar (valgfritt)
+                <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
+              </label>
+              <label>Tidspunkt (valgfritt)
+                <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
+              </label>
+              <label>Gruppe
+                <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
+                  <option value="">(Ingen gruppe)</option>
+                  {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                  <option value="__new__">+ Ny gruppe...</option>
+                </select>
+              </label>
+            </div>
+            {runSheetForm.groupLabel === "__new__" && (
+              <label>Navn på ny gruppe
+                <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
+              </label>
+            )}
+            <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
+
+            {runSheetItems.length > 0 && (
+              <table style={{ marginTop: 16 }}>
+                <thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th><th>Gruppe</th><th></th></tr></thead>
+                <tbody>
+                  {runSheetItems.map((item, i) => {
+                    const showGroupHeader = item.groupLabel && item.groupLabel !== runSheetItems[i - 1]?.groupLabel;
+                    return (
+                      <React.Fragment key={item.id}>
+                        {showGroupHeader && (
+                          <tr style={{ background: runSheetGroupColor(item.groupLabel!) }}>
+                            <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700 }}>{item.groupLabel}</td>
+                          </tr>
+                        )}
+                        <tr>
+                          <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
+                          <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
+                          <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} placeholder="-" /></td>
+                          <td>
+                            <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
+                              <option value="">(Ingen gruppe)</option>
+                              {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
+                            <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
+                            <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+        </>
       )}
 
       <div className="card" style={{ marginTop: 18 }}>
