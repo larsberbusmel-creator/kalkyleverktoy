@@ -5196,7 +5196,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                 <div className="search-dropdown inline">
                   {data.products
                     .filter((p) => p.name.toLowerCase().includes(addProductSearch.toLowerCase()))
-                    .slice(0, 12)
+                    .slice(0, 50)
                     .map((p) => (
                       <button
                         key={p.id}
