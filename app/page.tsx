@@ -155,6 +155,8 @@ type RentalOffer = {
   id?: string;
   customer: string;
   date?: string;
+  phone?: string;
+  email?: string;
   note?: string;
   venue: string;
   venuePrice: number;
@@ -8477,6 +8479,8 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
   const [offerSearch, setOfferSearch] = useState("");
   const [showTerms, setShowTerms] = useState(false);
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
+  const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar">("forside");
+  const [printOpts, setPrintOpts] = useState({ tilbud: true, recipes: false, kjoreplan: false, produksjon: false });
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
     ((data as any).deletedRentalOffers || []) as RentalOffer[]
   );
@@ -8624,7 +8628,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         customerType: "bedrift" as const,
         customer: offer.customer,
         companyName: offer.customer,
-        orgNumber: "", companyAddress: "", phone: "",
+        orgNumber: "", companyAddress: "", phone: offer.phone || "",
         deliveryAddress: rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue,
         date: offer.date, time: "", note: offer.note || "", paymentInfo: "",
         guests: rental.productLines.reduce((sum, l) => sum + l.guests, 0),
@@ -8879,7 +8883,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     return html;
   }
 
-  function printOffer(printLevel: "tilbud" | "recipes" | "kjoreplan" | "produksjon" | "full" = "full") {
+  function printOffer(opts: { tilbud?: boolean; recipes?: boolean; kjoreplan?: boolean; produksjon?: boolean }) {
     const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
     const productRows = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
@@ -8976,7 +8980,7 @@ td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
   ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim())}</p>` : ""}
 </div>
-${printLevel !== "kjoreplan" && printLevel !== "produksjon" ? `<div class="page-break"></div><h2>Spesifikasjon</h2>
+${opts.tilbud ? `<div class="page-break"></div><h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
   <tbody>${venueRow}${productRows}${waiterRow}${addonRows}</tbody>
@@ -8987,9 +8991,9 @@ ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
 ${showTerms ? `<div class="page-break"></div>
 <h2 style="border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:16px">Vilkår for leie av Bodøgaard</h2>
 <p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}` : ""}
-${(printLevel === "recipes" || printLevel === "full") && recipePagesHtml ? `<div class="page-break"></div><h2>Oppskrifter</h2>${recipePagesHtml}` : ""}
-${(printLevel === "kjoreplan" || printLevel === "full") && rental.runSheetEnabled && runSheetItems.length ? `<div class="page-break"></div>${runSheetHtml()}` : ""}
-${printLevel === "produksjon" ? productionPageHtml : ""}
+${opts.recipes && recipePagesHtml ? `<div class="page-break"></div><h2>Oppskrifter</h2>${recipePagesHtml}` : ""}
+${opts.kjoreplan && rental.runSheetEnabled && runSheetItems.length ? `<div class="page-break"></div>${runSheetHtml()}` : ""}
+${opts.produksjon ? productionPageHtml : ""}
 <div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
 </body></html>`);
     w.document.close();
@@ -9056,204 +9060,235 @@ ${printLevel === "produksjon" ? productionPageHtml : ""}
               </div>
             )}
 
-            <div className="form-grid two">
-              <label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
-              <label>Dato for arrangement<input type="date" value={rental.date || ""} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
+            <div className="tabs-row" style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
+              <button className={rentalSubTab === "forside" ? "btn active" : "btn"} onClick={() => setRentalSubTab("forside")}>Forside</button>
+              <button className={rentalSubTab === "meny" ? "btn active" : "btn"} onClick={() => setRentalSubTab("meny")}>Meny og allergier</button>
+              <button className={rentalSubTab === "tillegg" ? "btn active" : "btn"} onClick={() => setRentalSubTab("tillegg")}>Tillegg</button>
+              <button className={rentalSubTab === "kjoreplan" ? "btn active" : "btn"} onClick={() => setRentalSubTab("kjoreplan")}>Kjøreplan</button>
+              <button className={rentalSubTab === "vilkar" ? "btn active" : "btn"} onClick={() => setRentalSubTab("vilkar")}>Vilkår</button>
             </div>
 
-            <label>Lokale
-              <select value={rental.venueExternal ? "__extern__" : rental.venue} onChange={(e) => {
-                if (e.target.value === "__extern__") {
-                  setRental({ ...rental, venueExternal: true, venue: "", venuePrice: 0 });
-                } else {
-                  const v = data.venues.find((x) => x.name === e.target.value)!;
-                  setRental({ ...rental, venueExternal: false, venueExternalName: "", venue: v.name, venuePrice: v.price });
-                }
-              }}>
-                {data.venues.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
-                <option value="__extern__">Eksternt lokale</option>
-              </select>
-            </label>
-
-            {rental.venueExternal ? (
-              <div className="form-grid two">
-                <label>Navn på eksternt lokale<input value={rental.venueExternalName || ""} onChange={(e) => setRental({ ...rental, venueExternalName: e.target.value })} placeholder="F.eks. Svømmehallen" /></label>
-                <label>Pris (0 hvis kunden leier selv)<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) || 0 })} /></label>
-              </div>
-            ) : (
-              <label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label>
-            )}
-
-            <h3>Produkter/menyer</h3>
-            <div className="soft-box">
-              <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk produkt eller meny..." style={{ marginBottom: 8 }} />
-              {productSearch && (
-                <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "auto", maxHeight: 280, marginBottom: 10 }}>
-                  {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
-                  {filteredProducts.map((p) => (
-                    <button key={p.id} style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: 0, borderBottom: "1px solid #f1f5f9", background: "white", cursor: "pointer" }}
-                      onClick={() => { setRental({ ...rental, productLines: [...rental.productLines, { productId: p.id, guests: 1 }] }); setProductSearch(""); }}>
-                      <b>{p.name}</b> <span style={{ color: "#64748b", fontSize: 13 }}>· {currency(p.customerPrice)}/pers</span>
-                    </button>
-                  ))}
+            {rentalSubTab === "forside" && (
+              <>
+                <div className="form-grid two">
+                  <label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
+                  <label>Dato for arrangement<input type="date" value={rental.date || ""} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
                 </div>
-              )}
-              {rental.productLines.map((l, i) => {
-                const p = data.products.find((x) => x.id === l.productId);
-                return (
-                  <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
-                    <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
-                    <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
-                    <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
-                  </div>
-                );
-              })}
-            </div>
 
-            <h3>Servitører</h3>
-            <div className="form-grid three">
-              <label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label>
-              <label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
-              <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
-            </div>
+                <div className="form-grid two">
+                  <label>Telefon<input value={rental.phone || ""} onChange={(e) => setRental({ ...rental, phone: e.target.value })} placeholder="Telefonnummer" /></label>
+                  <label>E-post<input type="email" value={rental.email || ""} onChange={(e) => setRental({ ...rental, email: e.target.value })} placeholder="E-postadresse" /></label>
+                </div>
 
-            <h3>Tillegg</h3>
-            <div className="soft-box">
-              {data.rentalAddons.map((addon) => {
-                const selected = isAddonSelected(addon);
-                const line = addonLines.find((x) => x.text === addon.name);
-                const usesQty = addonUsesQuantity(addon.name);
-                return (
-                  <div key={addon.id} className="editable-row">
-                    <label className="check">
-                      <input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} />
-                      {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : " (fast beløp)"}
-                    </label>
-                    {selected && usesQty && (
-                      <label>Antall
-                        <input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} />
-                      </label>
-                    )}
-                    {selected && !usesQty && (
-                      <label>Beløp
-                        <input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} />
-                      </label>
-                    )}
-                    {selected && usesQty && <b>{currency(line?.amount || 0)}</b>}
-                  </div>
-                );
-              })}
-            </div>
-
-            <h3 style={{ marginTop: 16 }}>Dietter / hensyn</h3>
-            <div className="form-grid four">
-              <label>Vegetar<input type="number" value={rental.dietVegetarian || "0"} onChange={(e) => setRental({ ...rental, dietVegetarian: e.target.value })} /></label>
-              <label>Vegan<input type="number" value={rental.dietVegan || "0"} onChange={(e) => setRental({ ...rental, dietVegan: e.target.value })} /></label>
-              <label>Gravid<input type="number" value={rental.dietPregnant || "0"} onChange={(e) => setRental({ ...rental, dietPregnant: e.target.value })} /></label>
-              <label>Andre hensyn<input value={rental.dietOther || ""} onChange={(e) => setRental({ ...rental, dietOther: e.target.value })} placeholder="Fritekst" /></label>
-            </div>
-            <h3>Allergier</h3>
-            <div className="chips">
-              {defaultAllergens.map((a) => {
-                const active = ((rental.allergens || {})[a] || 0) > 0;
-                return <div key={a}><button type="button" className={active ? "btn active" : "btn"} onClick={() => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={(rental.allergens || {})[a]} onChange={(e) => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: Number(e.target.value) } })} />}</div>;
-              })}
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
-              <textarea
-                className="textarea"
-                value={rental.note || ""}
-                onChange={(e) => setRental({ ...rental, note: e.target.value })}
-                placeholder="Spesielle ønsker, allergier, praktisk info osv."
-              />
-            </div>
-          </div>
-
-          {rental.runSheetEnabled && (
-            <div className="card">
-              <h2>Kjøreplan</h2>
-              <div className="form-grid four">
-                <label>Oppgave
-                  <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
-                </label>
-                <label>Ansvar (valgfritt)
-                  <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
-                </label>
-                <label>Tidspunkt (valgfritt)
-                  <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
-                </label>
-                <label>Gruppe
-                  <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
-                    <option value="">(Ingen gruppe)</option>
-                    {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
-                    <option value="__new__">+ Ny gruppe...</option>
+                <label>Lokale
+                  <select value={rental.venueExternal ? "__extern__" : rental.venue} onChange={(e) => {
+                    if (e.target.value === "__extern__") {
+                      setRental({ ...rental, venueExternal: true, venue: "", venuePrice: 0 });
+                    } else {
+                      const v = data.venues.find((x) => x.name === e.target.value)!;
+                      setRental({ ...rental, venueExternal: false, venueExternalName: "", venue: v.name, venuePrice: v.price });
+                    }
+                  }}>
+                    {data.venues.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+                    <option value="__extern__">Eksternt lokale</option>
                   </select>
                 </label>
-              </div>
-              {runSheetForm.groupLabel === "__new__" && (
-                <label>Navn på ny gruppe
-                  <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
-                </label>
-              )}
-              <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
 
-              {runSheetItems.length > 0 && (
-                <table style={{ marginTop: 16 }}>
-                  <thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th><th>Gruppe</th><th></th></tr></thead>
-                  <tbody>
-                    {runSheetItems.map((item, i) => {
-                      const showGroupHeader = item.groupLabel && item.groupLabel !== runSheetItems[i - 1]?.groupLabel;
-                      return (
-                        <React.Fragment key={item.id}>
-                          {showGroupHeader && (
-                            <tr style={{ background: runSheetGroupColor(item.groupLabel!) }}>
-                              <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700 }}>{item.groupLabel}</td>
-                            </tr>
-                          )}
-                          <tr>
-                            <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
-                            <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
-                            <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} placeholder="-" /></td>
-                            <td>
-                              <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
-                                <option value="">(Ingen gruppe)</option>
-                                {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
-                              </select>
-                            </td>
-                            <td style={{ whiteSpace: "nowrap" }}>
-                              <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
-                              <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
-                              <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
-                            </td>
-                          </tr>
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
+                {rental.venueExternal ? (
+                  <div className="form-grid two">
+                    <label>Navn på eksternt lokale<input value={rental.venueExternalName || ""} onChange={(e) => setRental({ ...rental, venueExternalName: e.target.value })} placeholder="F.eks. Svømmehallen" /></label>
+                    <label>Pris (0 hvis kunden leier selv)<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) || 0 })} /></label>
+                  </div>
+                ) : (
+                  <label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label>
+                )}
+
+                <h3>Servitører</h3>
+                <div className="form-grid three">
+                  <label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label>
+                  <label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
+                  <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
+                  <textarea
+                    className="textarea"
+                    value={rental.note || ""}
+                    onChange={(e) => setRental({ ...rental, note: e.target.value })}
+                    placeholder="Spesielle ønsker, praktisk info osv."
+                  />
+                </div>
+              </>
+            )}
+
+            {rentalSubTab === "meny" && (
+              <>
+                <h3>Produkter/menyer</h3>
+                <div className="soft-box">
+                  <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk produkt eller meny..." style={{ marginBottom: 8 }} />
+                  {productSearch && (
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "auto", maxHeight: 280, marginBottom: 10 }}>
+                      {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
+                      {filteredProducts.map((p) => (
+                        <button key={p.id} style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: 0, borderBottom: "1px solid #f1f5f9", background: "white", cursor: "pointer" }}
+                          onClick={() => { setRental({ ...rental, productLines: [...rental.productLines, { productId: p.id, guests: 1 }] }); setProductSearch(""); }}>
+                          <b>{p.name}</b> <span style={{ color: "#64748b", fontSize: 13 }}>· {currency(p.customerPrice)}/pers</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {rental.productLines.map((l, i) => {
+                    const p = data.products.find((x) => x.id === l.productId);
+                    return (
+                      <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
+                        <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
+                        <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
+                        <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <h3 style={{ marginTop: 16 }}>Dietter / hensyn</h3>
+                <div className="form-grid four">
+                  <label>Vegetar<input type="number" value={rental.dietVegetarian || "0"} onChange={(e) => setRental({ ...rental, dietVegetarian: e.target.value })} /></label>
+                  <label>Vegan<input type="number" value={rental.dietVegan || "0"} onChange={(e) => setRental({ ...rental, dietVegan: e.target.value })} /></label>
+                  <label>Gravid<input type="number" value={rental.dietPregnant || "0"} onChange={(e) => setRental({ ...rental, dietPregnant: e.target.value })} /></label>
+                  <label>Andre hensyn<input value={rental.dietOther || ""} onChange={(e) => setRental({ ...rental, dietOther: e.target.value })} placeholder="Fritekst" /></label>
+                </div>
+                <h3>Allergier</h3>
+                <div className="chips">
+                  {defaultAllergens.map((a) => {
+                    const active = ((rental.allergens || {})[a] || 0) > 0;
+                    return <div key={a}><button type="button" className={active ? "btn active" : "btn"} onClick={() => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={(rental.allergens || {})[a]} onChange={(e) => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: Number(e.target.value) } })} />}</div>;
+                  })}
+                </div>
+              </>
+            )}
+
+            {rentalSubTab === "tillegg" && (
+              <>
+                <h3>Tillegg</h3>
+                <div className="soft-box">
+                  {data.rentalAddons.map((addon) => {
+                    const selected = isAddonSelected(addon);
+                    const line = addonLines.find((x) => x.text === addon.name);
+                    const usesQty = addonUsesQuantity(addon.name);
+                    return (
+                      <div key={addon.id} className="editable-row">
+                        <label className="check">
+                          <input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} />
+                          {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : " (fast beløp)"}
+                        </label>
+                        {selected && usesQty && (
+                          <label>Antall
+                            <input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} />
+                          </label>
+                        )}
+                        {selected && !usesQty && (
+                          <label>Beløp
+                            <input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} />
+                          </label>
+                        )}
+                        {selected && usesQty && <b>{currency(line?.amount || 0)}</b>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {rentalSubTab === "kjoreplan" && (
+              <>
+                <label className="check" style={{ marginBottom: 12 }}>
+                  <input type="checkbox" checked={!!rental.runSheetEnabled} onChange={(e) => setRental({ ...rental, runSheetEnabled: e.target.checked })} />
+                  Lag kjøreplan
+                </label>
+                {rental.runSheetEnabled && (
+                  <>
+                    <div className="form-grid four">
+                      <label>Oppgave
+                        <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
+                      </label>
+                      <label>Ansvar (valgfritt)
+                        <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
+                      </label>
+                      <label>Tidspunkt (valgfritt)
+                        <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
+                      </label>
+                      <label>Gruppe
+                        <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
+                          <option value="">(Ingen gruppe)</option>
+                          {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                          <option value="__new__">+ Ny gruppe...</option>
+                        </select>
+                      </label>
+                    </div>
+                    {runSheetForm.groupLabel === "__new__" && (
+                      <label>Navn på ny gruppe
+                        <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
+                      </label>
+                    )}
+                    <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
+
+                    {runSheetItems.length > 0 && (
+                      <table style={{ marginTop: 16 }}>
+                        <thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th><th>Gruppe</th><th></th></tr></thead>
+                        <tbody>
+                          {runSheetItems.map((item, i) => {
+                            const showGroupHeader = item.groupLabel && item.groupLabel !== runSheetItems[i - 1]?.groupLabel;
+                            return (
+                              <React.Fragment key={item.id}>
+                                {showGroupHeader && (
+                                  <tr style={{ background: runSheetGroupColor(item.groupLabel!) }}>
+                                    <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700 }}>{item.groupLabel}</td>
+                                  </tr>
+                                )}
+                                <tr>
+                                  <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
+                                  <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
+                                  <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} placeholder="-" /></td>
+                                  <td>
+                                    <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
+                                      <option value="">(Ingen gruppe)</option>
+                                      {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                                    </select>
+                                  </td>
+                                  <td style={{ whiteSpace: "nowrap" }}>
+                                    <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
+                                    <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
+                                    <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
+                                  </td>
+                                </tr>
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {rentalSubTab === "vilkar" && (
+              <div className="soft-box">
+                <label className="check">
+                  <input type="checkbox" checked={showIncluded} onChange={(e) => setShowIncluded(e.target.checked)} />
+                  Vis "Prisen inkluderer" i tilbud
+                </label>
+                {showIncluded && <p style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>{includedText}</p>}
+                <label className="check" style={{ marginTop: 8 }}>
+                  <input type="checkbox" checked={showTerms} onChange={(e) => setShowTerms(e.target.checked)} />
+                  Vilkår for leie Bodøgaard
+                </label>
+              </div>
+            )}
+          </div>
 
           <div className="card">
             <h2>Tilbud</h2>
-            <div className="soft-box">
-              <label className="check">
-                <input type="checkbox" checked={showIncluded} onChange={(e) => setShowIncluded(e.target.checked)} />
-                Vis "Prisen inkluderer" i tilbud
-              </label>
-              {showIncluded && <p style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>{includedText}</p>}
-              <label className="check" style={{ marginTop: 8 }}>
-                <input type="checkbox" checked={showTerms} onChange={(e) => setShowTerms(e.target.checked)} />
-                Vilkår for leie Bodøgaard
-              </label>
-              <label className="check" style={{ marginTop: 8 }}>
-                <input type="checkbox" checked={!!rental.runSheetEnabled} onChange={(e) => setRental({ ...rental, runSheetEnabled: e.target.checked })} />
-                Lag kjøreplan
-              </label>
-            </div>
             {rental.venuePrice > 0 && <p>Leie {rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue}: <b>{currency(rental.venuePrice)}</b></p>}
             <p>Mat/produkter: <b>{currency(food)}</b></p>
             <p>Servitører: <b>{currency(waiterCost)}</b></p>
@@ -9264,28 +9299,33 @@ ${printLevel === "produksjon" ? productionPageHtml : ""}
                 <tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody>
               </table>
             )}
+            <div className="soft-box" style={{ marginTop: 12 }}>
+              <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Hva skal skrives ut?</label>
+              <label className="check">
+                <input type="checkbox" checked={printOpts.tilbud} onChange={(e) => setPrintOpts({ ...printOpts, tilbud: e.target.checked })} />
+                Tilbud (spesifikasjon/pris)
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={printOpts.recipes} onChange={(e) => setPrintOpts({ ...printOpts, recipes: e.target.checked })} />
+                Oppskrifter
+              </label>
+              {rental.runSheetEnabled && (
+                <label className="check">
+                  <input type="checkbox" checked={printOpts.kjoreplan} onChange={(e) => setPrintOpts({ ...printOpts, kjoreplan: e.target.checked })} />
+                  Kjøreplan
+                </label>
+              )}
+              <label className="check">
+                <input type="checkbox" checked={printOpts.produksjon} onChange={(e) => setPrintOpts({ ...printOpts, produksjon: e.target.checked })} />
+                Produksjonsgrunnlag (kjøkken)
+              </label>
+            </div>
             <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
             <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
               <button className="btn active" onClick={saveOffer}>
                 {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
               </button>
-              <select
-                className="btn"
-                defaultValue=""
-                style={{ width: "auto", maxWidth: 240 }}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v) printOffer(v as "tilbud" | "recipes" | "kjoreplan" | "full");
-                  e.target.value = "";
-                }}
-              >
-                <option value="" disabled>Skriv ut...</option>
-                <option value="tilbud">Print tilbud</option>
-                <option value="recipes">Print tilbud + oppskrift</option>
-                {rental.runSheetEnabled && <option value="kjoreplan">Print kjøreplan</option>}
-                <option value="full">Print alt {rental.runSheetEnabled ? "(tilbud + oppskrift + kjøreplan)" : "(tilbud + oppskrift)"}</option>
-                <option value="produksjon">Print produksjonsgrunnlag (kjøkken)</option>
-              </select>
+              <button className="btn" onClick={() => printOffer(printOpts)}>Skriv ut</button>
               <button className="btn" onClick={cancelEdit}>Avbryt</button>
             </div>
           </div>
