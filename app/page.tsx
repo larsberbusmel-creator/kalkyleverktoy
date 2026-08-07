@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -3891,22 +3891,22 @@ th{background:#f3f4f6}
         placeholder="Søk produkt"
       />
 
-      <div className="chips">
+      <select
+        value={categoryFilter}
+        onChange={(e) => {
+          setCategoryFilter(e.target.value);
+          setProductPage(1);
+        }}
+        style={{ maxWidth: 260 }}
+      >
         {["Alle", ...data.productCategories]
           .filter((v, i, arr) => arr.indexOf(v) === i)
           .map((cat) => (
-            <button
-              key={cat}
-              className={categoryFilter === cat ? "btn active" : "btn"}
-              onClick={() => {
-                setCategoryFilter(cat);
-                setProductPage(1);
-              }}
-            >
+            <option key={cat} value={cat}>
               {cat}
-            </button>
+            </option>
           ))}
-      </div>
+      </select>
 
       <p style={{ color: "#64748b" }}>
         Viser {pagedProducts.length} av {filtered.length} produkter. Side {productPage} av {totalProductPages}.
@@ -8871,13 +8871,13 @@ const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", per
   const [localPackaging, setLocalPackaging] = useState(data.packaging);
   const [localRentalAddons, setLocalRentalAddons] = useState(data.rentalAddons);
 
-  const Section = ({ id, title, children }: { id: string; title: string; children: React.ReactNode }) =>
+  const Section = useCallback(({ id, title, children }: { id: string; title: string; children: React.ReactNode }) =>
     <div className="settings-section">
       <button className="settings-toggle" onClick={() => setOpen(open === id ? "" : id)}>
         {title}<span>{open === id ? "−" : "+"}</span>
       </button>
       {open === id && <div className="settings-content">{children}</div>}
-    </div>;
+    </div>, [open]);
 
   return (
     <section className="card">
