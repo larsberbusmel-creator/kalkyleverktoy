@@ -152,7 +152,7 @@ type RentalProductLine = { productId: string; guests: number };
 type RunSheetItem = { id: string; task: string; responsible?: string; time?: string; groupLabel?: string };
 
 type ChairSides = { north?: boolean; east?: boolean; south?: boolean; west?: boolean };
-type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string; chairSides?: ChairSides };
+type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string; chairSides?: ChairSides; seatsOverride?: number };
 type PlacedChair = { id: string; roomId: string; x: number; y: number; rotation: number };
 
 type RentalOffer = {
@@ -8960,6 +8960,16 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     };
   }
 
+  function seatsFor(t: PlacedTable): number {
+    const tt = tableTypeById(t.tableTypeId);
+    if (!tt) return 0;
+    return t.seatsOverride != null ? Math.max(0, Math.min(t.seatsOverride, tt.seats)) : tt.seats;
+  }
+
+  function updateSeatsOverride(id: string, seats: number) {
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === id ? { ...t, seatsOverride: seats } : t) });
+  }
+
   function toggleChairSide(id: string, side: "north" | "east" | "south" | "west") {
     setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => {
       if (t.id !== id) return t;
@@ -9045,8 +9055,8 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
   }
 
   function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number): PlacedTable[] {
-    const margin = 60;
-    const spacing = 60;
+    const margin = 40;
+    const spacing = 25;
     const footprintW = tableType.width + tableType.chairDepth * 2 + spacing;
     const footprintL = (tableType.shape === "rund" ? tableType.width : tableType.length) + tableType.chairDepth * 2 + spacing;
     const tablesNeeded = Math.max(1, Math.ceil(guestCount / Math.max(tableType.seats, 1)));
@@ -9752,7 +9762,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                             {(() => {
                               const guestSeats = tablesInRoom.reduce((sum, t) => {
                                 const tt = tableTypeById(t.tableTypeId);
-                                return tt?.category === "gjestebord" ? sum + tt.seats : sum;
+                                return tt?.category === "gjestebord" ? sum + seatsFor(t) : sum;
                               }, 0);
                               const diff = guestSeats - plannerGuestCount;
                               const color = diff < 0 ? "#dc2626" : "#166534";
@@ -9798,7 +9808,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                       const selected = plannerSelectedTableId === t.id;
                                       const sides = chairSidesFor(t);
                                       const chairSizePx = (tt.chairSize || 45) * scale;
-                                      const chairs = chairPositions(isRound, w, l, chair, chairSizePx, tt.seats, sides);
+                                      const chairs = chairPositions(isRound, w, l, chair, chairSizePx, seatsFor(t), sides);
                                       return (
                                         <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
                                           {chairs.map((c, ci) => (
@@ -9872,6 +9882,11 @@ ${opts.produksjon ? productionPageHtml : ""}
                                       <label>Retning (grader)
                                         <input type="number" value={selectedTable.rotation} onChange={(e) => setTableRotation(selectedTable.id, Number(e.target.value) || 0)} step={15} />
                                       </label>
+                                      {selectedTt && (
+                                        <label style={{ marginTop: 8, display: "block" }}>Antall stoler (maks {selectedTt.seats})
+                                          <input type="number" min={0} max={selectedTt.seats} value={selectedTable.seatsOverride ?? selectedTt.seats} onChange={(e) => updateSeatsOverride(selectedTable.id, Number(e.target.value) || 0)} />
+                                        </label>
+                                      )}
                                       {selectedTt && selectedTt.shape !== "rund" && (
                                         <div style={{ marginTop: 8 }}>
                                           <b style={{ fontSize: 13 }}>Stoler på side:</b>
