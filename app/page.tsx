@@ -8503,6 +8503,7 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
   const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan">("forside");
     const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
+    const [plannerLargeView, setPlannerLargeView] = useState(false);
     const [plannerMargin, setPlannerMargin] = useState(40);
     const [plannerSpacing, setPlannerSpacing] = useState(70);
     const [plannerTableTypeId, setPlannerTableTypeId] = useState("");
@@ -9892,12 +9893,29 @@ ${opts.produksjon ? productionPageHtml : ""}
                           )}
 
                           {activeRoom && (
-                            <div className="grid two" style={{ marginTop: 12 }}>
+                            <div className={plannerLargeView ? "grid" : "grid two"} style={{ marginTop: 12 }}>
                               <div>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  onClick={() => setPlannerLargeView(!plannerLargeView)}
+                                  title={plannerLargeView ? "Vis mindre" : "Vis større"}
+                                  style={{ padding: "4px 8px", marginBottom: 6 }}
+                                >
+                                  {plannerLargeView ? (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                                    </svg>
+                                  ) : (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                                    </svg>
+                                  )}
+                                </button>
                                 <svg
                                   ref={svgRef}
                                   viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`}
-                                  style={{ width: "100%", maxWidth: 680, background: "#f8fafc", borderRadius: 8, touchAction: "none" }}
+                                  style={{ width: "100%", maxWidth: plannerLargeView ? undefined : 680, background: "#f8fafc", borderRadius: 8, touchAction: "none" }}
                                   onPointerMove={(e) => onSvgPointerMove(e, scale)}
                                   onPointerUp={onSvgPointerUp}
                                   onPointerLeave={onSvgPointerUp}
