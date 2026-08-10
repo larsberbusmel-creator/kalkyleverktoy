@@ -151,7 +151,7 @@ type RentalProductLine = { productId: string; guests: number };
 
 type RunSheetItem = { id: string; task: string; responsible?: string; time?: string; groupLabel?: string };
 
-type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string };
+type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string };
 
 type RentalOffer = {
   id?: string;
@@ -310,7 +310,7 @@ type RoomOpening = { id: string; type: "dør" | "vindu"; wall: "nord" | "øst" |
 type RoomObstacle = { id: string; type: "søyle" | "flygel/piano" | "annet"; x: number; y: number; width: number; height: number; label?: string };
 type RoomExclusionZone = { id: string; x: number; y: number; width: number; height: number; label?: string };
 type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; exclusionZones?: RoomExclusionZone[]; notes?: string };
-type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet" };
+type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet"; joinable?: boolean };
 
 type AppData = {
   materials: Material[];
@@ -8500,6 +8500,7 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
     const [plannerTableTypeId, setPlannerTableTypeId] = useState("");
     const [plannerSelectedTableId, setPlannerSelectedTableId] = useState<string | null>(null);
     const [dragTableId, setDragTableId] = useState<string | null>(null);
+    const [groupSelection, setGroupSelection] = useState<string[]>([]);
     const svgRef = useRef<SVGSVGElement>(null);
   const [printOpts, setPrintOpts] = useState({ tilbud: true, recipes: false, kjoreplan: false, produksjon: false });
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
@@ -8943,6 +8944,36 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
   function tableTypeById(id: string) { return (data.tableTypes || []).find((t) => t.id === id); }
   function tableTypeName(id: string) { return tableTypeById(id)?.name || "Ukjent"; }
 
+  function toggleGroupSelection(id: string) {
+    setGroupSelection((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+
+  function joinIntoLongTable() {
+    if (groupSelection.length < 2) { alert("Huk av minst to bord som skal slås sammen."); return; }
+    const tables = rental.floorPlanTables || [];
+    const selected = groupSelection.map((id) => tables.find((t) => t.id === id)).filter(Boolean) as PlacedTable[];
+    if (selected.length < 2) return;
+    const first = selected[0];
+    const tt = tableTypeById(first.tableTypeId);
+    if (!tt) return;
+    const length = tt.shape === "rund" ? tt.width : tt.length;
+    const horizontal = first.rotation % 180 === 0;
+    const groupId = `grp-${Date.now()}`;
+    const positioned = selected.map((t, i) => horizontal
+      ? { ...t, groupId, rotation: first.rotation, x: first.x + i * length, y: first.y }
+      : { ...t, groupId, rotation: first.rotation, y: first.y + i * length, x: first.x });
+    setRental({ ...rental, floorPlanTables: tables.map((t) => positioned.find((p) => p.id === t.id) || t) });
+    setGroupSelection([]);
+  }
+
+  function ungroupTable(id: string) {
+    const tables = rental.floorPlanTables || [];
+    const t = tables.find((x) => x.id === id);
+    if (!t?.groupId) return;
+    const gid = t.groupId;
+    setRental({ ...rental, floorPlanTables: tables.map((x) => x.groupId === gid ? { ...x, groupId: undefined } : x) });
+  }
+
   function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number): PlacedTable[] {
     const margin = 60;
     const spacing = 60;
@@ -8996,6 +9027,11 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
 
   function rotateTable(id: string) {
     setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === id ? { ...t, rotation: (t.rotation + 90) % 360 } : t) });
+  }
+
+  function setTableRotation(id: string, degrees: number) {
+    const normalized = ((degrees % 360) + 360) % 360;
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === id ? { ...t, rotation: normalized } : t) });
   }
 
   function deleteTable(id: string) {
@@ -9690,16 +9726,29 @@ ${opts.produksjon ? productionPageHtml : ""}
                               <div>
                                 <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
                                 {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
-                                {tablesInRoom.map((t, idx) => (
-                                  <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
-                                    <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}</span>
-                                    <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
-                                    <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
-                                  </div>
-                                ))}
+                                {tablesInRoom.map((t, idx) => {
+                                  const tt = tableTypeById(t.tableTypeId);
+                                  return (
+                                    <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
+                                      {tt?.joinable && (
+                                        <input type="checkbox" checked={groupSelection.includes(t.id)} onChange={(e) => { e.stopPropagation(); toggleGroupSelection(t.id); }} onClick={(e) => e.stopPropagation()} title="Velg for sammenslåing til langbord" />
+                                      )}
+                                      <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}{t.groupId ? " · del av langbord" : ""}</span>
+                                      <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
+                                      {t.groupId && <button className="link" onClick={(e) => { e.stopPropagation(); ungroupTable(t.id); }}>Løs opp langbord</button>}
+                                      <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
+                                    </div>
+                                  );
+                                })}
+                                {groupSelection.length >= 2 && (
+                                  <button className="btn active" style={{ marginTop: 8 }} onClick={joinIntoLongTable}>Slå sammen {groupSelection.length} valgte til langbord</button>
+                                )}
                                 {selectedTable && (
                                   <div className="soft-box" style={{ marginTop: 12 }}>
-                                    <label>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
+                                    <label>Retning (grader)
+                                      <input type="number" value={selectedTable.rotation} onChange={(e) => setTableRotation(selectedTable.id, Number(e.target.value) || 0)} step={15} />
+                                    </label>
+                                    <label style={{ marginTop: 8, display: "block" }}>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
                                       <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
                                     </label>
                                   </div>
@@ -10100,6 +10149,12 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
             )}
             <label>Plass til stol rundt (cm)<input type="number" value={tableTypeForm.chairDepth} onChange={(e) => setTableTypeForm({ ...tableTypeForm, chairDepth: Number(e.target.value) || 0 })} /></label>
           </div>
+          {tableTypeForm.shape !== "rund" && (
+            <label className="check" style={{ marginTop: 8 }}>
+              <input type="checkbox" checked={!!tableTypeForm.joinable} onChange={(e) => setTableTypeForm({ ...tableTypeForm, joinable: e.target.checked })} />
+              Kan slås sammen til langbord
+            </label>
+          )}
           <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
             <button className="btn active" onClick={saveTableType}>{editingTableTypeId ? "Lagre endringer" : "Lagre bordtype"}</button>
             {editingTableTypeId && <button className="btn" onClick={resetTableTypeForm}>Avbryt</button>}
