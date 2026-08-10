@@ -314,7 +314,7 @@ type RoomOpening = { id: string; type: "dør" | "vindu"; wall: "nord" | "øst" |
 type RoomObstacle = { id: string; type: "søyle" | "flygel/piano" | "annet"; x: number; y: number; width: number; height: number; label?: string };
 type RoomExclusionZone = { id: string; x: number; y: number; width: number; height: number; label?: string };
 type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; exclusionZones?: RoomExclusionZone[]; notes?: string };
-type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; chairSize?: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet"; joinable?: boolean };
+type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; chairSize?: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet"; joinable?: boolean; defaultChairSides?: ChairSides };
 
 type AppData = {
   materials: Material[];
@@ -8503,6 +8503,8 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
   const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan">("forside");
     const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
     const [plannerGuestCount, setPlannerGuestCount] = useState(50);
+    const [plannerMargin, setPlannerMargin] = useState(40);
+    const [plannerSpacing, setPlannerSpacing] = useState(25);
     const [plannerTableTypeId, setPlannerTableTypeId] = useState("");
     const [plannerSelectedTableId, setPlannerSelectedTableId] = useState<string | null>(null);
     const [dragTableId, setDragTableId] = useState<string | null>(null);
@@ -9093,9 +9095,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     updateData({ roomLayoutTemplates: (data.roomLayoutTemplates || []).filter((tpl) => tpl.id !== templateId) });
   }
 
-  function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number): PlacedTable[] {
-    const margin = 40;
-    const spacing = 25;
+  function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number, margin: number, spacing: number): PlacedTable[] {
     const footprintW = tableType.width + tableType.chairDepth * 2 + spacing;
     const footprintL = (tableType.shape === "rund" ? tableType.width : tableType.length) + tableType.chairDepth * 2 + spacing;
     const tablesNeeded = Math.max(1, Math.ceil(guestCount / Math.max(tableType.seats, 1)));
@@ -9113,7 +9113,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         return !(right < o.x || left > o.x + o.width || bottom < o.y || top > o.y + o.height);
       });
       if (!overlaps) {
-        placed.push({ id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`, tableTypeId: tableType.id, roomId: room.id, x: Math.round(x), y: Math.round(y), rotation: 0 });
+        placed.push({ id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`, tableTypeId: tableType.id, roomId: room.id, x: Math.round(x), y: Math.round(y), rotation: 0, chairSides: tableType.defaultChairSides });
       }
       col++;
       if (col >= cols) { col = 0; row++; }
@@ -9125,7 +9125,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const room = roomById(plannerActiveRoomId);
     const tt = tableTypeById(plannerTableTypeId);
     if (!room || !tt) { alert("Velg rom og bordtype først."); return; }
-    const suggested = suggestTablePlacement(room, tt, plannerGuestCount);
+    const suggested = suggestTablePlacement(room, tt, plannerGuestCount, plannerMargin, plannerSpacing);
     const otherRooms = (rental.floorPlanTables || []).filter((t) => t.roomId !== room.id);
     const otherTypesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id && t.tableTypeId !== tt.id);
     setRental({ ...rental, floorPlanTables: [...otherRooms, ...otherTypesInRoom, ...suggested] });
@@ -9135,7 +9135,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const room = roomById(plannerActiveRoomId);
     const tt = tableTypeById(typeId);
     if (!room || !tt) return;
-    const newTable: PlacedTable = { id: `pt-${Date.now()}`, tableTypeId: typeId, roomId: room.id, x: Math.round(room.width / 2), y: Math.round(room.length / 2), rotation: 0 };
+    const newTable: PlacedTable = { id: `pt-${Date.now()}`, tableTypeId: typeId, roomId: room.id, x: Math.round(room.width / 2), y: Math.round(room.length / 2), rotation: 0, chairSides: tt.defaultChairSides };
     setRental({ ...rental, floorPlanTables: [...(rental.floorPlanTables || []), newTable] });
     setPlannerSelectedTableId(newTable.id);
   }
@@ -9782,6 +9782,8 @@ ${opts.produksjon ? productionPageHtml : ""}
 
                           <div className="form-grid four" style={{ marginTop: 8 }}>
                             <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setPlannerGuestCount(Number(e.target.value) || 0)} /></label>
+                            <label>Margin til vegg (cm)<input type="number" value={plannerMargin} onChange={(e) => setPlannerMargin(Number(e.target.value) || 0)} /></label>
+                            <label>Gangareal mellom bord (cm)<input type="number" value={plannerSpacing} onChange={(e) => setPlannerSpacing(Number(e.target.value) || 0)} /></label>
                             <label>Bordtype
                               <select value={plannerTableTypeId} onChange={(e) => setPlannerTableTypeId(e.target.value)}>
                                 <option value="">Velg bordtype...</option>
@@ -9798,17 +9800,6 @@ ${opts.produksjon ? productionPageHtml : ""}
                           </div>
 
                           <p style={{ marginTop: 8, fontWeight: 700, fontSize: 14 }}>
-                            {(() => {
-                              const guestSeats = tablesInRoom.reduce((sum, t) => {
-                                const tt = tableTypeById(t.tableTypeId);
-                                return tt?.category === "gjestebord" ? sum + seatsFor(t) : sum;
-                              }, 0) + (rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).length;
-                              const diff = guestSeats - plannerGuestCount;
-                              const color = diff < 0 ? "#dc2626" : "#166534";
-                              return <span style={{ color }}>Plass til {guestSeats} av {plannerGuestCount} gjester{diff !== 0 ? ` (${diff > 0 ? "+" : ""}${diff})` : ""}</span>;
-                            })()}
-                          </p>
-<p style={{ marginTop: 8, fontWeight: 700, fontSize: 14 }}>
                             {(() => {
                               const guestSeats = tablesInRoom.reduce((sum, t) => {
                                 const tt = tableTypeById(t.tableTypeId);
@@ -10379,10 +10370,27 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
             <label>Stolstørrelse (cm)<input type="number" value={tableTypeForm.chairSize || 45} onChange={(e) => setTableTypeForm({ ...tableTypeForm, chairSize: Number(e.target.value) || 45 })} /></label>
           </div>
           {tableTypeForm.shape !== "rund" && (
-            <label className="check" style={{ marginTop: 8 }}>
-              <input type="checkbox" checked={!!tableTypeForm.joinable} onChange={(e) => setTableTypeForm({ ...tableTypeForm, joinable: e.target.checked })} />
-              Kan slås sammen til langbord
-            </label>
+            <>
+              <label className="check" style={{ marginTop: 8 }}>
+                <input type="checkbox" checked={!!tableTypeForm.joinable} onChange={(e) => setTableTypeForm({ ...tableTypeForm, joinable: e.target.checked })} />
+                Kan slås sammen til langbord
+              </label>
+              <div style={{ marginTop: 8 }}>
+                <b style={{ fontSize: 13 }}>Standard stolplassering:</b>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+                  {(["north", "east", "south", "west"] as const).map((side) => (
+                    <label key={side} className="check">
+                      <input
+                        type="checkbox"
+                        checked={tableTypeForm.defaultChairSides?.[side] !== false}
+                        onChange={(e) => setTableTypeForm({ ...tableTypeForm, defaultChairSides: { ...tableTypeForm.defaultChairSides, [side]: e.target.checked } })}
+                      />
+                      {side === "north" ? "Topp" : side === "south" ? "Bunn" : side === "east" ? "Høyre" : "Venstre"}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
           <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
             <button className="btn active" onClick={saveTableType}>{editingTableTypeId ? "Lagre endringer" : "Lagre bordtype"}</button>
