@@ -163,6 +163,7 @@ type RentalOffer = {
   phone?: string;
   email?: string;
   note?: string;
+  guestCount?: number;
   floorPlanRoomIds?: string[];
   floorPlanTables?: PlacedTable[];
   floorPlanChairs?: PlacedChair[];
@@ -8502,9 +8503,8 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
   const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan">("forside");
     const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
-    const [plannerGuestCount, setPlannerGuestCount] = useState(50);
     const [plannerMargin, setPlannerMargin] = useState(40);
-    const [plannerSpacing, setPlannerSpacing] = useState(25);
+    const [plannerSpacing, setPlannerSpacing] = useState(70);
     const [plannerTableTypeId, setPlannerTableTypeId] = useState("");
     const [plannerSelectedTableId, setPlannerSelectedTableId] = useState<string | null>(null);
     const [dragTableId, setDragTableId] = useState<string | null>(null);
@@ -8516,6 +8516,7 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
   );
 
   const [rental, setRental] = useState<RentalOffer>(() => ({ ...initialData.rental }));
+  const plannerGuestCount = rental.guestCount || 0;
 
   const addonLines = rental.extraLines || [];
   const addonTotal = addonLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
@@ -9096,27 +9097,80 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
   }
 
   function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number, margin: number, spacing: number): PlacedTable[] {
-    const footprintW = tableType.width + tableType.chairDepth * 2 + spacing;
-    const footprintL = (tableType.shape === "rund" ? tableType.width : tableType.length) + tableType.chairDepth * 2 + spacing;
     const tablesNeeded = Math.max(1, Math.ceil(guestCount / Math.max(tableType.seats, 1)));
-    const cols = Math.max(1, Math.floor((room.width - margin * 2) / footprintW));
+    const blockers = [...room.obstacles, ...(room.exclusionZones || [])];
+
+    function fillGrid(footprintW: number, footprintL: number, rotation: number): PlacedTable[] {
+      const cols = Math.max(1, Math.floor((room.width - margin * 2) / footprintW));
+      const placed: PlacedTable[] = [];
+      let row = 0, col = 0, attempts = 0;
+      while (placed.length < tablesNeeded && attempts < 500) {
+        attempts++;
+        const x = margin + col * footprintW + footprintW / 2;
+        const y = margin + row * footprintL + footprintL / 2;
+        if (y + footprintL / 2 > room.length - margin) break;
+        const overlaps = blockers.some((o) => {
+          const left = x - footprintW / 2, right = x + footprintW / 2, top = y - footprintL / 2, bottom = y + footprintL / 2;
+          return !(right < o.x || left > o.x + o.width || bottom < o.y || top > o.y + o.height);
+        });
+        if (!overlaps) {
+          placed.push({ id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`, tableTypeId: tableType.id, roomId: room.id, x: Math.round(x), y: Math.round(y), rotation, chairSides: tableType.defaultChairSides });
+        }
+        col++;
+        if (col >= cols) { col = 0; row++; }
+      }
+      return placed;
+    }
+
+    const dimA = tableType.width + tableType.chairDepth * 2 + spacing;
+    const dimB = (tableType.shape === "rund" ? tableType.width : tableType.length) + tableType.chairDepth * 2 + spacing;
+    const optionNormal = fillGrid(dimA, dimB, 0);
+    if (tableType.shape === "rund" || dimA === dimB) return optionNormal;
+    const optionRotated = fillGrid(dimB, dimA, 90);
+    return optionRotated.length > optionNormal.length ? optionRotated : optionNormal;
+  }
+
+  function suggestLongTables(room: Room, tableType: TableType, guestCount: number, margin: number, spacing: number): PlacedTable[] {
+    const tablesNeeded = Math.max(1, Math.ceil(guestCount / Math.max(tableType.seats, 1)));
+    const blockers = [...room.obstacles, ...(room.exclusionZones || [])];
+    const length = tableType.shape === "rund" ? tableType.width : tableType.length;
+    const rowDepth = tableType.width + tableType.chairDepth * 2;
+    const maxPerRow = Math.max(1, Math.floor((room.width - margin * 2) / length));
+    const rowCounts: number[] = [];
+    let remaining = tablesNeeded;
+    while (remaining > 0) {
+      const count = Math.min(remaining, maxPerRow);
+      rowCounts.push(count);
+      remaining -= count;
+    }
     const placed: PlacedTable[] = [];
-    let row = 0, col = 0, attempts = 0;
-    while (placed.length < tablesNeeded && attempts < 500) {
-      attempts++;
-      const x = margin + col * footprintW + footprintW / 2;
-      const y = margin + row * footprintL + footprintL / 2;
-      if (y + footprintL / 2 > room.length - margin) break;
-      const blockers = [...room.obstacles, ...(room.exclusionZones || [])];
-      const overlaps = blockers.some((o) => {
-        const left = x - footprintW / 2, right = x + footprintW / 2, top = y - footprintL / 2, bottom = y + footprintL / 2;
+    let y = margin + rowDepth / 2;
+    for (const count of rowCounts) {
+      if (y + rowDepth / 2 > room.length - margin) break;
+      const rowLength = count * length;
+      const startX = margin + (room.width - margin * 2 - rowLength) / 2 + length / 2;
+      const groupId = `grp-${Date.now()}-${placed.length}`;
+      const rowOverlaps = blockers.some((o) => {
+        const left = startX - length / 2, right = startX - length / 2 + rowLength, top = y - rowDepth / 2, bottom = y + rowDepth / 2;
         return !(right < o.x || left > o.x + o.width || bottom < o.y || top > o.y + o.height);
       });
-      if (!overlaps) {
-        placed.push({ id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`, tableTypeId: tableType.id, roomId: room.id, x: Math.round(x), y: Math.round(y), rotation: 0, chairSides: tableType.defaultChairSides });
+      if (!rowOverlaps) {
+        for (let i = 0; i < count; i++) {
+          const isFirst = i === 0, isLast = i === count - 1;
+          const chairSides: ChairSides = { north: true, south: true, east: isLast, west: isFirst };
+          placed.push({
+            id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`,
+            tableTypeId: tableType.id,
+            roomId: room.id,
+            x: Math.round(startX + i * length),
+            y: Math.round(y),
+            rotation: 0,
+            groupId,
+            chairSides,
+          });
+        }
       }
-      col++;
-      if (col >= cols) { col = 0; row++; }
+      y += rowDepth + spacing;
     }
     return placed;
   }
@@ -9125,7 +9179,9 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const room = roomById(plannerActiveRoomId);
     const tt = tableTypeById(plannerTableTypeId);
     if (!room || !tt) { alert("Velg rom og bordtype først."); return; }
-    const suggested = suggestTablePlacement(room, tt, plannerGuestCount, plannerMargin, plannerSpacing);
+    const suggested = tt.joinable
+      ? suggestLongTables(room, tt, plannerGuestCount, plannerMargin, plannerSpacing)
+      : suggestTablePlacement(room, tt, plannerGuestCount, plannerMargin, plannerSpacing);
     const otherRooms = (rental.floorPlanTables || []).filter((t) => t.roomId !== room.id);
     const otherTypesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id && t.tableTypeId !== tt.id);
     setRental({ ...rental, floorPlanTables: [...otherRooms, ...otherTypesInRoom, ...suggested] });
@@ -9535,6 +9591,8 @@ ${opts.produksjon ? productionPageHtml : ""}
                   <label>E-post<input type="email" value={rental.email || ""} onChange={(e) => setRental({ ...rental, email: e.target.value })} placeholder="E-postadresse" /></label>
                 </div>
 
+                <label>Antall gjester<input type="number" value={rental.guestCount || 0} onChange={(e) => setRental({ ...rental, guestCount: Number(e.target.value) || 0 })} /></label>
+
                 <label>Lokale
                   <select value={rental.venueExternal ? "__extern__" : rental.venue} onChange={(e) => {
                     if (e.target.value === "__extern__") {
@@ -9781,7 +9839,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                           )}
 
                           <div className="form-grid four" style={{ marginTop: 8 }}>
-                            <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setPlannerGuestCount(Number(e.target.value) || 0)} /></label>
+                            <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setRental({ ...rental, guestCount: Number(e.target.value) || 0 })} /></label>
                             <label>Margin til vegg (cm)<input type="number" value={plannerMargin} onChange={(e) => setPlannerMargin(Number(e.target.value) || 0)} /></label>
                             <label>Gangareal mellom bord (cm)<input type="number" value={plannerSpacing} onChange={(e) => setPlannerSpacing(Number(e.target.value) || 0)} /></label>
                             <label>Bordtype
