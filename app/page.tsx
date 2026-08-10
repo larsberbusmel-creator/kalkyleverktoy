@@ -308,7 +308,8 @@ type CalendarNote = {
 
 type RoomOpening = { id: string; type: "dør" | "vindu"; wall: "nord" | "øst" | "sør" | "vest"; position: number; width: number };
 type RoomObstacle = { id: string; type: "søyle" | "flygel/piano" | "annet"; x: number; y: number; width: number; height: number; label?: string };
-type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; notes?: string };
+type RoomExclusionZone = { id: string; x: number; y: number; width: number; height: number; label?: string };
+type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; exclusionZones?: RoomExclusionZone[]; notes?: string };
 type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet" };
 
 type AppData = {
@@ -8956,7 +8957,8 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
       const x = margin + col * footprintW + footprintW / 2;
       const y = margin + row * footprintL + footprintL / 2;
       if (y + footprintL / 2 > room.length - margin) break;
-      const overlaps = room.obstacles.some((o) => {
+      const blockers = [...room.obstacles, ...(room.exclusionZones || [])];
+      const overlaps = blockers.some((o) => {
         const left = x - footprintW / 2, right = x + footprintW / 2, top = y - footprintL / 2, bottom = y + footprintL / 2;
         return !(right < o.x || left > o.x + o.width || bottom < o.y || top > o.y + o.height);
       });
@@ -9643,6 +9645,12 @@ ${opts.produksjon ? productionPageHtml : ""}
                                     {plannerWallSegments(activeRoom, "sør", 0, roomPxH, roomPxW, roomPxH, true, scale)}
                                     {plannerWallSegments(activeRoom, "vest", 0, 0, 0, roomPxH, false, scale)}
                                     {plannerWallSegments(activeRoom, "øst", roomPxW, 0, roomPxW, roomPxH, false, scale)}
+                                    {(activeRoom.exclusionZones || []).map((z) => (
+                                      <g key={z.id}>
+                                        <rect x={z.x * scale} y={z.y * scale} width={z.width * scale} height={z.height * scale} fill="#fef9c3" stroke="#ca8a04" strokeWidth={1} strokeDasharray="5 3" opacity={0.7} />
+                                        {z.label && <text x={z.x * scale + 4} y={z.y * scale + 14} fontSize={10} fill="#854d0e">{z.label}</text>}
+                                      </g>
+                                    ))}
                                     {activeRoom.obstacles.map((o) => (
                                       <g key={o.id}>
                                         <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
@@ -9808,9 +9816,10 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
   const [roomForm, setRoomForm] = useState<Room>({ id: "", name: "", width: 800, length: 600, openings: [], obstacles: [] });
   const [openingForm, setOpeningForm] = useState<Omit<RoomOpening, "id">>({ type: "dør", wall: "nord", position: 0, width: 90 });
   const [obstacleForm, setObstacleForm] = useState<Omit<RoomObstacle, "id">>({ type: "søyle", x: 0, y: 0, width: 40, height: 40, label: "" });
+  const [zoneForm, setZoneForm] = useState<Omit<RoomExclusionZone, "id">>({ x: 0, y: 0, width: 60, height: 60, label: "" });
 
   function resetRoomForm() {
-    setRoomForm({ id: "", name: "", width: 800, length: 600, openings: [], obstacles: [] });
+    setRoomForm({ id: "", name: "", width: 800, length: 600, openings: [], obstacles: [], exclusionZones: [] });
     setEditingRoomId(null);
   }
 
@@ -9844,6 +9853,12 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
   }
   function removeObstacle(id: string) {
     setRoomForm({ ...roomForm, obstacles: roomForm.obstacles.filter((o) => o.id !== id) });
+  }
+  function addZone() {
+    setRoomForm({ ...roomForm, exclusionZones: [...(roomForm.exclusionZones || []), { ...zoneForm, id: `ez-${Date.now()}` }] });
+  }
+  function removeZone(id: string) {
+    setRoomForm({ ...roomForm, exclusionZones: (roomForm.exclusionZones || []).filter((z) => z.id !== id) });
   }
 
   const [editingTableTypeId, setEditingTableTypeId] = useState<string | null>(null);
@@ -9987,6 +10002,29 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
             </table>
           )}
 
+          <h4 style={{ marginTop: 16 }}>Skjulte soner (unngås ved bordforslag, vises aldri på utskrift)</h4>
+          <div className="form-grid four">
+            <label>Navn (valgfritt)<input value={zoneForm.label || ""} onChange={(e) => setZoneForm({ ...zoneForm, label: e.target.value })} placeholder="F.eks. Ved inngangsdør" /></label>
+            <label>X fra venstre (cm)<input type="number" value={zoneForm.x} onChange={(e) => setZoneForm({ ...zoneForm, x: Number(e.target.value) || 0 })} /></label>
+            <label>Y fra topp (cm)<input type="number" value={zoneForm.y} onChange={(e) => setZoneForm({ ...zoneForm, y: Number(e.target.value) || 0 })} /></label>
+            <label>Bredde (cm)<input type="number" value={zoneForm.width} onChange={(e) => setZoneForm({ ...zoneForm, width: Number(e.target.value) || 0 })} /></label>
+            <label>Dybde (cm)<input type="number" value={zoneForm.height} onChange={(e) => setZoneForm({ ...zoneForm, height: Number(e.target.value) || 0 })} /></label>
+          </div>
+          <button className="btn" onClick={addZone}>Legg til skjult sone</button>
+          {(roomForm.exclusionZones || []).length > 0 && (
+            <table style={{ marginTop: 8 }}>
+              <thead><tr><th>Navn</th><th>Posisjon</th><th>Størrelse</th><th></th></tr></thead>
+              <tbody>
+                {(roomForm.exclusionZones || []).map((z) => (
+                  <tr key={z.id}>
+                    <td>{z.label || "-"}</td><td>{z.x}, {z.y} cm</td><td>{z.width}×{z.height} cm</td>
+                    <td><button className="link danger" onClick={() => removeZone(z.id)}>Slett</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
           <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
             <button className="btn active" onClick={saveRoom}>{editingRoomId ? "Lagre endringer" : "Lagre rom"}</button>
             {editingRoomId && <button className="btn" onClick={resetRoomForm}>Avbryt</button>}
@@ -10002,6 +10040,12 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
                 {renderWallWithOpenings("sør", 0, roomPxH, roomPxW, roomPxH, true)}
                 {renderWallWithOpenings("vest", 0, 0, 0, roomPxH, false)}
                 {renderWallWithOpenings("øst", roomPxW, 0, roomPxW, roomPxH, false)}
+                {(roomForm.exclusionZones || []).map((z) => (
+                  <g key={z.id}>
+                    <rect x={z.x * scale} y={z.y * scale} width={z.width * scale} height={z.height * scale} fill="#fef9c3" stroke="#ca8a04" strokeWidth={1} strokeDasharray="5 3" opacity={0.7} />
+                    {z.label && <text x={z.x * scale + 4} y={z.y * scale + 14} fontSize={10} fill="#854d0e">{z.label}</text>}
+                  </g>
+                ))}
                 {roomForm.obstacles.map((o) => (
                   <g key={o.id}>
                     <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
@@ -10011,7 +10055,7 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
               </g>
             </svg>
           ) : <p className="muted">Fyll inn bredde og lengde for å se forhåndsvisning.</p>}
-          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Oransje = dør, blå = vindu, rød boks = hindring.</p>
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Oransje = dør, blå = vindu, rød boks = hindring, gul stiplet = skjult sone.</p>
         </div>
       </div>
 
