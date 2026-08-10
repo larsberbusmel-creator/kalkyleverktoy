@@ -9320,7 +9320,7 @@ ${opts.produksjon ? productionPageHtml : ""}
 
       {showNewOffer && (
         <>
-        <div className="grid two">
+        <div className="grid two" style={{ gridTemplateColumns: "1fr" }}>
           <div className="card">
             <div className="between">
               <h2>{editingOfferId ? "Rediger tilbud" : "Nytt tilbud"}</h2>
@@ -9490,7 +9490,70 @@ ${opts.produksjon ? productionPageHtml : ""}
                   <input type="checkbox" checked={!!rental.runSheetEnabled} onChange={(e) => setRental({ ...rental, runSheetEnabled: e.target.checked })} />
                   Lag kjøreplan
                 </label>
-                {rental.runSheetEnabled && <p style={{ color: "#64748b", fontSize: 13 }}>Selve kjøreplanen redigerer du i boksen under (mer plass der).</p>}
+                {rental.runSheetEnabled && (
+                  <>
+                    <div className="form-grid four">
+                      <label>Oppgave
+                        <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
+                      </label>
+                      <label>Ansvar (valgfritt)
+                        <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
+                      </label>
+                      <label>Tidspunkt (valgfritt)
+                        <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
+                      </label>
+                      <label>Gruppe
+                        <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
+                          <option value="">(Ingen gruppe)</option>
+                          {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                          <option value="__new__">+ Ny gruppe...</option>
+                        </select>
+                      </label>
+                    </div>
+                    {runSheetForm.groupLabel === "__new__" && (
+                      <label>Navn på ny gruppe
+                        <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
+                      </label>
+                    )}
+                    <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
+
+                    {runSheetItems.length > 0 && (
+                      <table style={{ marginTop: 16 }}>
+                        <thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th><th>Gruppe</th><th></th></tr></thead>
+                        <tbody>
+                          {runSheetItems.map((item, i) => {
+                            const showGroupHeader = item.groupLabel && item.groupLabel !== runSheetItems[i - 1]?.groupLabel;
+                            return (
+                              <React.Fragment key={item.id}>
+                                {showGroupHeader && (
+                                  <tr style={{ background: runSheetGroupColor(item.groupLabel!) }}>
+                                    <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700 }}>{item.groupLabel}</td>
+                                  </tr>
+                                )}
+                                <tr>
+                                  <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
+                                  <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
+                                  <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} onBlur={sortRunSheetNow} placeholder="-" /></td>
+                                  <td>
+                                    <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
+                                      <option value="">(Ingen gruppe)</option>
+                                      {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
+                                    </select>
+                                  </td>
+                                  <td style={{ whiteSpace: "nowrap" }}>
+                                    <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
+                                    <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
+                                    <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
+                                  </td>
+                                </tr>
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </>
+                )}
               </>
             )}
 
@@ -9508,9 +9571,146 @@ ${opts.produksjon ? productionPageHtml : ""}
               </div>
             )}
 
-            {rentalSubTab === "bordplan" && (
-              <p style={{ color: "#64748b", fontSize: 13 }}>Bordplanleggeren ligger i boksen under (mer plass der).</p>
-            )}
+            {rentalSubTab === "bordplan" && (() => {
+              const venueObj = data.venues.find((v) => v.name === rental.venue);
+              const availableRoomIds = venueObj?.roomIds || [];
+              const availableRooms = (data.rooms || []).filter((r) => availableRoomIds.includes(r.id));
+              const selectedRoomIds = (rental.floorPlanRoomIds || []).filter((id) => availableRoomIds.includes(id));
+              const activeRoomId = plannerActiveRoomId && selectedRoomIds.includes(plannerActiveRoomId) ? plannerActiveRoomId : (selectedRoomIds[0] || "");
+              const activeRoom = roomById(activeRoomId);
+              const scale = activeRoom ? Math.min(680 / Math.max(activeRoom.width, 1), 480 / Math.max(activeRoom.length, 1)) : 1;
+              const roomPxW = activeRoom ? activeRoom.width * scale : 0;
+              const roomPxH = activeRoom ? activeRoom.length * scale : 0;
+              const tablesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === activeRoomId);
+              const selectedTable = tablesInRoom.find((t) => t.id === plannerSelectedTableId);
+
+              return (
+                <>
+                  {availableRooms.length === 0 ? (
+                    <p className="muted">Ingen rom er koblet til lokalet "{rental.venue}" ennå. Gå til Innstillinger → Rombibliotek for å koble rom til lokalet.</p>
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: 8 }}>
+                        <b style={{ fontSize: 13 }}>Rom som skal planlegges:</b>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                          {availableRooms.map((r) => (
+                            <button key={r.id} type="button" className={selectedRoomIds.includes(r.id) ? "btn active" : "btn"} onClick={() => toggleRoomSelected(r.id)}>{r.name}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {selectedRoomIds.length > 0 && (
+                        <>
+                          {selectedRoomIds.length > 1 && (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
+                              {selectedRoomIds.map((id) => {
+                                const r = roomById(id);
+                                return r ? <button key={id} type="button" className={activeRoomId === id ? "btn active" : "btn"} onClick={() => setPlannerActiveRoomId(id)}>{r.name}</button> : null;
+                              })}
+                            </div>
+                          )}
+
+                          <div className="form-grid four" style={{ marginTop: 8 }}>
+                            <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setPlannerGuestCount(Number(e.target.value) || 0)} /></label>
+                            <label>Bordtype
+                              <select value={plannerTableTypeId} onChange={(e) => setPlannerTableTypeId(e.target.value)}>
+                                <option value="">Velg bordtype...</option>
+                                {(data.tableTypes || []).filter((t) => t.category === "gjestebord").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                              </select>
+                            </label>
+                            <button className="btn active" style={{ alignSelf: "end" }} onClick={runSuggestion}>Foreslå bordoppsett</button>
+                            <label>Legg til enkeltbord
+                              <select value="" onChange={(e) => { if (e.target.value) addManualTable(e.target.value); }}>
+                                <option value="">Velg type...</option>
+                                {(data.tableTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name} ({t.category})</option>)}
+                              </select>
+                            </label>
+                          </div>
+
+                          {activeRoom && (
+                            <div className="grid two" style={{ marginTop: 12 }}>
+                              <div>
+                                <svg
+                                  ref={svgRef}
+                                  viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`}
+                                  style={{ width: "100%", maxWidth: 680, background: "#f8fafc", borderRadius: 8, touchAction: "none" }}
+                                  onPointerMove={(e) => onSvgPointerMove(e, scale)}
+                                  onPointerUp={onSvgPointerUp}
+                                  onPointerLeave={onSvgPointerUp}
+                                >
+                                  <g transform="translate(20,20)">
+                                    {plannerWallSegments(activeRoom, "nord", 0, 0, roomPxW, 0, true, scale)}
+                                    {plannerWallSegments(activeRoom, "sør", 0, roomPxH, roomPxW, roomPxH, true, scale)}
+                                    {plannerWallSegments(activeRoom, "vest", 0, 0, 0, roomPxH, false, scale)}
+                                    {plannerWallSegments(activeRoom, "øst", roomPxW, 0, roomPxW, roomPxH, false, scale)}
+                                    {activeRoom.obstacles.map((o) => (
+                                      <g key={o.id}>
+                                        <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
+                                        {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
+                                      </g>
+                                    ))}
+                                    {tablesInRoom.map((t, idx) => {
+                                      const tt = tableTypeById(t.tableTypeId);
+                                      if (!tt) return null;
+                                      const isRound = tt.shape === "rund";
+                                      const w = tt.width * scale;
+                                      const l = (isRound ? tt.width : tt.length) * scale;
+                                      const chair = tt.chairDepth * scale;
+                                      const selected = plannerSelectedTableId === t.id;
+                                      return (
+                                        <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
+                                          {isRound ? (
+                                            <>
+                                              <circle r={w / 2 + chair} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
+                                              <circle r={w / 2} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
+                                            </>
+                                          ) : (
+                                            <>
+                                              <rect x={-w / 2 - chair} y={-l / 2 - chair} width={w + chair * 2} height={l + chair * 2} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
+                                              <rect x={-w / 2} y={-l / 2} width={w} height={l} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
+                                            </>
+                                          )}
+                                          <text textAnchor="middle" dy={4} fontSize={12} fontWeight={700}>{idx + 1}</text>
+                                        </g>
+                                      );
+                                    })}
+                                  </g>
+                                </svg>
+                                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene for å flytte. Klikk for å velge og redigere.</p>
+                              </div>
+
+                              <div>
+                                <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
+                                {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
+                                {tablesInRoom.map((t, idx) => (
+                                  <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
+                                    <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}</span>
+                                    <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
+                                    <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
+                                  </div>
+                                ))}
+                                {selectedTable && (
+                                  <div className="soft-box" style={{ marginTop: 12 }}>
+                                    <label>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
+                                      <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
+                                    </label>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                            <button className="btn" onClick={printRiggingDocument}>Skriv ut riggedokument</button>
+                            <button className="btn" onClick={printGuestIllustration}>Skriv ut gjesteillustrasjon</button>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           <div className="card">
@@ -9557,357 +9757,7 @@ ${opts.produksjon ? productionPageHtml : ""}
           </div>
         </div>
 
-        {rentalSubTab === "kjoreplan" && rental.runSheetEnabled && (
-          <div className="card" style={{ marginTop: 18 }}>
-            <h2>Kjøreplan</h2>
-            <div className="form-grid four">
-              <label>Oppgave
-                <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
-              </label>
-              <label>Ansvar (valgfritt)
-                <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
-              </label>
-              <label>Tidspunkt (valgfritt)
-                <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
-              </label>
-              <label>Gruppe
-                <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
-                  <option value="">(Ingen gruppe)</option>
-                  {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
-                  <option value="__new__">+ Ny gruppe...</option>
-                </select>
-              </label>
-            </div>
-            {runSheetForm.groupLabel === "__new__" && (
-              <label>Navn på ny gruppe
-                <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
-              </label>
-            )}
-            <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
-
-            {runSheetItems.length > 0 && (
-              <table style={{ marginTop: 16 }}>
-                <thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th><th>Gruppe</th><th></th></tr></thead>
-                <tbody>
-                  {runSheetItems.map((item, i) => {
-                    const showGroupHeader = item.groupLabel && item.groupLabel !== runSheetItems[i - 1]?.groupLabel;
-                    return (
-                      <React.Fragment key={item.id}>
-                        {showGroupHeader && (
-                          <tr style={{ background: runSheetGroupColor(item.groupLabel!) }}>
-                            <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700 }}>{item.groupLabel}</td>
-                          </tr>
-                        )}
-                        <tr>
-                          <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
-                          <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
-                          <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} onBlur={sortRunSheetNow} placeholder="-" /></td>
-                          <td>
-                            <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
-                              <option value="">(Ingen gruppe)</option>
-                              {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
-                            </select>
-                          </td>
-                          <td style={{ whiteSpace: "nowrap" }}>
-                            <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
-                            <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
-                            <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
-                          </td>
-                        </tr>
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-
-        {rentalSubTab === "bordplan" && (() => {
-          const venueObj = data.venues.find((v) => v.name === rental.venue);
-          const availableRoomIds = venueObj?.roomIds || [];
-          const availableRooms = (data.rooms || []).filter((r) => availableRoomIds.includes(r.id));
-          const selectedRoomIds = (rental.floorPlanRoomIds || []).filter((id) => availableRoomIds.includes(id));
-          const activeRoomId = plannerActiveRoomId && selectedRoomIds.includes(plannerActiveRoomId) ? plannerActiveRoomId : (selectedRoomIds[0] || "");
-          const activeRoom = roomById(activeRoomId);
-          const scale = activeRoom ? Math.min(680 / Math.max(activeRoom.width, 1), 480 / Math.max(activeRoom.length, 1)) : 1;
-          const roomPxW = activeRoom ? activeRoom.width * scale : 0;
-          const roomPxH = activeRoom ? activeRoom.length * scale : 0;
-          const tablesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === activeRoomId);
-          const selectedTable = tablesInRoom.find((t) => t.id === plannerSelectedTableId);
-
-          return (
-            <div className="card" style={{ marginTop: 18 }}>
-              <h2>Bordplan</h2>
-
-              {availableRooms.length === 0 ? (
-                <p className="muted">Ingen rom er koblet til lokalet "{rental.venue}" ennå. Gå til Innstillinger → Rombibliotek for å koble rom til lokalet.</p>
-              ) : (
-                <>
-                  <div style={{ marginBottom: 8 }}>
-                    <b style={{ fontSize: 13 }}>Rom som skal planlegges:</b>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
-                      {availableRooms.map((r) => (
-                        <button key={r.id} type="button" className={selectedRoomIds.includes(r.id) ? "btn active" : "btn"} onClick={() => toggleRoomSelected(r.id)}>{r.name}</button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {selectedRoomIds.length > 0 && (
-                    <>
-                      {selectedRoomIds.length > 1 && (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
-                          {selectedRoomIds.map((id) => {
-                            const r = roomById(id);
-                            return r ? <button key={id} type="button" className={activeRoomId === id ? "btn active" : "btn"} onClick={() => setPlannerActiveRoomId(id)}>{r.name}</button> : null;
-                          })}
-                        </div>
-                      )}
-
-                      <div className="form-grid four" style={{ marginTop: 8 }}>
-                        <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setPlannerGuestCount(Number(e.target.value) || 0)} /></label>
-                        <label>Bordtype
-                          <select value={plannerTableTypeId} onChange={(e) => setPlannerTableTypeId(e.target.value)}>
-                            <option value="">Velg bordtype...</option>
-                            {(data.tableTypes || []).filter((t) => t.category === "gjestebord").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                          </select>
-                        </label>
-                        <button className="btn active" style={{ alignSelf: "end" }} onClick={runSuggestion}>Foreslå bordoppsett</button>
-                        <label>Legg til enkeltbord
-                          <select value="" onChange={(e) => { if (e.target.value) addManualTable(e.target.value); }}>
-                            <option value="">Velg type...</option>
-                            {(data.tableTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name} ({t.category})</option>)}
-                          </select>
-                        </label>
-                      </div>
-
-                      {activeRoom && (
-                        <div className="grid two" style={{ marginTop: 12 }}>
-                          <div>
-                            <svg
-                              ref={svgRef}
-                              viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`}
-                              style={{ width: "100%", maxWidth: 680, background: "#f8fafc", borderRadius: 8, touchAction: "none" }}
-                              onPointerMove={(e) => onSvgPointerMove(e, scale)}
-                              onPointerUp={onSvgPointerUp}
-                              onPointerLeave={onSvgPointerUp}
-                            >
-                              <g transform="translate(20,20)">
-                                {plannerWallSegments(activeRoom, "nord", 0, 0, roomPxW, 0, true, scale)}
-                                {plannerWallSegments(activeRoom, "sør", 0, roomPxH, roomPxW, roomPxH, true, scale)}
-                                {plannerWallSegments(activeRoom, "vest", 0, 0, 0, roomPxH, false, scale)}
-                                {plannerWallSegments(activeRoom, "øst", roomPxW, 0, roomPxW, roomPxH, false, scale)}
-                                {activeRoom.obstacles.map((o) => (
-                                  <g key={o.id}>
-                                    <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
-                                    {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
-                                  </g>
-                                ))}
-                                {tablesInRoom.map((t, idx) => {
-                                  const tt = tableTypeById(t.tableTypeId);
-                                  if (!tt) return null;
-                                  const isRound = tt.shape === "rund";
-                                  const w = tt.width * scale;
-                                  const l = (isRound ? tt.width : tt.length) * scale;
-                                  const chair = tt.chairDepth * scale;
-                                  const selected = plannerSelectedTableId === t.id;
-                                  return (
-                                    <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
-                                      {isRound ? (
-                                        <>
-                                          <circle r={w / 2 + chair} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
-                                          <circle r={w / 2} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
-                                        </>
-                                      ) : (
-                                        <>
-                                          <rect x={-w / 2 - chair} y={-l / 2 - chair} width={w + chair * 2} height={l + chair * 2} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
-                                          <rect x={-w / 2} y={-l / 2} width={w} height={l} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
-                                        </>
-                                      )}
-                                      <text textAnchor="middle" dy={4} fontSize={12} fontWeight={700}>{idx + 1}</text>
-                                    </g>
-                                  );
-                                })}
-                              </g>
-                            </svg>
-                            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene for å flytte. Klikk for å velge og redigere.</p>
-                          </div>
-
-                          <div>
-                            <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
-                            {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
-                            {tablesInRoom.map((t, idx) => (
-                              <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
-                                <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}</span>
-                                <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
-                                <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
-                              </div>
-                            ))}
-                            {selectedTable && (
-                              <div className="soft-box" style={{ marginTop: 12 }}>
-                                <label>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
-                                  <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
-                                </label>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-                        <button className="btn" onClick={printRiggingDocument}>Skriv ut riggedokument</button>
-                        <button className="btn" onClick={printGuestIllustration}>Skriv ut gjesteillustrasjon</button>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })()}
-
-        {rentalSubTab === "bordplan" && (() => {
-          const venueObj = data.venues.find((v) => v.name === rental.venue);
-          const availableRoomIds = venueObj?.roomIds || [];
-          const availableRooms = (data.rooms || []).filter((r) => availableRoomIds.includes(r.id));
-          const selectedRoomIds = (rental.floorPlanRoomIds || []).filter((id) => availableRoomIds.includes(id));
-          const activeRoomId = plannerActiveRoomId && selectedRoomIds.includes(plannerActiveRoomId) ? plannerActiveRoomId : (selectedRoomIds[0] || "");
-          const activeRoom = roomById(activeRoomId);
-          const scale = activeRoom ? Math.min(680 / Math.max(activeRoom.width, 1), 480 / Math.max(activeRoom.length, 1)) : 1;
-          const roomPxW = activeRoom ? activeRoom.width * scale : 0;
-          const roomPxH = activeRoom ? activeRoom.length * scale : 0;
-          const tablesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === activeRoomId);
-          const selectedTable = tablesInRoom.find((t) => t.id === plannerSelectedTableId);
-
-          return (
-            <div className="card" style={{ marginTop: 18 }}>
-              <h2>Bordplan</h2>
-
-              {availableRooms.length === 0 ? (
-                <p className="muted">Ingen rom er koblet til lokalet "{rental.venue}" ennå. Gå til Innstillinger → Rombibliotek for å koble rom til lokalet.</p>
-              ) : (
-                <>
-                  <div style={{ marginBottom: 8 }}>
-                    <b style={{ fontSize: 13 }}>Rom som skal planlegges:</b>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
-                      {availableRooms.map((r) => (
-                        <button key={r.id} type="button" className={selectedRoomIds.includes(r.id) ? "btn active" : "btn"} onClick={() => toggleRoomSelected(r.id)}>{r.name}</button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {selectedRoomIds.length > 0 && (
-                    <>
-                      {selectedRoomIds.length > 1 && (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
-                          {selectedRoomIds.map((id) => {
-                            const r = roomById(id);
-                            return r ? <button key={id} type="button" className={activeRoomId === id ? "btn active" : "btn"} onClick={() => setPlannerActiveRoomId(id)}>{r.name}</button> : null;
-                          })}
-                        </div>
-                      )}
-
-                      <div className="form-grid four" style={{ marginTop: 8 }}>
-                        <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setPlannerGuestCount(Number(e.target.value) || 0)} /></label>
-                        <label>Bordtype
-                          <select value={plannerTableTypeId} onChange={(e) => setPlannerTableTypeId(e.target.value)}>
-                            <option value="">Velg bordtype...</option>
-                            {(data.tableTypes || []).filter((t) => t.category === "gjestebord").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                          </select>
-                        </label>
-                        <button className="btn active" style={{ alignSelf: "end" }} onClick={runSuggestion}>Foreslå bordoppsett</button>
-                        <label>Legg til enkeltbord
-                          <select value="" onChange={(e) => { if (e.target.value) addManualTable(e.target.value); }}>
-                            <option value="">Velg type...</option>
-                            {(data.tableTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name} ({t.category})</option>)}
-                          </select>
-                        </label>
-                      </div>
-
-                      {activeRoom && (
-                        <div className="grid two" style={{ marginTop: 12 }}>
-                          <div>
-                            <svg
-                              ref={svgRef}
-                              viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`}
-                              style={{ width: "100%", maxWidth: 680, background: "#f8fafc", borderRadius: 8, touchAction: "none" }}
-                              onPointerMove={(e) => onSvgPointerMove(e, scale)}
-                              onPointerUp={onSvgPointerUp}
-                              onPointerLeave={onSvgPointerUp}
-                            >
-                              <g transform="translate(20,20)">
-                                {plannerWallSegments(activeRoom, "nord", 0, 0, roomPxW, 0, true, scale)}
-                                {plannerWallSegments(activeRoom, "sør", 0, roomPxH, roomPxW, roomPxH, true, scale)}
-                                {plannerWallSegments(activeRoom, "vest", 0, 0, 0, roomPxH, false, scale)}
-                                {plannerWallSegments(activeRoom, "øst", roomPxW, 0, roomPxW, roomPxH, false, scale)}
-                                {activeRoom.obstacles.map((o) => (
-                                  <g key={o.id}>
-                                    <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
-                                    {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
-                                  </g>
-                                ))}
-                                {tablesInRoom.map((t, idx) => {
-                                  const tt = tableTypeById(t.tableTypeId);
-                                  if (!tt) return null;
-                                  const isRound = tt.shape === "rund";
-                                  const w = tt.width * scale;
-                                  const l = (isRound ? tt.width : tt.length) * scale;
-                                  const chair = tt.chairDepth * scale;
-                                  const selected = plannerSelectedTableId === t.id;
-                                  return (
-                                    <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
-                                      {isRound ? (
-                                        <>
-                                          <circle r={w / 2 + chair} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
-                                          <circle r={w / 2} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
-                                        </>
-                                      ) : (
-                                        <>
-                                          <rect x={-w / 2 - chair} y={-l / 2 - chair} width={w + chair * 2} height={l + chair * 2} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
-                                          <rect x={-w / 2} y={-l / 2} width={w} height={l} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
-                                        </>
-                                      )}
-                                      <text textAnchor="middle" dy={4} fontSize={12} fontWeight={700}>{idx + 1}</text>
-                                    </g>
-                                  );
-                                })}
-                              </g>
-                            </svg>
-                            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene for å flytte. Klikk for å velge og redigere.</p>
-                          </div>
-
-                          <div>
-                            <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
-                            {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
-                            {tablesInRoom.map((t, idx) => (
-                              <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
-                                <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}</span>
-                                <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
-                                <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
-                              </div>
-                            ))}
-                            {selectedTable && (
-                              <div className="soft-box" style={{ marginTop: 12 }}>
-                                <label>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
-                                  <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
-                                </label>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-                        <button className="btn" onClick={printRiggingDocument}>Skriv ut riggedokument</button>
-                        <button className="btn" onClick={printGuestIllustration}>Skriv ut gjesteillustrasjon</button>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })()}
+               
         </>
       )}
 
