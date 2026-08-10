@@ -313,7 +313,7 @@ type RoomOpening = { id: string; type: "dør" | "vindu"; wall: "nord" | "øst" |
 type RoomObstacle = { id: string; type: "søyle" | "flygel/piano" | "annet"; x: number; y: number; width: number; height: number; label?: string };
 type RoomExclusionZone = { id: string; x: number; y: number; width: number; height: number; label?: string };
 type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; exclusionZones?: RoomExclusionZone[]; notes?: string };
-type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet"; joinable?: boolean };
+type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; chairSize?: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet"; joinable?: boolean };
 
 type AppData = {
   materials: Material[];
@@ -9001,7 +9001,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     setRental({ ...rental, floorPlanTables: tables.map((x) => x.groupId === gid ? { ...x, groupId: undefined, chairSides: undefined } : x) });
   }
 
-  function chairPositions(isRound: boolean, w: number, l: number, chairDepth: number, seats: number, sides: { north: boolean; east: boolean; south: boolean; west: boolean }) {
+  function chairPositions(isRound: boolean, w: number, l: number, chairDepth: number, chairSize: number, seats: number, sides: { north: boolean; east: boolean; south: boolean; west: boolean }) {
     if (isRound) {
       const r = w / 2 + chairDepth / 2;
       return Array.from({ length: Math.max(seats, 0) }, (_, i) => {
@@ -9014,16 +9014,20 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const perSide = Math.max(1, Math.floor(seats / activeSides.length));
     let remaining = seats;
     const chairs: { x: number; y: number; angle: number }[] = [];
+    const spacing = chairSize + 6;
     activeSides.forEach((side, si) => {
       const isLastSide = si === activeSides.length - 1;
       const count = isLastSide ? remaining : Math.min(remaining, perSide);
       remaining -= count;
+      const sideLen = (side === "north" || side === "south") ? w : l;
+      const maxSpread = Math.max(sideLen - spacing, 0);
+      const spread = count > 1 ? Math.min((count - 1) * spacing, maxSpread) : 0;
       for (let i = 0; i < count; i++) {
-        const t = count === 1 ? 0.5 : i / (count - 1);
-        if (side === "north") chairs.push({ x: -w / 2 + t * w, y: -l / 2 - chairDepth / 2, angle: 0 });
-        if (side === "south") chairs.push({ x: -w / 2 + t * w, y: l / 2 + chairDepth / 2, angle: 180 });
-        if (side === "west") chairs.push({ x: -w / 2 - chairDepth / 2, y: -l / 2 + t * l, angle: -90 });
-        if (side === "east") chairs.push({ x: w / 2 + chairDepth / 2, y: -l / 2 + t * l, angle: 90 });
+        const offset = count === 1 ? 0 : -spread / 2 + (spread / (count - 1)) * i;
+        if (side === "north") chairs.push({ x: offset, y: -l / 2 - chairDepth / 2, angle: 0 });
+        if (side === "south") chairs.push({ x: offset, y: l / 2 + chairDepth / 2, angle: 180 });
+        if (side === "west") chairs.push({ x: -w / 2 - chairDepth / 2, y: offset, angle: -90 });
+        if (side === "east") chairs.push({ x: w / 2 + chairDepth / 2, y: offset, angle: 90 });
       }
     });
     return chairs;
@@ -9233,12 +9237,12 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const pages = roomsToPrint.map((room) => {
       const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
       const scale = Math.min(680 / Math.max(room.width, 1), 480 / Math.max(room.length, 1));
-      const rows = tables.map((t, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(tableTypeName(t.tableTypeId))}</td><td>${Math.round(t.x)}, ${Math.round(t.y)} cm</td><td>${t.rotation}°</td><td>${escapeHtml(t.note || "-")}</td></tr>`).join("");
+      const rows = tables.map((t, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(tableTypeName(t.tableTypeId))}</td><td>${t.rotation}°</td><td>${escapeHtml(t.note || "-")}</td></tr>`).join("");
       return `<div class="page-break"></div>
 <h2>Riggeplan: ${escapeHtml(room.name)}</h2>
 <p>Rom: ${room.width}×${room.length} cm · ${tables.length} bord</p>
 ${renderStaticRoomSvg(room, tables, scale, true)}
-<table><thead><tr><th>#</th><th>Bordtype</th><th>Posisjon</th><th>Rotasjon</th><th>Notat</th></tr></thead><tbody>${rows}</tbody></table>`;
+<table><thead><tr><th>#</th><th>Bordtype</th><th>Rotasjon</th><th>Notat</th></tr></thead><tbody>${rows}</tbody></table>`;
     }).join("");
     const w = window.open("", "_blank");
     if (!w) return;
@@ -9744,6 +9748,18 @@ ${opts.produksjon ? productionPageHtml : ""}
                             </label>
                           </div>
 
+                          <p style={{ marginTop: 8, fontWeight: 700, fontSize: 14 }}>
+                            {(() => {
+                              const guestSeats = tablesInRoom.reduce((sum, t) => {
+                                const tt = tableTypeById(t.tableTypeId);
+                                return tt?.category === "gjestebord" ? sum + tt.seats : sum;
+                              }, 0);
+                              const diff = guestSeats - plannerGuestCount;
+                              const color = diff < 0 ? "#dc2626" : "#166534";
+                              return <span style={{ color }}>Plass til {guestSeats} av {plannerGuestCount} gjester{diff !== 0 ? ` (${diff > 0 ? "+" : ""}${diff})` : ""}</span>;
+                            })()}
+                          </p>
+
                           {activeRoom && (
                             <div className="grid two" style={{ marginTop: 12 }}>
                               <div>
@@ -9781,13 +9797,14 @@ ${opts.produksjon ? productionPageHtml : ""}
                                       const chair = tt.chairDepth * scale;
                                       const selected = plannerSelectedTableId === t.id;
                                       const sides = chairSidesFor(t);
-                                      const chairs = chairPositions(isRound, w, l, chair, tt.seats, sides);
+                                      const chairSizePx = (tt.chairSize || 45) * scale;
+                                      const chairs = chairPositions(isRound, w, l, chair, chairSizePx, tt.seats, sides);
                                       return (
                                         <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
                                           {chairs.map((c, ci) => (
                                             <g key={ci} transform={`translate(${c.x},${c.y}) rotate(${c.angle})`}>
-                                              <rect x={-7} y={-7} width={14} height={14} rx={3} fill="#fde68a" stroke="#92400e" strokeWidth={1} />
-                                              <line x1={-6} y1={-7} x2={6} y2={-7} stroke="#92400e" strokeWidth={2} />
+                                              <rect x={-chairSizePx / 2} y={-chairSizePx / 2} width={chairSizePx} height={chairSizePx} rx={3} fill="#fde68a" stroke="#92400e" strokeWidth={1} />
+                                              <line x1={-chairSizePx / 2 + 1} y1={-chairSizePx / 2} x2={chairSizePx / 2 - 1} y2={-chairSizePx / 2} stroke="#92400e" strokeWidth={2} />
                                             </g>
                                           ))}
                                           {isRound ? (
@@ -10269,6 +10286,7 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
               <label>Lengde (cm)<input type="number" value={tableTypeForm.length} onChange={(e) => setTableTypeForm({ ...tableTypeForm, length: Number(e.target.value) || 0 })} /></label>
             )}
             <label>Plass til stol rundt (cm)<input type="number" value={tableTypeForm.chairDepth} onChange={(e) => setTableTypeForm({ ...tableTypeForm, chairDepth: Number(e.target.value) || 0 })} /></label>
+            <label>Stolstørrelse (cm)<input type="number" value={tableTypeForm.chairSize || 45} onChange={(e) => setTableTypeForm({ ...tableTypeForm, chairSize: Number(e.target.value) || 45 })} /></label>
           </div>
           {tableTypeForm.shape !== "rund" && (
             <label className="check" style={{ marginTop: 8 }}>
