@@ -151,7 +151,9 @@ type RentalProductLine = { productId: string; guests: number };
 
 type RunSheetItem = { id: string; task: string; responsible?: string; time?: string; groupLabel?: string };
 
-type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string };
+type ChairSides = { north?: boolean; east?: boolean; south?: boolean; west?: boolean };
+type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string; chairSides?: ChairSides };
+type PlacedChair = { id: string; roomId: string; x: number; y: number; rotation: number };
 
 type RentalOffer = {
   id?: string;
@@ -162,6 +164,7 @@ type RentalOffer = {
   note?: string;
   floorPlanRoomIds?: string[];
   floorPlanTables?: PlacedTable[];
+  floorPlanChairs?: PlacedChair[];
   venue: string;
   venuePrice: number;
   venueExternal?: boolean;
@@ -8948,6 +8951,23 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     setGroupSelection((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   }
 
+  function chairSidesFor(t: PlacedTable): { north: boolean; east: boolean; south: boolean; west: boolean } {
+    return {
+      north: t.chairSides?.north !== false,
+      east: t.chairSides?.east !== false,
+      south: t.chairSides?.south !== false,
+      west: t.chairSides?.west !== false,
+    };
+  }
+
+  function toggleChairSide(id: string, side: "north" | "east" | "south" | "west") {
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => {
+      if (t.id !== id) return t;
+      const current = chairSidesFor(t);
+      return { ...t, chairSides: { ...current, [side]: !current[side] } };
+    }) });
+  }
+
   function joinIntoLongTable() {
     if (groupSelection.length < 2) { alert("Huk av minst to bord som skal slås sammen."); return; }
     const tables = rental.floorPlanTables || [];
@@ -8959,9 +8979,16 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const length = tt.shape === "rund" ? tt.width : tt.length;
     const horizontal = first.rotation % 180 === 0;
     const groupId = `grp-${Date.now()}`;
-    const positioned = selected.map((t, i) => horizontal
-      ? { ...t, groupId, rotation: first.rotation, x: first.x + i * length, y: first.y }
-      : { ...t, groupId, rotation: first.rotation, y: first.y + i * length, x: first.x });
+    const positioned = selected.map((t, i) => {
+      const isFirst = i === 0;
+      const isLast = i === selected.length - 1;
+      const chairSides: ChairSides = horizontal
+        ? { north: true, south: true, east: isLast, west: isFirst }
+        : { east: true, west: true, south: isLast, north: isFirst };
+      return horizontal
+        ? { ...t, groupId, rotation: first.rotation, x: first.x + i * length, y: first.y, chairSides }
+        : { ...t, groupId, rotation: first.rotation, y: first.y + i * length, x: first.x, chairSides };
+    });
     setRental({ ...rental, floorPlanTables: tables.map((t) => positioned.find((p) => p.id === t.id) || t) });
     setGroupSelection([]);
   }
@@ -8971,7 +8998,46 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const t = tables.find((x) => x.id === id);
     if (!t?.groupId) return;
     const gid = t.groupId;
-    setRental({ ...rental, floorPlanTables: tables.map((x) => x.groupId === gid ? { ...x, groupId: undefined } : x) });
+    setRental({ ...rental, floorPlanTables: tables.map((x) => x.groupId === gid ? { ...x, groupId: undefined, chairSides: undefined } : x) });
+  }
+
+  function chairPositions(isRound: boolean, w: number, l: number, chairDepth: number, seats: number, sides: { north: boolean; east: boolean; south: boolean; west: boolean }) {
+    if (isRound) {
+      const r = w / 2 + chairDepth / 2;
+      return Array.from({ length: Math.max(seats, 0) }, (_, i) => {
+        const angle = (i / Math.max(seats, 1)) * Math.PI * 2;
+        return { x: Math.sin(angle) * r, y: -Math.cos(angle) * r, angle: (angle * 180) / Math.PI };
+      });
+    }
+    const activeSides = (["north", "east", "south", "west"] as const).filter((s) => sides[s]);
+    if (!activeSides.length) return [];
+    const perSide = Math.max(1, Math.floor(seats / activeSides.length));
+    let remaining = seats;
+    const chairs: { x: number; y: number; angle: number }[] = [];
+    activeSides.forEach((side, si) => {
+      const isLastSide = si === activeSides.length - 1;
+      const count = isLastSide ? remaining : Math.min(remaining, perSide);
+      remaining -= count;
+      for (let i = 0; i < count; i++) {
+        const t = count === 1 ? 0.5 : i / (count - 1);
+        if (side === "north") chairs.push({ x: -w / 2 + t * w, y: -l / 2 - chairDepth / 2, angle: 0 });
+        if (side === "south") chairs.push({ x: -w / 2 + t * w, y: l / 2 + chairDepth / 2, angle: 180 });
+        if (side === "west") chairs.push({ x: -w / 2 - chairDepth / 2, y: -l / 2 + t * l, angle: -90 });
+        if (side === "east") chairs.push({ x: w / 2 + chairDepth / 2, y: -l / 2 + t * l, angle: 90 });
+      }
+    });
+    return chairs;
+  }
+
+  function addLooseChair() {
+    const room = roomById(plannerActiveRoomId);
+    if (!room) return;
+    const newChair: PlacedChair = { id: `chair-${Date.now()}`, roomId: room.id, x: Math.round(room.width / 2), y: Math.round(room.length / 2), rotation: 0 };
+    setRental({ ...rental, floorPlanChairs: [...(rental.floorPlanChairs || []), newChair] });
+  }
+
+  function deleteLooseChair(id: string) {
+    setRental({ ...rental, floorPlanChairs: (rental.floorPlanChairs || []).filter((c) => c.id !== id) });
   }
 
   function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number): PlacedTable[] {
@@ -9061,13 +9127,26 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     e.stopPropagation();
     (e.target as Element).setPointerCapture(e.pointerId);
     setDragTableId(tableId);
-    setPlannerSelectedTableId(tableId);
+    if (!tableId.startsWith("chair-")) setPlannerSelectedTableId(tableId);
   }
 
   function onSvgPointerMove(e: React.PointerEvent, scale: number) {
     if (!dragTableId) return;
     const { x, y } = clientToRoomCm(e.clientX, e.clientY, scale);
-    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === dragTableId ? { ...t, x: Math.round(x), y: Math.round(y) } : t) });
+    if (dragTableId.startsWith("chair-")) {
+      setRental({ ...rental, floorPlanChairs: (rental.floorPlanChairs || []).map((c) => c.id === dragTableId ? { ...c, x: Math.round(x), y: Math.round(y) } : c) });
+      return;
+    }
+    const tables = rental.floorPlanTables || [];
+    const dragged = tables.find((t) => t.id === dragTableId);
+    if (!dragged) return;
+    const dx = Math.round(x) - dragged.x;
+    const dy = Math.round(y) - dragged.y;
+    if (dragged.groupId) {
+      setRental({ ...rental, floorPlanTables: tables.map((t) => t.groupId === dragged.groupId ? { ...t, x: t.x + dx, y: t.y + dy } : t) });
+    } else {
+      setRental({ ...rental, floorPlanTables: tables.map((t) => t.id === dragTableId ? { ...t, x: Math.round(x), y: Math.round(y) } : t) });
+    }
   }
 
   function onSvgPointerUp() {
@@ -9701,26 +9780,34 @@ ${opts.produksjon ? productionPageHtml : ""}
                                       const l = (isRound ? tt.width : tt.length) * scale;
                                       const chair = tt.chairDepth * scale;
                                       const selected = plannerSelectedTableId === t.id;
+                                      const sides = chairSidesFor(t);
+                                      const chairs = chairPositions(isRound, w, l, chair, tt.seats, sides);
                                       return (
                                         <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
+                                          {chairs.map((c, ci) => (
+                                            <g key={ci} transform={`translate(${c.x},${c.y}) rotate(${c.angle})`}>
+                                              <rect x={-7} y={-7} width={14} height={14} rx={3} fill="#fde68a" stroke="#92400e" strokeWidth={1} />
+                                              <line x1={-6} y1={-7} x2={6} y2={-7} stroke="#92400e" strokeWidth={2} />
+                                            </g>
+                                          ))}
                                           {isRound ? (
-                                            <>
-                                              <circle r={w / 2 + chair} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
-                                              <circle r={w / 2} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
-                                            </>
+                                            <circle r={w / 2} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
                                           ) : (
-                                            <>
-                                              <rect x={-w / 2 - chair} y={-l / 2 - chair} width={w + chair * 2} height={l + chair * 2} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
-                                              <rect x={-w / 2} y={-l / 2} width={w} height={l} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
-                                            </>
+                                            <rect x={-w / 2} y={-l / 2} width={w} height={l} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
                                           )}
                                           <text textAnchor="middle" dy={4} fontSize={12} fontWeight={700}>{idx + 1}</text>
                                         </g>
                                       );
                                     })}
+                                    {(rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).map((c) => (
+                                      <g key={c.id} transform={`translate(${c.x * scale},${c.y * scale}) rotate(${c.rotation})`} onPointerDown={(e) => onTablePointerDown(e, c.id)} style={{ cursor: "grab" }}>
+                                        <rect x={-9} y={-9} width={18} height={18} rx={3} fill="#fde68a" stroke="#92400e" strokeWidth={1.5} />
+                                        <line x1={-8} y1={-9} x2={8} y2={-9} stroke="#92400e" strokeWidth={2.5} />
+                                      </g>
+                                    ))}
                                   </g>
                                 </svg>
-                                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene for å flytte. Klikk for å velge og redigere.</p>
+                                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene (eller løse stoler) for å flytte. Klikk et bord for å velge og redigere.</p>
                               </div>
 
                               <div>
@@ -9731,7 +9818,10 @@ ${opts.produksjon ? productionPageHtml : ""}
                                   return (
                                     <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
                                       {tt?.joinable && (
-                                        <input type="checkbox" checked={groupSelection.includes(t.id)} onChange={(e) => { e.stopPropagation(); toggleGroupSelection(t.id); }} onClick={(e) => e.stopPropagation()} title="Velg for sammenslåing til langbord" />
+                                        <label className="check" style={{ marginRight: 4 }} onClick={(e) => e.stopPropagation()}>
+                                          <input type="checkbox" checked={groupSelection.includes(t.id)} onChange={() => toggleGroupSelection(t.id)} />
+                                          Velg for langbord
+                                        </label>
                                       )}
                                       <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}{t.groupId ? " · del av langbord" : ""}</span>
                                       <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
@@ -9740,19 +9830,50 @@ ${opts.produksjon ? productionPageHtml : ""}
                                     </div>
                                   );
                                 })}
-                                {groupSelection.length >= 2 && (
-                                  <button className="btn active" style={{ marginTop: 8 }} onClick={joinIntoLongTable}>Slå sammen {groupSelection.length} valgte til langbord</button>
-                                )}
-                                {selectedTable && (
-                                  <div className="soft-box" style={{ marginTop: 12 }}>
-                                    <label>Retning (grader)
-                                      <input type="number" value={selectedTable.rotation} onChange={(e) => setTableRotation(selectedTable.id, Number(e.target.value) || 0)} step={15} />
-                                    </label>
-                                    <label style={{ marginTop: 8, display: "block" }}>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
-                                      <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
-                                    </label>
+                                <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                                  <button className="btn active" disabled={groupSelection.length < 2} onClick={joinIntoLongTable}>
+                                    Slå sammen{groupSelection.length >= 2 ? ` (${groupSelection.length} valgt)` : ""} til langbord
+                                  </button>
+                                  <button className="btn" onClick={addLooseChair}>Legg til løs stol</button>
+                                </div>
+                                {(rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).length > 0 && (
+                                  <div style={{ marginTop: 8 }}>
+                                    <b style={{ fontSize: 13 }}>Løse stoler:</b>
+                                    {(rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).map((c, ci) => (
+                                      <div key={c.id} className="editable-row">
+                                        <span>Stol #{ci + 1}</span>
+                                        <button className="link danger" onClick={() => deleteLooseChair(c.id)}>Slett</button>
+                                      </div>
+                                    ))}
                                   </div>
                                 )}
+                                {selectedTable && (() => {
+                                  const selectedTt = tableTypeById(selectedTable.tableTypeId);
+                                  const selectedSides = chairSidesFor(selectedTable);
+                                  return (
+                                    <div className="soft-box" style={{ marginTop: 12 }}>
+                                      <label>Retning (grader)
+                                        <input type="number" value={selectedTable.rotation} onChange={(e) => setTableRotation(selectedTable.id, Number(e.target.value) || 0)} step={15} />
+                                      </label>
+                                      {selectedTt && selectedTt.shape !== "rund" && (
+                                        <div style={{ marginTop: 8 }}>
+                                          <b style={{ fontSize: 13 }}>Stoler på side:</b>
+                                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+                                            {(["north", "east", "south", "west"] as const).map((side) => (
+                                              <label key={side} className="check">
+                                                <input type="checkbox" checked={selectedSides[side]} onChange={() => toggleChairSide(selectedTable.id, side)} />
+                                                {side === "north" ? "Topp" : side === "south" ? "Bunn" : side === "east" ? "Høyre" : "Venstre"}
+                                              </label>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      <label style={{ marginTop: 8, display: "block" }}>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
+                                        <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
+                                      </label>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           )}
