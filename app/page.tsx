@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings" | "rombibliotek";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert" | "selskapsmeny";
@@ -176,7 +176,7 @@ type RentalOffer = {
   runSheet?: RunSheetItem[];
 };
 
-type Venue = { id: string; name: string; price: number };
+type Venue = { id: string; name: string; price: number; roomIds?: string[] };
 
 type Settings = {
   foodVat: number;
@@ -302,6 +302,11 @@ type CalendarNote = {
   text: string;
 };
 
+type RoomOpening = { id: string; type: "dør" | "vindu"; wall: "nord" | "øst" | "sør" | "vest"; position: number; width: number };
+type RoomObstacle = { id: string; type: "søyle" | "flygel/piano" | "annet"; x: number; y: number; width: number; height: number; label?: string };
+type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; notes?: string };
+type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet" };
+
 type AppData = {
   materials: Material[];
   recipes: Recipe[];
@@ -313,6 +318,8 @@ type AppData = {
   packaging: Packaging[];
   rentalAddons: RentalAddon[];
   productLists: ProductList[];
+  rooms: Room[];
+  tableTypes: TableType[];
   menuCategories: string[];
   productCategories: string[];
   materialCategories: string[];
@@ -502,7 +509,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
   seenOrderIds: [],
-  rentalOffers: [],
+  rentalOffers: [], rooms: [], tableTypes: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -594,6 +601,8 @@ bakeryProductionDays:
     .map((o: any) => o.id);
 })(),
 rentalOffers: (raw as any).rentalOffers || [],
+    rooms: raw.rooms || [],
+    tableTypes: raw.tableTypes || [],
   };
 }
 
@@ -1117,7 +1126,8 @@ return (
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
-        {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} />}
+        {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} />}
+        {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
           <img src="/mise-logo.png" alt="Misemetrics" style={{ width: 140, height: "auto" }} />
@@ -9423,16 +9433,296 @@ ${opts.produksjon ? productionPageHtml : ""}
   );
 }
 
+function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateData: (p: Partial<AppData>) => void; setTab: (t: Tab) => void }) {
+  const rooms = data.rooms || [];
+  const tableTypes = data.tableTypes || [];
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
+  const [roomForm, setRoomForm] = useState<Room>({ id: "", name: "", width: 800, length: 600, openings: [], obstacles: [] });
+  const [openingForm, setOpeningForm] = useState<Omit<RoomOpening, "id">>({ type: "dør", wall: "nord", position: 0, width: 90 });
+  const [obstacleForm, setObstacleForm] = useState<Omit<RoomObstacle, "id">>({ type: "søyle", x: 0, y: 0, width: 40, height: 40, label: "" });
+
+  function resetRoomForm() {
+    setRoomForm({ id: "", name: "", width: 800, length: 600, openings: [], obstacles: [] });
+    setEditingRoomId(null);
+  }
+
+  function saveRoom() {
+    if (!roomForm.name.trim()) return;
+    const room: Room = { ...roomForm, id: roomForm.id || `room-${Date.now()}` };
+    const next = editingRoomId ? rooms.map((r) => r.id === editingRoomId ? room : r) : [...rooms, room];
+    updateData({ rooms: next });
+    resetRoomForm();
+  }
+
+  function editRoom(room: Room) {
+    setRoomForm(room);
+    setEditingRoomId(room.id);
+  }
+
+  function deleteRoom(id: string) {
+    if (!confirm("Slette rommet?")) return;
+    updateData({ rooms: rooms.filter((r) => r.id !== id) });
+    if (editingRoomId === id) resetRoomForm();
+  }
+
+  function addOpening() {
+    setRoomForm({ ...roomForm, openings: [...roomForm.openings, { ...openingForm, id: `op-${Date.now()}` }] });
+  }
+  function removeOpening(id: string) {
+    setRoomForm({ ...roomForm, openings: roomForm.openings.filter((o) => o.id !== id) });
+  }
+  function addObstacle() {
+    setRoomForm({ ...roomForm, obstacles: [...roomForm.obstacles, { ...obstacleForm, id: `ob-${Date.now()}` }] });
+  }
+  function removeObstacle(id: string) {
+    setRoomForm({ ...roomForm, obstacles: roomForm.obstacles.filter((o) => o.id !== id) });
+  }
+
+  const [editingTableTypeId, setEditingTableTypeId] = useState<string | null>(null);
+  const [tableTypeForm, setTableTypeForm] = useState<TableType>({ id: "", name: "", shape: "rund", width: 150, length: 150, seats: 8, chairDepth: 50, category: "gjestebord" });
+
+  function resetTableTypeForm() {
+    setTableTypeForm({ id: "", name: "", shape: "rund", width: 150, length: 150, seats: 8, chairDepth: 50, category: "gjestebord" });
+    setEditingTableTypeId(null);
+  }
+  function saveTableType() {
+    if (!tableTypeForm.name.trim()) return;
+    const tt: TableType = { ...tableTypeForm, id: tableTypeForm.id || `tt-${Date.now()}` };
+    const next = editingTableTypeId ? tableTypes.map((t) => t.id === editingTableTypeId ? tt : t) : [...tableTypes, tt];
+    updateData({ tableTypes: next });
+    resetTableTypeForm();
+  }
+  function editTableType(tt: TableType) {
+    setTableTypeForm(tt);
+    setEditingTableTypeId(tt.id);
+  }
+  function deleteTableType(id: string) {
+    if (!confirm("Slette bordtypen?")) return;
+    updateData({ tableTypes: tableTypes.filter((t) => t.id !== id) });
+    if (editingTableTypeId === id) resetTableTypeForm();
+  }
+
+  const scale = Math.min(560 / Math.max(roomForm.width, 1), 420 / Math.max(roomForm.length, 1));
+  const wallThickness = 8;
+  const roomPxW = roomForm.width * scale;
+  const roomPxH = roomForm.length * scale;
+
+  function wallOpeningsFor(wall: RoomOpening["wall"]) {
+    return roomForm.openings.filter((o) => o.wall === wall);
+  }
+
+  function renderWallWithOpenings(wall: RoomOpening["wall"], x1: number, y1: number, x2: number, y2: number, isHorizontal: boolean) {
+    const openings = wallOpeningsFor(wall);
+    const totalLen = isHorizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1);
+    const segments: { start: number; end: number; opening?: RoomOpening }[] = [];
+    let cursor = 0;
+    const sorted = [...openings].sort((a, b) => a.position - b.position);
+    sorted.forEach((o) => {
+      const start = Math.max(0, Math.min(totalLen, o.position * scale));
+      const end = Math.max(0, Math.min(totalLen, (o.position + o.width) * scale));
+      if (start > cursor) segments.push({ start: cursor, end: start });
+      segments.push({ start, end, opening: o });
+      cursor = end;
+    });
+    if (cursor < totalLen) segments.push({ start: cursor, end: totalLen });
+    return segments.map((seg, i) => {
+      const color = seg.opening ? (seg.opening.type === "dør" ? "#f59e0b" : "#38bdf8") : "#334155";
+      const sw = seg.opening ? 4 : wallThickness;
+      if (isHorizontal) {
+        const dir = x2 > x1 ? 1 : -1;
+        return <line key={i} x1={x1 + dir * seg.start} y1={y1} x2={x1 + dir * seg.end} y2={y2} stroke={color} strokeWidth={sw} />;
+      }
+      const dir = y2 > y1 ? 1 : -1;
+      return <line key={i} x1={x1} y1={y1 + dir * seg.start} x2={x2} y2={y1 + dir * seg.end} stroke={color} strokeWidth={sw} />;
+    });
+  }
+
+  return (
+    <section className="card">
+      <div className="between">
+        <h2>Rombibliotek</h2>
+        <button className="btn" onClick={() => setTab("settings")}>← Tilbake til innstillinger</button>
+      </div>
+      <p className="muted">Definer rom (mål, dører, vinduer, hindringer) og bordtyper som senere brukes i bordplanleggeren under Leie av lokale.</p>
+
+      <div className="grid two" style={{ marginTop: 16 }}>
+        <div className="card">
+          <h3>{editingRoomId ? "Rediger rom" : "Nytt rom"}</h3>
+          <div className="form-grid two">
+            <label>Navn på rom<input value={roomForm.name} onChange={(e) => setRoomForm({ ...roomForm, name: e.target.value })} placeholder="F.eks. Storsalen" /></label>
+            <div />
+            <label>Bredde (cm)<input type="number" value={roomForm.width} onChange={(e) => setRoomForm({ ...roomForm, width: Number(e.target.value) || 0 })} /></label>
+            <label>Lengde (cm)<input type="number" value={roomForm.length} onChange={(e) => setRoomForm({ ...roomForm, length: Number(e.target.value) || 0 })} /></label>
+          </div>
+
+          <h4>Dører / vinduer</h4>
+          <div className="form-grid four">
+            <label>Type
+              <select value={openingForm.type} onChange={(e) => setOpeningForm({ ...openingForm, type: e.target.value as RoomOpening["type"] })}>
+                <option value="dør">Dør</option>
+                <option value="vindu">Vindu</option>
+              </select>
+            </label>
+            <label>Vegg
+              <select value={openingForm.wall} onChange={(e) => setOpeningForm({ ...openingForm, wall: e.target.value as RoomOpening["wall"] })}>
+                <option value="nord">Nord</option>
+                <option value="øst">Øst</option>
+                <option value="sør">Sør</option>
+                <option value="vest">Vest</option>
+              </select>
+            </label>
+            <label>Posisjon fra hjørne (cm)<input type="number" value={openingForm.position} onChange={(e) => setOpeningForm({ ...openingForm, position: Number(e.target.value) || 0 })} /></label>
+            <label>Bredde (cm)<input type="number" value={openingForm.width} onChange={(e) => setOpeningForm({ ...openingForm, width: Number(e.target.value) || 0 })} /></label>
+          </div>
+          <button className="btn" onClick={addOpening}>Legg til dør/vindu</button>
+          {roomForm.openings.length > 0 && (
+            <table style={{ marginTop: 8 }}>
+              <thead><tr><th>Type</th><th>Vegg</th><th>Posisjon</th><th>Bredde</th><th></th></tr></thead>
+              <tbody>
+                {roomForm.openings.map((o) => (
+                  <tr key={o.id}>
+                    <td>{o.type}</td><td>{o.wall}</td><td>{o.position} cm</td><td>{o.width} cm</td>
+                    <td><button className="link danger" onClick={() => removeOpening(o.id)}>Slett</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <h4 style={{ marginTop: 16 }}>Hindringer (søyler, flygel, annet)</h4>
+          <div className="form-grid four">
+            <label>Type
+              <select value={obstacleForm.type} onChange={(e) => setObstacleForm({ ...obstacleForm, type: e.target.value as RoomObstacle["type"] })}>
+                <option value="søyle">Søyle</option>
+                <option value="flygel/piano">Flygel/piano</option>
+                <option value="annet">Annet</option>
+              </select>
+            </label>
+            <label>Navn (valgfritt)<input value={obstacleForm.label || ""} onChange={(e) => setObstacleForm({ ...obstacleForm, label: e.target.value })} /></label>
+            <label>X fra venstre (cm)<input type="number" value={obstacleForm.x} onChange={(e) => setObstacleForm({ ...obstacleForm, x: Number(e.target.value) || 0 })} /></label>
+            <label>Y fra topp (cm)<input type="number" value={obstacleForm.y} onChange={(e) => setObstacleForm({ ...obstacleForm, y: Number(e.target.value) || 0 })} /></label>
+            <label>Bredde (cm)<input type="number" value={obstacleForm.width} onChange={(e) => setObstacleForm({ ...obstacleForm, width: Number(e.target.value) || 0 })} /></label>
+            <label>Dybde (cm)<input type="number" value={obstacleForm.height} onChange={(e) => setObstacleForm({ ...obstacleForm, height: Number(e.target.value) || 0 })} /></label>
+          </div>
+          <button className="btn" onClick={addObstacle}>Legg til hindring</button>
+          {roomForm.obstacles.length > 0 && (
+            <table style={{ marginTop: 8 }}>
+              <thead><tr><th>Type</th><th>Navn</th><th>Posisjon</th><th>Størrelse</th><th></th></tr></thead>
+              <tbody>
+                {roomForm.obstacles.map((o) => (
+                  <tr key={o.id}>
+                    <td>{o.type}</td><td>{o.label || "-"}</td><td>{o.x}, {o.y} cm</td><td>{o.width}×{o.height} cm</td>
+                    <td><button className="link danger" onClick={() => removeObstacle(o.id)}>Slett</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <button className="btn active" onClick={saveRoom}>{editingRoomId ? "Lagre endringer" : "Lagre rom"}</button>
+            {editingRoomId && <button className="btn" onClick={resetRoomForm}>Avbryt</button>}
+          </div>
+        </div>
+
+        <div className="card">
+          <h3>Forhåndsvisning</h3>
+          {roomForm.width > 0 && roomForm.length > 0 ? (
+            <svg viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`} style={{ width: "100%", maxWidth: 560, background: "#f8fafc", borderRadius: 8 }}>
+              <g transform="translate(20,20)">
+                {renderWallWithOpenings("nord", 0, 0, roomPxW, 0, true)}
+                {renderWallWithOpenings("sør", 0, roomPxH, roomPxW, roomPxH, true)}
+                {renderWallWithOpenings("vest", 0, 0, 0, roomPxH, false)}
+                {renderWallWithOpenings("øst", roomPxW, 0, roomPxW, roomPxH, false)}
+                {roomForm.obstacles.map((o) => (
+                  <g key={o.id}>
+                    <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
+                    {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
+                  </g>
+                ))}
+              </g>
+            </svg>
+          ) : <p className="muted">Fyll inn bredde og lengde for å se forhåndsvisning.</p>}
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Oransje = dør, blå = vindu, rød boks = hindring.</p>
+        </div>
+      </div>
+
+      <h3 style={{ marginTop: 8 }}>Lagrede rom</h3>
+      {rooms.length === 0 && <p className="muted">Ingen rom lagret ennå.</p>}
+      {rooms.map((r) => (
+        <div key={r.id} className="editable-row">
+          <span><b>{r.name}</b> · {r.width}×{r.length} cm · {r.openings.length} dører/vinduer · {r.obstacles.length} hindringer</span>
+          <div>
+            <button className="link" onClick={() => editRoom(r)}>Rediger</button>
+            <button className="link danger" onClick={() => deleteRoom(r.id)}>Slett</button>
+          </div>
+        </div>
+      ))}
+
+      <h2 style={{ marginTop: 32 }}>Bordtyper</h2>
+      <div className="grid two">
+        <div className="card">
+          <h3>{editingTableTypeId ? "Rediger bordtype" : "Ny bordtype"}</h3>
+          <div className="form-grid two">
+            <label>Navn<input value={tableTypeForm.name} onChange={(e) => setTableTypeForm({ ...tableTypeForm, name: e.target.value })} placeholder="F.eks. Rundt bord 8 pers" /></label>
+            <label>Kategori
+              <select value={tableTypeForm.category} onChange={(e) => setTableTypeForm({ ...tableTypeForm, category: e.target.value as TableType["category"] })}>
+                <option value="gjestebord">Gjestebord</option>
+                <option value="gavebord">Gavebord</option>
+                <option value="kakebord">Kakebord</option>
+                <option value="buffetbord">Buffetbord</option>
+                <option value="annet">Annet</option>
+              </select>
+            </label>
+            <label>Form
+              <select value={tableTypeForm.shape} onChange={(e) => setTableTypeForm({ ...tableTypeForm, shape: e.target.value as TableType["shape"] })}>
+                <option value="rund">Rund</option>
+                <option value="rektangulær">Rektangulær</option>
+                <option value="firkantet">Firkantet</option>
+              </select>
+            </label>
+            <label>Sitteplasser<input type="number" value={tableTypeForm.seats} onChange={(e) => setTableTypeForm({ ...tableTypeForm, seats: Number(e.target.value) || 0 })} /></label>
+            <label>{tableTypeForm.shape === "rund" ? "Diameter (cm)" : "Bredde (cm)"}<input type="number" value={tableTypeForm.width} onChange={(e) => setTableTypeForm({ ...tableTypeForm, width: Number(e.target.value) || 0 })} /></label>
+            {tableTypeForm.shape !== "rund" && (
+              <label>Lengde (cm)<input type="number" value={tableTypeForm.length} onChange={(e) => setTableTypeForm({ ...tableTypeForm, length: Number(e.target.value) || 0 })} /></label>
+            )}
+            <label>Plass til stol rundt (cm)<input type="number" value={tableTypeForm.chairDepth} onChange={(e) => setTableTypeForm({ ...tableTypeForm, chairDepth: Number(e.target.value) || 0 })} /></label>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <button className="btn active" onClick={saveTableType}>{editingTableTypeId ? "Lagre endringer" : "Lagre bordtype"}</button>
+            {editingTableTypeId && <button className="btn" onClick={resetTableTypeForm}>Avbryt</button>}
+          </div>
+        </div>
+        <div className="card">
+          <h3>Lagrede bordtyper</h3>
+          {tableTypes.length === 0 && <p className="muted">Ingen bordtyper lagret ennå.</p>}
+          {tableTypes.map((t) => (
+            <div key={t.id} className="editable-row">
+              <span><b>{t.name}</b> · {t.category} · {t.shape === "rund" ? `Ø${t.width}cm` : `${t.width}×${t.length}cm`} · {t.seats} plasser</span>
+              <div>
+                <button className="link" onClick={() => editTableType(t)}>Rediger</button>
+                <button className="link danger" onClick={() => deleteTableType(t.id)}>Slett</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 const SettingsTab = React.memo(function SettingsTab({
   data,
   updateData,
   exportData,
   importData,
+  setTab,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   exportData: () => void;
   importData: (file: File | null) => void;
+  setTab: (t: Tab) => void;
 }) {
   const [open, setOpen] = useState("personell");
   const [newMaterialCategory, setNewMaterialCategory] = useState("");
@@ -9506,10 +9796,15 @@ const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", per
         </div>
       </Section>
 
+      <Section id="rombibliotek" title="Rombibliotek (rom og bordtyper)">
+        <p className="muted">Definer rom (mål, dører, vinduer, hindringer) og bordtyper som brukes i bordplanleggeren.</p>
+        <button className="btn active" onClick={() => setTab("rombibliotek")}>Åpne rombibliotek</button>
+      </Section>
+
       <Section id="venues" title="Leie av lokaler, priser">
         <div>
           {localVenues.map((v, i) => (
-            <div key={v.id} className="editable-row">
+            <div key={v.id} className="editable-row" style={{ flexWrap: "wrap" }}>
               <input
                 value={v.name}
                 onChange={(e) => setLocalVenues(localVenues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
@@ -9521,6 +9816,29 @@ const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", per
                 onChange={(e) => setLocalVenues(localVenues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
                 onBlur={() => updateData({ venues: localVenues })}
               />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#64748b" }}>Rom:</span>
+                {(data.rooms || []).map((room) => {
+                  const active = (v.roomIds || []).includes(room.id);
+                  return (
+                    <button
+                      key={room.id}
+                      type="button"
+                      className={active ? "btn active" : "btn"}
+                      style={{ padding: "2px 8px", fontSize: 12 }}
+                      onClick={() => {
+                        const roomIds = active ? (v.roomIds || []).filter((id) => id !== room.id) : [...(v.roomIds || []), room.id];
+                        const next = localVenues.map((x, ix) => ix === i ? { ...x, roomIds } : x);
+                        setLocalVenues(next);
+                        updateData({ venues: next });
+                      }}
+                    >
+                      {room.name}
+                    </button>
+                  );
+                })}
+                {(data.rooms || []).length === 0 && <span style={{ fontSize: 12, color: "#94a3b8" }}>Ingen rom lagret ennå (se Rombibliotek)</span>}
+              </div>
               <button className="link danger" onClick={() => {
                 const next = localVenues.filter((x) => x.id !== v.id);
                 setLocalVenues(next);
