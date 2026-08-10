@@ -151,6 +151,8 @@ type RentalProductLine = { productId: string; guests: number };
 
 type RunSheetItem = { id: string; task: string; responsible?: string; time?: string; groupLabel?: string };
 
+type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string };
+
 type RentalOffer = {
   id?: string;
   customer: string;
@@ -158,6 +160,8 @@ type RentalOffer = {
   phone?: string;
   email?: string;
   note?: string;
+  floorPlanRoomIds?: string[];
+  floorPlanTables?: PlacedTable[];
   venue: string;
   venuePrice: number;
   venueExternal?: boolean;
@@ -8489,7 +8493,13 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
   const [offerSearch, setOfferSearch] = useState("");
   const [showTerms, setShowTerms] = useState(false);
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
-  const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar">("forside");
+  const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan">("forside");
+    const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
+    const [plannerGuestCount, setPlannerGuestCount] = useState(50);
+    const [plannerTableTypeId, setPlannerTableTypeId] = useState("");
+    const [plannerSelectedTableId, setPlannerSelectedTableId] = useState<string | null>(null);
+    const [dragTableId, setDragTableId] = useState<string | null>(null);
+    const svgRef = useRef<SVGSVGElement>(null);
   const [printOpts, setPrintOpts] = useState({ tilbud: true, recipes: false, kjoreplan: false, produksjon: false });
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
     ((data as any).deletedRentalOffers || []) as RentalOffer[]
@@ -8928,6 +8938,223 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     return html;
   }
 
+  function roomById(id: string) { return (data.rooms || []).find((r) => r.id === id); }
+  function tableTypeById(id: string) { return (data.tableTypes || []).find((t) => t.id === id); }
+  function tableTypeName(id: string) { return tableTypeById(id)?.name || "Ukjent"; }
+
+  function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number): PlacedTable[] {
+    const margin = 60;
+    const spacing = 60;
+    const footprintW = tableType.width + tableType.chairDepth * 2 + spacing;
+    const footprintL = (tableType.shape === "rund" ? tableType.width : tableType.length) + tableType.chairDepth * 2 + spacing;
+    const tablesNeeded = Math.max(1, Math.ceil(guestCount / Math.max(tableType.seats, 1)));
+    const cols = Math.max(1, Math.floor((room.width - margin * 2) / footprintW));
+    const placed: PlacedTable[] = [];
+    let row = 0, col = 0, attempts = 0;
+    while (placed.length < tablesNeeded && attempts < 500) {
+      attempts++;
+      const x = margin + col * footprintW + footprintW / 2;
+      const y = margin + row * footprintL + footprintL / 2;
+      if (y + footprintL / 2 > room.length - margin) break;
+      const overlaps = room.obstacles.some((o) => {
+        const left = x - footprintW / 2, right = x + footprintW / 2, top = y - footprintL / 2, bottom = y + footprintL / 2;
+        return !(right < o.x || left > o.x + o.width || bottom < o.y || top > o.y + o.height);
+      });
+      if (!overlaps) {
+        placed.push({ id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`, tableTypeId: tableType.id, roomId: room.id, x: Math.round(x), y: Math.round(y), rotation: 0 });
+      }
+      col++;
+      if (col >= cols) { col = 0; row++; }
+    }
+    return placed;
+  }
+
+  function runSuggestion() {
+    const room = roomById(plannerActiveRoomId);
+    const tt = tableTypeById(plannerTableTypeId);
+    if (!room || !tt) { alert("Velg rom og bordtype først."); return; }
+    const suggested = suggestTablePlacement(room, tt, plannerGuestCount);
+    const otherRooms = (rental.floorPlanTables || []).filter((t) => t.roomId !== room.id);
+    const otherTypesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id && t.tableTypeId !== tt.id);
+    setRental({ ...rental, floorPlanTables: [...otherRooms, ...otherTypesInRoom, ...suggested] });
+  }
+
+  function addManualTable(typeId: string) {
+    const room = roomById(plannerActiveRoomId);
+    const tt = tableTypeById(typeId);
+    if (!room || !tt) return;
+    const newTable: PlacedTable = { id: `pt-${Date.now()}`, tableTypeId: typeId, roomId: room.id, x: Math.round(room.width / 2), y: Math.round(room.length / 2), rotation: 0 };
+    setRental({ ...rental, floorPlanTables: [...(rental.floorPlanTables || []), newTable] });
+    setPlannerSelectedTableId(newTable.id);
+  }
+
+  function updateTableNote(id: string, note: string) {
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === id ? { ...t, note } : t) });
+  }
+
+  function rotateTable(id: string) {
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === id ? { ...t, rotation: (t.rotation + 90) % 360 } : t) });
+  }
+
+  function deleteTable(id: string) {
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).filter((t) => t.id !== id) });
+    if (plannerSelectedTableId === id) setPlannerSelectedTableId(null);
+  }
+
+  function toggleRoomSelected(roomId: string) {
+    const current = rental.floorPlanRoomIds || [];
+    const next = current.includes(roomId) ? current.filter((id) => id !== roomId) : [...current, roomId];
+    setRental({ ...rental, floorPlanRoomIds: next });
+    if (!next.includes(plannerActiveRoomId)) setPlannerActiveRoomId(next[0] || "");
+  }
+
+  function clientToRoomCm(clientX: number, clientY: number, scale: number) {
+    const svgEl = svgRef.current;
+    if (!svgEl) return { x: 0, y: 0 };
+    const pt = svgEl.createSVGPoint();
+    pt.x = clientX; pt.y = clientY;
+    const ctm = svgEl.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const p = pt.matrixTransform(ctm.inverse());
+    return { x: (p.x - 20) / scale, y: (p.y - 20) / scale };
+  }
+
+  function onTablePointerDown(e: React.PointerEvent, tableId: string) {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture(e.pointerId);
+    setDragTableId(tableId);
+    setPlannerSelectedTableId(tableId);
+  }
+
+  function onSvgPointerMove(e: React.PointerEvent, scale: number) {
+    if (!dragTableId) return;
+    const { x, y } = clientToRoomCm(e.clientX, e.clientY, scale);
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === dragTableId ? { ...t, x: Math.round(x), y: Math.round(y) } : t) });
+  }
+
+  function onSvgPointerUp() {
+    setDragTableId(null);
+  }
+
+  function plannerWallSegments(room: Room, wall: RoomOpening["wall"], x1: number, y1: number, x2: number, y2: number, isHorizontal: boolean, scale: number) {
+    const openings = room.openings.filter((o) => o.wall === wall);
+    const totalLen = isHorizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1);
+    const segments: { start: number; end: number; opening?: RoomOpening }[] = [];
+    let cursor = 0;
+    const sorted = [...openings].sort((a, b) => a.position - b.position);
+    sorted.forEach((o) => {
+      const start = Math.max(0, Math.min(totalLen, o.position * scale));
+      const end = Math.max(0, Math.min(totalLen, (o.position + o.width) * scale));
+      if (start > cursor) segments.push({ start: cursor, end: start });
+      segments.push({ start, end, opening: o });
+      cursor = end;
+    });
+    if (cursor < totalLen) segments.push({ start: cursor, end: totalLen });
+    return segments.map((seg, i) => {
+      const color = seg.opening ? (seg.opening.type === "dør" ? "#f59e0b" : "#38bdf8") : "#334155";
+      const sw = seg.opening ? 4 : 8;
+      if (isHorizontal) {
+        const dir = x2 > x1 ? 1 : -1;
+        return <line key={`${wall}-${i}`} x1={x1 + dir * seg.start} y1={y1} x2={x1 + dir * seg.end} y2={y2} stroke={color} strokeWidth={sw} />;
+      }
+      const dir = y2 > y1 ? 1 : -1;
+      return <line key={`${wall}-${i}`} x1={x1} y1={y1 + dir * seg.start} x2={x2} y2={y1 + dir * seg.end} stroke={color} strokeWidth={sw} />;
+    });
+  }
+
+  function renderStaticRoomSvg(room: Room, tables: PlacedTable[], scale: number, technical: boolean): string {
+    const roomPxW = room.width * scale;
+    const roomPxH = room.length * scale;
+    function segmentsStr(wall: RoomOpening["wall"], x1: number, y1: number, x2: number, y2: number, isHorizontal: boolean): string {
+      const openings = room.openings.filter((o) => o.wall === wall);
+      const totalLen = isHorizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1);
+      const segments: { start: number; end: number; opening?: RoomOpening }[] = [];
+      let cursor = 0;
+      const sorted = [...openings].sort((a, b) => a.position - b.position);
+      sorted.forEach((o) => {
+        const start = Math.max(0, Math.min(totalLen, o.position * scale));
+        const end = Math.max(0, Math.min(totalLen, (o.position + o.width) * scale));
+        if (start > cursor) segments.push({ start: cursor, end: start });
+        segments.push({ start, end, opening: o });
+        cursor = end;
+      });
+      if (cursor < totalLen) segments.push({ start: cursor, end: totalLen });
+      return segments.map((seg) => {
+        const color = seg.opening ? (seg.opening.type === "dør" ? "#f59e0b" : "#38bdf8") : "#334155";
+        const sw = seg.opening ? 4 : 8;
+        if (isHorizontal) {
+          const dir = x2 > x1 ? 1 : -1;
+          return `<line x1="${x1 + dir * seg.start}" y1="${y1}" x2="${x1 + dir * seg.end}" y2="${y2}" stroke="${color}" stroke-width="${sw}" />`;
+        }
+        const dir = y2 > y1 ? 1 : -1;
+        return `<line x1="${x1}" y1="${y1 + dir * seg.start}" x2="${x2}" y2="${y1 + dir * seg.end}" stroke="${color}" stroke-width="${sw}" />`;
+      }).join("");
+    }
+    const wallsHtml = segmentsStr("nord", 0, 0, roomPxW, 0, true) + segmentsStr("sør", 0, roomPxH, roomPxW, roomPxH, true) + segmentsStr("vest", 0, 0, 0, roomPxH, false) + segmentsStr("øst", roomPxW, 0, roomPxW, roomPxH, false);
+    const obstaclesHtml = room.obstacles.map((o) => technical
+      ? `<rect x="${o.x * scale}" y="${o.y * scale}" width="${o.width * scale}" height="${o.height * scale}" fill="#fecaca" stroke="#dc2626" stroke-width="1" />${o.label ? `<text x="${o.x * scale + 4}" y="${o.y * scale + 14}" font-size="10" fill="#7f1d1d">${escapeHtml(o.label)}</text>` : ""}`
+      : `<rect x="${o.x * scale}" y="${o.y * scale}" width="${o.width * scale}" height="${o.height * scale}" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1" />`
+    ).join("");
+    const tablesHtml = tables.map((t, i) => {
+      const tt = tableTypeById(t.tableTypeId);
+      if (!tt) return "";
+      const isRound = tt.shape === "rund";
+      const w = tt.width * scale;
+      const l = (isRound ? tt.width : tt.length) * scale;
+      const chair = technical ? tt.chairDepth * scale : 0;
+      const shapeHtml = isRound
+        ? `${technical ? `<circle r="${w / 2 + chair}" fill="none" stroke="#94a3b8" stroke-dasharray="4 3" />` : ""}<circle r="${w / 2}" fill="#e2e8f0" stroke="#334155" stroke-width="1.5" />`
+        : `${technical ? `<rect x="${-w / 2 - chair}" y="${-l / 2 - chair}" width="${w + chair * 2}" height="${l + chair * 2}" fill="none" stroke="#94a3b8" stroke-dasharray="4 3" />` : ""}<rect x="${-w / 2}" y="${-l / 2}" width="${w}" height="${l}" fill="#e2e8f0" stroke="#334155" stroke-width="1.5" />`;
+      return `<g transform="translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})">${shapeHtml}<text text-anchor="middle" dy="4" font-size="13" font-weight="700">${i + 1}</text></g>`;
+    }).join("");
+    return `<svg viewBox="0 0 ${roomPxW + 40} ${roomPxH + 40}" style="width:100%;max-width:680px;background:#f8fafc;border-radius:8px"><g transform="translate(20,20)">${wallsHtml}${obstaclesHtml}${tablesHtml}</g></svg>`;
+  }
+
+  function printRiggingDocument() {
+    const roomsToPrint = (rental.floorPlanRoomIds || []).map((id) => roomById(id)).filter(Boolean) as Room[];
+    if (!roomsToPrint.length) { alert("Ingen rom valgt for bordplanen."); return; }
+    const pages = roomsToPrint.map((room) => {
+      const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
+      const scale = Math.min(680 / Math.max(room.width, 1), 480 / Math.max(room.length, 1));
+      const rows = tables.map((t, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(tableTypeName(t.tableTypeId))}</td><td>${Math.round(t.x)}, ${Math.round(t.y)} cm</td><td>${t.rotation}°</td><td>${escapeHtml(t.note || "-")}</td></tr>`).join("");
+      return `<div class="page-break"></div>
+<h2>Riggeplan: ${escapeHtml(room.name)}</h2>
+<p>Rom: ${room.width}×${room.length} cm · ${tables.length} bord</p>
+${renderStaticRoomSvg(room, tables, scale, true)}
+<table><thead><tr><th>#</th><th>Bordtype</th><th>Posisjon</th><th>Rotasjon</th><th>Notat</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }).join("");
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<html><head><title>Riggeplan – ${escapeHtml(rental.customer)}</title><style>
+body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827}
+h2{border-bottom:1px solid #e5e7eb;padding-bottom:6px}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{border-bottom:1px solid #e5e7eb;padding:6px 8px;text-align:left;font-size:13px}
+@media print{.page-break{page-break-before:always}}
+</style></head><body>${pages}<script>window.print()</script></body></html>`);
+    w.document.close();
+  }
+
+  function printGuestIllustration() {
+    const roomsToPrint = (rental.floorPlanRoomIds || []).map((id) => roomById(id)).filter(Boolean) as Room[];
+    if (!roomsToPrint.length) { alert("Ingen rom valgt for bordplanen."); return; }
+    const pages = roomsToPrint.map((room) => {
+      const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
+      const scale = Math.min(680 / Math.max(room.width, 1), 480 / Math.max(room.length, 1));
+      return `<div class="page-break"></div>
+<h2>${escapeHtml(room.name)}</h2>
+${renderStaticRoomSvg(room, tables, scale, false)}`;
+    }).join("");
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<html><head><title>Bordplan – ${escapeHtml(rental.customer)}</title><style>
+body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827;text-align:center}
+h2{margin-bottom:16px}
+@media print{.page-break{page-break-before:always}}
+</style></head><body>${pages}<script>window.print()</script></body></html>`);
+    w.document.close();
+  }
+
   function printOffer(opts: { tilbud?: boolean; recipes?: boolean; kjoreplan?: boolean; produksjon?: boolean }) {
     const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
     const productRows = rental.productLines.map((l) => {
@@ -9113,6 +9340,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                 { key: "tillegg", label: "Tillegg" },
                 { key: "kjoreplan", label: "Kjøreplan" },
                 { key: "vilkar", label: "Vilkår" },
+                { key: "bordplan", label: "Bordplan" },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -9279,6 +9507,10 @@ ${opts.produksjon ? productionPageHtml : ""}
                 </label>
               </div>
             )}
+
+            {rentalSubTab === "bordplan" && (
+              <p style={{ color: "#64748b", fontSize: 13 }}>Bordplanleggeren ligger i boksen under (mer plass der).</p>
+            )}
           </div>
 
           <div className="card">
@@ -9390,6 +9622,292 @@ ${opts.produksjon ? productionPageHtml : ""}
             )}
           </div>
         )}
+
+        {rentalSubTab === "bordplan" && (() => {
+          const venueObj = data.venues.find((v) => v.name === rental.venue);
+          const availableRoomIds = venueObj?.roomIds || [];
+          const availableRooms = (data.rooms || []).filter((r) => availableRoomIds.includes(r.id));
+          const selectedRoomIds = (rental.floorPlanRoomIds || []).filter((id) => availableRoomIds.includes(id));
+          const activeRoomId = plannerActiveRoomId && selectedRoomIds.includes(plannerActiveRoomId) ? plannerActiveRoomId : (selectedRoomIds[0] || "");
+          const activeRoom = roomById(activeRoomId);
+          const scale = activeRoom ? Math.min(680 / Math.max(activeRoom.width, 1), 480 / Math.max(activeRoom.length, 1)) : 1;
+          const roomPxW = activeRoom ? activeRoom.width * scale : 0;
+          const roomPxH = activeRoom ? activeRoom.length * scale : 0;
+          const tablesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === activeRoomId);
+          const selectedTable = tablesInRoom.find((t) => t.id === plannerSelectedTableId);
+
+          return (
+            <div className="card" style={{ marginTop: 18 }}>
+              <h2>Bordplan</h2>
+
+              {availableRooms.length === 0 ? (
+                <p className="muted">Ingen rom er koblet til lokalet "{rental.venue}" ennå. Gå til Innstillinger → Rombibliotek for å koble rom til lokalet.</p>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 8 }}>
+                    <b style={{ fontSize: 13 }}>Rom som skal planlegges:</b>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                      {availableRooms.map((r) => (
+                        <button key={r.id} type="button" className={selectedRoomIds.includes(r.id) ? "btn active" : "btn"} onClick={() => toggleRoomSelected(r.id)}>{r.name}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedRoomIds.length > 0 && (
+                    <>
+                      {selectedRoomIds.length > 1 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
+                          {selectedRoomIds.map((id) => {
+                            const r = roomById(id);
+                            return r ? <button key={id} type="button" className={activeRoomId === id ? "btn active" : "btn"} onClick={() => setPlannerActiveRoomId(id)}>{r.name}</button> : null;
+                          })}
+                        </div>
+                      )}
+
+                      <div className="form-grid four" style={{ marginTop: 8 }}>
+                        <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setPlannerGuestCount(Number(e.target.value) || 0)} /></label>
+                        <label>Bordtype
+                          <select value={plannerTableTypeId} onChange={(e) => setPlannerTableTypeId(e.target.value)}>
+                            <option value="">Velg bordtype...</option>
+                            {(data.tableTypes || []).filter((t) => t.category === "gjestebord").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </label>
+                        <button className="btn active" style={{ alignSelf: "end" }} onClick={runSuggestion}>Foreslå bordoppsett</button>
+                        <label>Legg til enkeltbord
+                          <select value="" onChange={(e) => { if (e.target.value) addManualTable(e.target.value); }}>
+                            <option value="">Velg type...</option>
+                            {(data.tableTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name} ({t.category})</option>)}
+                          </select>
+                        </label>
+                      </div>
+
+                      {activeRoom && (
+                        <div className="grid two" style={{ marginTop: 12 }}>
+                          <div>
+                            <svg
+                              ref={svgRef}
+                              viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`}
+                              style={{ width: "100%", maxWidth: 680, background: "#f8fafc", borderRadius: 8, touchAction: "none" }}
+                              onPointerMove={(e) => onSvgPointerMove(e, scale)}
+                              onPointerUp={onSvgPointerUp}
+                              onPointerLeave={onSvgPointerUp}
+                            >
+                              <g transform="translate(20,20)">
+                                {plannerWallSegments(activeRoom, "nord", 0, 0, roomPxW, 0, true, scale)}
+                                {plannerWallSegments(activeRoom, "sør", 0, roomPxH, roomPxW, roomPxH, true, scale)}
+                                {plannerWallSegments(activeRoom, "vest", 0, 0, 0, roomPxH, false, scale)}
+                                {plannerWallSegments(activeRoom, "øst", roomPxW, 0, roomPxW, roomPxH, false, scale)}
+                                {activeRoom.obstacles.map((o) => (
+                                  <g key={o.id}>
+                                    <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
+                                    {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
+                                  </g>
+                                ))}
+                                {tablesInRoom.map((t, idx) => {
+                                  const tt = tableTypeById(t.tableTypeId);
+                                  if (!tt) return null;
+                                  const isRound = tt.shape === "rund";
+                                  const w = tt.width * scale;
+                                  const l = (isRound ? tt.width : tt.length) * scale;
+                                  const chair = tt.chairDepth * scale;
+                                  const selected = plannerSelectedTableId === t.id;
+                                  return (
+                                    <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
+                                      {isRound ? (
+                                        <>
+                                          <circle r={w / 2 + chair} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
+                                          <circle r={w / 2} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
+                                        </>
+                                      ) : (
+                                        <>
+                                          <rect x={-w / 2 - chair} y={-l / 2 - chair} width={w + chair * 2} height={l + chair * 2} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
+                                          <rect x={-w / 2} y={-l / 2} width={w} height={l} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
+                                        </>
+                                      )}
+                                      <text textAnchor="middle" dy={4} fontSize={12} fontWeight={700}>{idx + 1}</text>
+                                    </g>
+                                  );
+                                })}
+                              </g>
+                            </svg>
+                            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene for å flytte. Klikk for å velge og redigere.</p>
+                          </div>
+
+                          <div>
+                            <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
+                            {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
+                            {tablesInRoom.map((t, idx) => (
+                              <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
+                                <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}</span>
+                                <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
+                                <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
+                              </div>
+                            ))}
+                            {selectedTable && (
+                              <div className="soft-box" style={{ marginTop: 12 }}>
+                                <label>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
+                                  <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                        <button className="btn" onClick={printRiggingDocument}>Skriv ut riggedokument</button>
+                        <button className="btn" onClick={printGuestIllustration}>Skriv ut gjesteillustrasjon</button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
+        {rentalSubTab === "bordplan" && (() => {
+          const venueObj = data.venues.find((v) => v.name === rental.venue);
+          const availableRoomIds = venueObj?.roomIds || [];
+          const availableRooms = (data.rooms || []).filter((r) => availableRoomIds.includes(r.id));
+          const selectedRoomIds = (rental.floorPlanRoomIds || []).filter((id) => availableRoomIds.includes(id));
+          const activeRoomId = plannerActiveRoomId && selectedRoomIds.includes(plannerActiveRoomId) ? plannerActiveRoomId : (selectedRoomIds[0] || "");
+          const activeRoom = roomById(activeRoomId);
+          const scale = activeRoom ? Math.min(680 / Math.max(activeRoom.width, 1), 480 / Math.max(activeRoom.length, 1)) : 1;
+          const roomPxW = activeRoom ? activeRoom.width * scale : 0;
+          const roomPxH = activeRoom ? activeRoom.length * scale : 0;
+          const tablesInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === activeRoomId);
+          const selectedTable = tablesInRoom.find((t) => t.id === plannerSelectedTableId);
+
+          return (
+            <div className="card" style={{ marginTop: 18 }}>
+              <h2>Bordplan</h2>
+
+              {availableRooms.length === 0 ? (
+                <p className="muted">Ingen rom er koblet til lokalet "{rental.venue}" ennå. Gå til Innstillinger → Rombibliotek for å koble rom til lokalet.</p>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 8 }}>
+                    <b style={{ fontSize: 13 }}>Rom som skal planlegges:</b>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                      {availableRooms.map((r) => (
+                        <button key={r.id} type="button" className={selectedRoomIds.includes(r.id) ? "btn active" : "btn"} onClick={() => toggleRoomSelected(r.id)}>{r.name}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedRoomIds.length > 0 && (
+                    <>
+                      {selectedRoomIds.length > 1 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
+                          {selectedRoomIds.map((id) => {
+                            const r = roomById(id);
+                            return r ? <button key={id} type="button" className={activeRoomId === id ? "btn active" : "btn"} onClick={() => setPlannerActiveRoomId(id)}>{r.name}</button> : null;
+                          })}
+                        </div>
+                      )}
+
+                      <div className="form-grid four" style={{ marginTop: 8 }}>
+                        <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setPlannerGuestCount(Number(e.target.value) || 0)} /></label>
+                        <label>Bordtype
+                          <select value={plannerTableTypeId} onChange={(e) => setPlannerTableTypeId(e.target.value)}>
+                            <option value="">Velg bordtype...</option>
+                            {(data.tableTypes || []).filter((t) => t.category === "gjestebord").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </label>
+                        <button className="btn active" style={{ alignSelf: "end" }} onClick={runSuggestion}>Foreslå bordoppsett</button>
+                        <label>Legg til enkeltbord
+                          <select value="" onChange={(e) => { if (e.target.value) addManualTable(e.target.value); }}>
+                            <option value="">Velg type...</option>
+                            {(data.tableTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name} ({t.category})</option>)}
+                          </select>
+                        </label>
+                      </div>
+
+                      {activeRoom && (
+                        <div className="grid two" style={{ marginTop: 12 }}>
+                          <div>
+                            <svg
+                              ref={svgRef}
+                              viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`}
+                              style={{ width: "100%", maxWidth: 680, background: "#f8fafc", borderRadius: 8, touchAction: "none" }}
+                              onPointerMove={(e) => onSvgPointerMove(e, scale)}
+                              onPointerUp={onSvgPointerUp}
+                              onPointerLeave={onSvgPointerUp}
+                            >
+                              <g transform="translate(20,20)">
+                                {plannerWallSegments(activeRoom, "nord", 0, 0, roomPxW, 0, true, scale)}
+                                {plannerWallSegments(activeRoom, "sør", 0, roomPxH, roomPxW, roomPxH, true, scale)}
+                                {plannerWallSegments(activeRoom, "vest", 0, 0, 0, roomPxH, false, scale)}
+                                {plannerWallSegments(activeRoom, "øst", roomPxW, 0, roomPxW, roomPxH, false, scale)}
+                                {activeRoom.obstacles.map((o) => (
+                                  <g key={o.id}>
+                                    <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
+                                    {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
+                                  </g>
+                                ))}
+                                {tablesInRoom.map((t, idx) => {
+                                  const tt = tableTypeById(t.tableTypeId);
+                                  if (!tt) return null;
+                                  const isRound = tt.shape === "rund";
+                                  const w = tt.width * scale;
+                                  const l = (isRound ? tt.width : tt.length) * scale;
+                                  const chair = tt.chairDepth * scale;
+                                  const selected = plannerSelectedTableId === t.id;
+                                  return (
+                                    <g key={t.id} transform={`translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})`} onPointerDown={(e) => onTablePointerDown(e, t.id)} style={{ cursor: "grab" }}>
+                                      {isRound ? (
+                                        <>
+                                          <circle r={w / 2 + chair} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
+                                          <circle r={w / 2} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
+                                        </>
+                                      ) : (
+                                        <>
+                                          <rect x={-w / 2 - chair} y={-l / 2 - chair} width={w + chair * 2} height={l + chair * 2} fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
+                                          <rect x={-w / 2} y={-l / 2} width={w} height={l} fill={selected ? "#c7d2fe" : "#e2e8f0"} stroke="#334155" strokeWidth={selected ? 2 : 1} />
+                                        </>
+                                      )}
+                                      <text textAnchor="middle" dy={4} fontSize={12} fontWeight={700}>{idx + 1}</text>
+                                    </g>
+                                  );
+                                })}
+                              </g>
+                            </svg>
+                            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene for å flytte. Klikk for å velge og redigere.</p>
+                          </div>
+
+                          <div>
+                            <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
+                            {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
+                            {tablesInRoom.map((t, idx) => (
+                              <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
+                                <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}</span>
+                                <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
+                                <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
+                              </div>
+                            ))}
+                            {selectedTable && (
+                              <div className="soft-box" style={{ marginTop: 12 }}>
+                                <label>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
+                                  <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                        <button className="btn" onClick={printRiggingDocument}>Skriv ut riggedokument</button>
+                        <button className="btn" onClick={printGuestIllustration}>Skriv ut gjesteillustrasjon</button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
         </>
       )}
 
