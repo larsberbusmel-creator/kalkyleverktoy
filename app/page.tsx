@@ -154,6 +154,7 @@ type RunSheetItem = { id: string; task: string; responsible?: string; time?: str
 type ChairSides = { north?: boolean; east?: boolean; south?: boolean; west?: boolean };
 type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string; chairSides?: ChairSides; seatsOverride?: number };
 type PlacedChair = { id: string; roomId: string; x: number; y: number; rotation: number };
+type RoomLayoutTemplate = { id: string; name: string; roomId: string; tables: PlacedTable[]; chairs: PlacedChair[] };
 
 type RentalOffer = {
   id?: string;
@@ -328,6 +329,7 @@ type AppData = {
   productLists: ProductList[];
   rooms: Room[];
   tableTypes: TableType[];
+  roomLayoutTemplates: RoomLayoutTemplate[];
   menuCategories: string[];
   productCategories: string[];
   materialCategories: string[];
@@ -517,7 +519,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
   seenOrderIds: [],
-  rentalOffers: [], rooms: [], tableTypes: [],
+  rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -611,6 +613,7 @@ bakeryProductionDays:
 rentalOffers: (raw as any).rentalOffers || [],
     rooms: raw.rooms || [],
     tableTypes: raw.tableTypes || [],
+    roomLayoutTemplates: raw.roomLayoutTemplates || [],
   };
 }
 
@@ -9054,6 +9057,42 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     setRental({ ...rental, floorPlanChairs: (rental.floorPlanChairs || []).filter((c) => c.id !== id) });
   }
 
+  function saveAsLayoutTemplate() {
+    const room = roomById(plannerActiveRoomId);
+    if (!room) return;
+    const existingCount = (data.roomLayoutTemplates || []).filter((tpl) => tpl.roomId === room.id).length;
+    const defaultName = `Oppsett ${existingCount + 1}`;
+    const name = prompt("Navn på standardoppsett:", defaultName);
+    if (!name) return;
+    const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
+    const chairs = (rental.floorPlanChairs || []).filter((c) => c.roomId === room.id);
+    const template: RoomLayoutTemplate = { id: `tpl-${Date.now()}`, name, roomId: room.id, tables, chairs };
+    updateData({ roomLayoutTemplates: [...(data.roomLayoutTemplates || []), template] });
+    alert(`Lagret som "${name}".`);
+  }
+
+  function loadLayoutTemplate(templateId: string) {
+    const template = (data.roomLayoutTemplates || []).find((tpl) => tpl.id === templateId);
+    if (!template) return;
+    const existingInRoom = (rental.floorPlanTables || []).filter((t) => t.roomId === template.roomId).length;
+    if (existingInRoom > 0 && !confirm("Dette erstatter bordoppsettet som allerede ligger i dette rommet for dette tilbudet. Fortsette?")) return;
+    const idMap: Record<string, string> = {};
+    const newTables = template.tables.map((t) => {
+      const newId = `pt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      idMap[t.id] = newId;
+      return { ...t, id: newId };
+    });
+    const newChairs = template.chairs.map((c) => ({ ...c, id: `chair-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }));
+    const otherTables = (rental.floorPlanTables || []).filter((t) => t.roomId !== template.roomId);
+    const otherChairs = (rental.floorPlanChairs || []).filter((c) => c.roomId !== template.roomId);
+    setRental({ ...rental, floorPlanTables: [...otherTables, ...newTables], floorPlanChairs: [...otherChairs, ...newChairs] });
+  }
+
+  function deleteLayoutTemplate(templateId: string) {
+    if (!confirm("Slette dette standardoppsettet?")) return;
+    updateData({ roomLayoutTemplates: (data.roomLayoutTemplates || []).filter((tpl) => tpl.id !== templateId) });
+  }
+
   function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number): PlacedTable[] {
     const margin = 40;
     const spacing = 25;
@@ -9763,12 +9802,45 @@ ${opts.produksjon ? productionPageHtml : ""}
                               const guestSeats = tablesInRoom.reduce((sum, t) => {
                                 const tt = tableTypeById(t.tableTypeId);
                                 return tt?.category === "gjestebord" ? sum + seatsFor(t) : sum;
-                              }, 0);
+                              }, 0) + (rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).length;
                               const diff = guestSeats - plannerGuestCount;
                               const color = diff < 0 ? "#dc2626" : "#166534";
                               return <span style={{ color }}>Plass til {guestSeats} av {plannerGuestCount} gjester{diff !== 0 ? ` (${diff > 0 ? "+" : ""}${diff})` : ""}</span>;
                             })()}
                           </p>
+<p style={{ marginTop: 8, fontWeight: 700, fontSize: 14 }}>
+                            {(() => {
+                              const guestSeats = tablesInRoom.reduce((sum, t) => {
+                                const tt = tableTypeById(t.tableTypeId);
+                                return tt?.category === "gjestebord" ? sum + seatsFor(t) : sum;
+                              }, 0) + (rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).length;
+                              const diff = guestSeats - plannerGuestCount;
+                              const color = diff < 0 ? "#dc2626" : "#166534";
+                              return <span style={{ color }}>Plass til {guestSeats} av {plannerGuestCount} gjester{diff !== 0 ? ` (${diff > 0 ? "+" : ""}${diff})` : ""}</span>;
+                            })()}
+                          </p>
+
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                            <button className="btn" onClick={saveAsLayoutTemplate}>Lagre som standardoppsett</button>
+                            <label style={{ margin: 0 }}>Last inn standardoppsett
+                              <select value="" onChange={(e) => { if (e.target.value) loadLayoutTemplate(e.target.value); }}>
+                                <option value="">Velg oppsett...</option>
+                                {(data.roomLayoutTemplates || []).filter((tpl) => tpl.roomId === activeRoomId).map((tpl) => (
+                                  <option key={tpl.id} value={tpl.id}>{tpl.name} ({tpl.tables.length} bord)</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          {(data.roomLayoutTemplates || []).filter((tpl) => tpl.roomId === activeRoomId).length > 0 && (
+                            <div style={{ marginTop: 6 }}>
+                              {(data.roomLayoutTemplates || []).filter((tpl) => tpl.roomId === activeRoomId).map((tpl) => (
+                                <div key={tpl.id} className="editable-row">
+                                  <span>{tpl.name} · {tpl.tables.length} bord, {tpl.chairs.length} løse stoler</span>
+                                  <button className="link danger" onClick={() => deleteLayoutTemplate(tpl.id)}>Slett</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
                           {activeRoom && (
                             <div className="grid two" style={{ marginTop: 12 }}>
@@ -9826,12 +9898,15 @@ ${opts.produksjon ? productionPageHtml : ""}
                                         </g>
                                       );
                                     })}
-                                    {(rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).map((c) => (
-                                      <g key={c.id} transform={`translate(${c.x * scale},${c.y * scale}) rotate(${c.rotation})`} onPointerDown={(e) => onTablePointerDown(e, c.id)} style={{ cursor: "grab" }}>
-                                        <rect x={-9} y={-9} width={18} height={18} rx={3} fill="#fde68a" stroke="#92400e" strokeWidth={1.5} />
-                                        <line x1={-8} y1={-9} x2={8} y2={-9} stroke="#92400e" strokeWidth={2.5} />
-                                      </g>
-                                    ))}
+                                    {(rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).map((c) => {
+                                      const looseChairSizePx = 45 * scale;
+                                      return (
+                                        <g key={c.id} transform={`translate(${c.x * scale},${c.y * scale}) rotate(${c.rotation})`} onPointerDown={(e) => onTablePointerDown(e, c.id)} style={{ cursor: "grab" }}>
+                                          <rect x={-looseChairSizePx / 2} y={-looseChairSizePx / 2} width={looseChairSizePx} height={looseChairSizePx} rx={3} fill="#fde68a" stroke="#92400e" strokeWidth={1.5} />
+                                          <line x1={-looseChairSizePx / 2 + 1} y1={-looseChairSizePx / 2} x2={looseChairSizePx / 2 - 1} y2={-looseChairSizePx / 2} stroke="#92400e" strokeWidth={2.5} />
+                                        </g>
+                                      );
+                                    })}
                                   </g>
                                 </svg>
                                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene (eller løse stoler) for å flytte. Klikk et bord for å velge og redigere.</p>
