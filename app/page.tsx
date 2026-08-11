@@ -9100,25 +9100,33 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
   function suggestTablePlacement(room: Room, tableType: TableType, guestCount: number, margin: number, spacing: number): PlacedTable[] {
     const tablesNeeded = Math.max(1, Math.ceil(guestCount / Math.max(tableType.seats, 1)));
     const blockers = [...room.obstacles, ...(room.exclusionZones || [])];
+    const usableW = Math.max(1, room.width - margin * 2);
+    const usableL = Math.max(1, room.length - margin * 2);
 
     function fillGrid(footprintW: number, footprintL: number, rotation: number): PlacedTable[] {
-      const cols = Math.max(1, Math.floor((room.width - margin * 2) / footprintW));
+      const maxCols = Math.max(1, Math.floor(usableW / footprintW));
+      const cols = Math.max(1, Math.min(maxCols, tablesNeeded));
+      const rowsNeeded = Math.max(1, Math.ceil(tablesNeeded / cols));
+      if (rowsNeeded * footprintL > usableL) return []; // doesn't fit even packed tight
+      const cellW = Math.max(footprintW, usableW / cols);
+      const cellL = Math.max(footprintL, usableL / rowsNeeded);
       const placed: PlacedTable[] = [];
-      let row = 0, col = 0, attempts = 0;
-      while (placed.length < tablesNeeded && attempts < 500) {
-        attempts++;
-        const x = margin + col * footprintW + footprintW / 2;
-        const y = margin + row * footprintL + footprintL / 2;
-        if (y + footprintL / 2 > room.length - margin) break;
-        const overlaps = blockers.some((o) => {
-          const left = x - footprintW / 2, right = x + footprintW / 2, top = y - footprintL / 2, bottom = y + footprintL / 2;
-          return !(right < o.x || left > o.x + o.width || bottom < o.y || top > o.y + o.height);
-        });
-        if (!overlaps) {
-          placed.push({ id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`, tableTypeId: tableType.id, roomId: room.id, x: Math.round(x), y: Math.round(y), rotation, chairSides: tableType.defaultChairSides });
+      let placedCount = 0;
+      for (let r = 0; r < rowsNeeded && placedCount < tablesNeeded; r++) {
+        const countInRow = Math.min(cols, tablesNeeded - placedCount);
+        const rowOffsetX = ((cols - countInRow) * cellW) / 2;
+        for (let c = 0; c < countInRow; c++) {
+          const x = margin + rowOffsetX + c * cellW + cellW / 2;
+          const y = margin + r * cellL + cellL / 2;
+          const overlaps = blockers.some((o) => {
+            const left = x - footprintW / 2, right = x + footprintW / 2, top = y - footprintL / 2, bottom = y + footprintL / 2;
+            return !(right < o.x || left > o.x + o.width || bottom < o.y || top > o.y + o.height);
+          });
+          if (!overlaps) {
+            placed.push({ id: `pt-${Date.now()}-${placed.length}-${Math.random().toString(36).slice(2, 6)}`, tableTypeId: tableType.id, roomId: room.id, x: Math.round(x), y: Math.round(y), rotation, chairSides: tableType.defaultChairSides });
+            placedCount++;
+          }
         }
-        col++;
-        if (col >= cols) { col = 0; row++; }
       }
       return placed;
     }
@@ -9144,10 +9152,14 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
       rowCounts.push(count);
       remaining -= count;
     }
+    const usableL = Math.max(1, room.length - margin * 2);
+    const minRowPitch = rowDepth + spacing;
+    const rowsCountTotal = rowCounts.length;
+    if (rowsCountTotal * minRowPitch > usableL) return [];
+    const rowPitch = Math.max(minRowPitch, usableL / rowsCountTotal);
     const placed: PlacedTable[] = [];
-    let y = margin + rowDepth / 2;
-    for (const count of rowCounts) {
-      if (y + rowDepth / 2 > room.length - margin) break;
+    rowCounts.forEach((count, rowIndex) => {
+      const y = margin + rowIndex * rowPitch + rowPitch / 2;
       const rowLength = count * length;
       const startX = margin + (room.width - margin * 2 - rowLength) / 2 + length / 2;
       const groupId = `grp-${Date.now()}-${placed.length}`;
@@ -9171,8 +9183,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
           });
         }
       }
-      y += rowDepth + spacing;
-    }
+    });
     return placed;
   }
 
