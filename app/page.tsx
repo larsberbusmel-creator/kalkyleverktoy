@@ -316,7 +316,7 @@ type CalendarNote = {
 };
 
 type RoomOpening = { id: string; type: "dør" | "vindu"; wall: "nord" | "øst" | "sør" | "vest"; position: number; width: number };
-type RoomObstacle = { id: string; type: "søyle" | "flygel/piano" | "annet"; x: number; y: number; width: number; height: number; label?: string };
+type RoomObstacle = { id: string; type: "søyle" | "flygel/piano" | "annet"; x: number; y: number; width: number; height: number; label?: string; color?: string };
 type RoomExclusionZone = { id: string; x: number; y: number; width: number; height: number; label?: string };
 type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; exclusionZones?: RoomExclusionZone[]; notes?: string };
 type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; chairSize?: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet"; joinable?: boolean; defaultChairSides?: ChairSides };
@@ -9336,7 +9336,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     }
     const wallsHtml = segmentsStr("nord", 0, 0, roomPxW, 0, true) + segmentsStr("sør", 0, roomPxH, roomPxW, roomPxH, true) + segmentsStr("vest", 0, 0, 0, roomPxH, false) + segmentsStr("øst", roomPxW, 0, roomPxW, roomPxH, false);
     const obstaclesHtml = room.obstacles.map((o) => technical
-      ? `<rect x="${o.x * scale}" y="${o.y * scale}" width="${o.width * scale}" height="${o.height * scale}" fill="#fecaca" stroke="#dc2626" stroke-width="1" />${o.label ? `<text x="${o.x * scale + 4}" y="${o.y * scale + 14}" font-size="10" fill="#7f1d1d">${escapeHtml(o.label)}</text>` : ""}`
+      ? `<rect x="${o.x * scale}" y="${o.y * scale}" width="${o.width * scale}" height="${o.height * scale}" fill="${o.color || "#fecaca"}" stroke="#334155" stroke-width="1" />${o.label ? `<text x="${o.x * scale + 4}" y="${o.y * scale + 14}" font-size="10" fill="#7f1d1d">${escapeHtml(o.label)}</text>` : ""}`
       : `<rect x="${o.x * scale}" y="${o.y * scale}" width="${o.width * scale}" height="${o.height * scale}" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1" />`
     ).join("");
     const tablesHtml = tables.map((t, i) => {
@@ -9345,11 +9345,17 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
       const isRound = tt.shape === "rund";
       const w = tt.width * scale;
       const l = (isRound ? tt.width : tt.length) * scale;
-      const chair = technical ? tt.chairDepth * scale : 0;
+      const chair = tt.chairDepth * scale;
+      const chairSizePx = (tt.chairSize || 45) * scale;
+      const sides = chairSidesFor(t);
+      const chairsArr = chairPositions(isRound, w, l, chair, chairSizePx, seatsFor(t), sides);
+      const chairsHtml = chairsArr.map((c) =>
+        `<g transform="translate(${c.x},${c.y}) rotate(${c.angle})"><rect x="${-chairSizePx / 2}" y="${-chairSizePx / 2}" width="${chairSizePx}" height="${chairSizePx}" rx="3" fill="#fde68a" stroke="#92400e" stroke-width="1" /><line x1="${-chairSizePx / 2 + 1}" y1="${-chairSizePx / 2}" x2="${chairSizePx / 2 - 1}" y2="${-chairSizePx / 2}" stroke="#92400e" stroke-width="2" /></g>`
+      ).join("");
       const shapeHtml = isRound
-        ? `${technical ? `<circle r="${w / 2 + chair}" fill="none" stroke="#94a3b8" stroke-dasharray="4 3" />` : ""}<circle r="${w / 2}" fill="#e2e8f0" stroke="#334155" stroke-width="1.5" />`
-        : `${technical ? `<rect x="${-w / 2 - chair}" y="${-l / 2 - chair}" width="${w + chair * 2}" height="${l + chair * 2}" fill="none" stroke="#94a3b8" stroke-dasharray="4 3" />` : ""}<rect x="${-w / 2}" y="${-l / 2}" width="${w}" height="${l}" fill="#e2e8f0" stroke="#334155" stroke-width="1.5" />`;
-      return `<g transform="translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})">${shapeHtml}<text text-anchor="middle" dy="4" font-size="13" font-weight="700">${i + 1}</text></g>`;
+        ? `<circle r="${w / 2}" fill="#e2e8f0" stroke="#334155" stroke-width="1.5" />`
+        : `<rect x="${-w / 2}" y="${-l / 2}" width="${w}" height="${l}" fill="#e2e8f0" stroke="#334155" stroke-width="1.5" />`;
+      return `<g transform="translate(${t.x * scale},${t.y * scale}) rotate(${t.rotation})">${chairsHtml}${shapeHtml}<text text-anchor="middle" dy="4" font-size="13" font-weight="700">${i + 1}</text></g>`;
     }).join("");
     return `<svg viewBox="0 0 ${roomPxW + 40} ${roomPxH + 40}" style="width:100%;max-width:680px;background:#f8fafc;border-radius:8px"><g transform="translate(20,20)">${wallsHtml}${obstaclesHtml}${tablesHtml}</g></svg>`;
   }
@@ -10032,7 +10038,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                     ))}
                                     {activeRoom.obstacles.map((o) => (
                                       <g key={o.id}>
-                                        <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
+                                        <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill={o.color || "#fecaca"} stroke="#334155" strokeWidth={1} />
                                         {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
                                       </g>
                                     ))}
@@ -10291,17 +10297,50 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
   function removeOpening(id: string) {
     setRoomForm({ ...roomForm, openings: roomForm.openings.filter((o) => o.id !== id) });
   }
+  const [editingObstacleId, setEditingObstacleId] = useState<string | null>(null);
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+
   function addObstacle() {
-    setRoomForm({ ...roomForm, obstacles: [...roomForm.obstacles, { ...obstacleForm, id: `ob-${Date.now()}` }] });
+    if (editingObstacleId) {
+      setRoomForm({ ...roomForm, obstacles: roomForm.obstacles.map((o) => o.id === editingObstacleId ? { ...obstacleForm, id: editingObstacleId } : o) });
+      setEditingObstacleId(null);
+    } else {
+      setRoomForm({ ...roomForm, obstacles: [...roomForm.obstacles, { ...obstacleForm, id: `ob-${Date.now()}` }] });
+    }
+    setObstacleForm({ type: "søyle", x: 0, y: 0, width: 40, height: 40, label: "" });
+  }
+  function editObstacle(o: RoomObstacle) {
+    setObstacleForm({ type: o.type, x: o.x, y: o.y, width: o.width, height: o.height, label: o.label, color: o.color });
+    setEditingObstacleId(o.id);
+  }
+  function cancelEditObstacle() {
+    setEditingObstacleId(null);
+    setObstacleForm({ type: "søyle", x: 0, y: 0, width: 40, height: 40, label: "" });
   }
   function removeObstacle(id: string) {
     setRoomForm({ ...roomForm, obstacles: roomForm.obstacles.filter((o) => o.id !== id) });
+    if (editingObstacleId === id) cancelEditObstacle();
   }
   function addZone() {
-    setRoomForm({ ...roomForm, exclusionZones: [...(roomForm.exclusionZones || []), { ...zoneForm, id: `ez-${Date.now()}` }] });
+    if (editingZoneId) {
+      setRoomForm({ ...roomForm, exclusionZones: (roomForm.exclusionZones || []).map((z) => z.id === editingZoneId ? { ...zoneForm, id: editingZoneId } : z) });
+      setEditingZoneId(null);
+    } else {
+      setRoomForm({ ...roomForm, exclusionZones: [...(roomForm.exclusionZones || []), { ...zoneForm, id: `ez-${Date.now()}` }] });
+    }
+    setZoneForm({ x: 0, y: 0, width: 60, height: 60, label: "" });
+  }
+  function editZone(z: RoomExclusionZone) {
+    setZoneForm({ x: z.x, y: z.y, width: z.width, height: z.height, label: z.label });
+    setEditingZoneId(z.id);
+  }
+  function cancelEditZone() {
+    setEditingZoneId(null);
+    setZoneForm({ x: 0, y: 0, width: 60, height: 60, label: "" });
   }
   function removeZone(id: string) {
     setRoomForm({ ...roomForm, exclusionZones: (roomForm.exclusionZones || []).filter((z) => z.id !== id) });
+    if (editingZoneId === id) cancelEditZone();
   }
 
   const [editingTableTypeId, setEditingTableTypeId] = useState<string | null>(null);
@@ -10453,7 +10492,8 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
             <label>X fra venstre (cm)<input type="number" value={obstacleForm.x} onChange={(e) => setObstacleForm({ ...obstacleForm, x: Number(e.target.value) || 0 })} /></label>
             <label>Y fra topp (cm)<input type="number" value={obstacleForm.y} onChange={(e) => setObstacleForm({ ...obstacleForm, y: Number(e.target.value) || 0 })} /></label>
             <label>Bredde (cm)<input type="number" value={obstacleForm.width} onChange={(e) => setObstacleForm({ ...obstacleForm, width: Number(e.target.value) || 0 })} /></label>
-            <label>Dybde (cm)<input type="number" value={obstacleForm.height} onChange={(e) => setObstacleForm({ ...obstacleForm, height: Number(e.target.value) || 0 })} /></label>
+            <label>Dybde (cm)<input type="number" value={obstacleForm.height} onChange={(e) => setObstacleForm({ ...obstacleForm, height: Number(e.target.value) || 0 })} /></label><label>Dybde (cm)<input type="number" value={obstacleForm.height} onChange={(e) => setObstacleForm({ ...obstacleForm, height: Number(e.target.value) || 0 })} /></label>
+            <label>Farge<input type="color" value={obstacleForm.color || "#fecaca"} onChange={(e) => setObstacleForm({ ...obstacleForm, color: e.target.value })} /></label>
           </div>
           <button className="btn" onClick={addObstacle}>Legg til hindring</button>
           {roomForm.obstacles.length > 0 && (
@@ -10503,23 +10543,30 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
           <h3>Forhåndsvisning</h3>
           {roomForm.width > 0 && roomForm.length > 0 ? (
             <svg viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`} style={{ width: "100%", maxWidth: 560, background: "#f8fafc", borderRadius: 8 }}>
+              <defs>
+                <clipPath id="roomClipLib">
+                  <rect x={0} y={0} width={roomPxW} height={roomPxH} />
+                </clipPath>
+              </defs>
               <g transform="translate(20,20)">
+                <g clipPath="url(#roomClipLib)">
+                  {(roomForm.exclusionZones || []).map((z) => (
+                    <g key={z.id}>
+                      <rect x={z.x * scale} y={z.y * scale} width={z.width * scale} height={z.height * scale} fill="#fef9c3" stroke="#ca8a04" strokeWidth={1} strokeDasharray="5 3" opacity={0.7} />
+                      {z.label && <text x={z.x * scale + 4} y={z.y * scale + 14} fontSize={10} fill="#854d0e">{z.label}</text>}
+                    </g>
+                  ))}
+                  {roomForm.obstacles.map((o) => (
+                    <g key={o.id}>
+                      <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill={o.color || "#fecaca"} stroke="#334155" strokeWidth={1} />
+                      {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
+                    </g>
+                  ))}
+                </g>
                 {renderWallWithOpenings("nord", 0, 0, roomPxW, 0, true)}
                 {renderWallWithOpenings("sør", 0, roomPxH, roomPxW, roomPxH, true)}
                 {renderWallWithOpenings("vest", 0, 0, 0, roomPxH, false)}
                 {renderWallWithOpenings("øst", roomPxW, 0, roomPxW, roomPxH, false)}
-                {(roomForm.exclusionZones || []).map((z) => (
-                  <g key={z.id}>
-                    <rect x={z.x * scale} y={z.y * scale} width={z.width * scale} height={z.height * scale} fill="#fef9c3" stroke="#ca8a04" strokeWidth={1} strokeDasharray="5 3" opacity={0.7} />
-                    {z.label && <text x={z.x * scale + 4} y={z.y * scale + 14} fontSize={10} fill="#854d0e">{z.label}</text>}
-                  </g>
-                ))}
-                {roomForm.obstacles.map((o) => (
-                  <g key={o.id}>
-                    <rect x={o.x * scale} y={o.y * scale} width={o.width * scale} height={o.height * scale} fill="#fecaca" stroke="#dc2626" strokeWidth={1} />
-                    {o.label && <text x={o.x * scale + 4} y={o.y * scale + 14} fontSize={10} fill="#7f1d1d">{o.label}</text>}
-                  </g>
-                ))}
               </g>
             </svg>
           ) : <p className="muted">Fyll inn bredde og lengde for å se forhåndsvisning.</p>}
