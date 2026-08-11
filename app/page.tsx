@@ -220,7 +220,8 @@ type InventoryMonthData = {
   profitability?: ProfitabilityInput;
 };
 
-type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean };
+type RentalAddonPackingItem = { id: string; name: string; unit: string; qty: number };
+type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean; packingItems?: RentalAddonPackingItem[] };
 
 type ProductListKind = "bakst" | "catering" | "storkjokken";
 
@@ -9408,7 +9409,7 @@ h2{margin-bottom:16px}
         return tt && (!shape || tt.shape === shape);
       }).length;
     }
-    return (data.coverItems || [])
+    const coverRows = (data.coverItems || [])
       .filter((item) => !item.mealType || item.mealType === rental.mealType)
       .map((item) => {
         let qty = 0;
@@ -9417,6 +9418,17 @@ h2{margin-bottom:16px}
         if (item.rule === "per_table") qty = tableCountForShape(item.tableShape) * item.qtyPerUnit;
         return { name: item.name, unit: item.unit, qty: Math.ceil(qty) };
       });
+    const selectedAddonNames = new Set((rental.extraLines || []).map((l) => l.text));
+    const addonRowsMap: Record<string, { name: string; unit: string; qty: number }> = {};
+    (data.rentalAddons || []).forEach((addon) => {
+      if (!selectedAddonNames.has(addon.name)) return;
+      (addon.packingItems || []).forEach((pi) => {
+        const key = `${pi.name}__${pi.unit}`;
+        if (!addonRowsMap[key]) addonRowsMap[key] = { name: pi.name, unit: pi.unit, qty: 0 };
+        addonRowsMap[key].qty += pi.qty;
+      });
+    });
+    return [...coverRows, ...Object.values(addonRowsMap)];
   }
 
   function printPackingList() {
@@ -10680,6 +10692,24 @@ const SettingsTab = React.memo(function SettingsTab({
   const [newVenue, setNewVenue] = useState({ name: "", price: "0" });
   const [newPackaging, setNewPackaging] = useState({ name: "", price: "0" });
 const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", perUnit: false });
+const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null);
+const [addonPackingForm, setAddonPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
+
+function addAddonPackingItem(addonId: string) {
+  if (!addonPackingForm.name.trim()) return;
+  const next = localRentalAddons.map((a) => a.id === addonId
+    ? { ...a, packingItems: [...(a.packingItems || []), { id: `api-${Date.now()}`, name: addonPackingForm.name.trim(), unit: addonPackingForm.unit, qty: Number(addonPackingForm.qty) || 0 }] }
+    : a);
+  setLocalRentalAddons(next);
+  updateData({ rentalAddons: next });
+  setAddonPackingForm({ name: "", unit: "stk", qty: "1" });
+}
+
+function removeAddonPackingItem(addonId: string, itemId: string) {
+  const next = localRentalAddons.map((a) => a.id === addonId ? { ...a, packingItems: (a.packingItems || []).filter((p) => p.id !== itemId) } : a);
+  setLocalRentalAddons(next);
+  updateData({ rentalAddons: next });
+}
 
   const [localSettings, setLocalSettings] = useState(data.settings);
   const [localVenues, setLocalVenues] = useState(data.venues);
@@ -10841,6 +10871,26 @@ const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", per
                 setLocalRentalAddons(next);
                 updateData({ rentalAddons: next });
               }}>Slett</button>
+              <button className="link" onClick={() => setExpandedAddonId(expandedAddonId === addon.id ? null : addon.id)}>
+                Pakkeliste-innhold ({(addon.packingItems || []).length})
+              </button>
+              {expandedAddonId === addon.id && (
+                <div className="soft-box" style={{ width: "100%", marginTop: 8 }}>
+                  <p className="muted" style={{ fontSize: 12 }}>Faste artikler som legges til pakkelisten når kunden velger "{addon.name}" (uavhengig av gjesteantall).</p>
+                  {(addon.packingItems || []).map((pi) => (
+                    <div key={pi.id} className="editable-row">
+                      <span>{pi.name} · {pi.qty} {pi.unit}</span>
+                      <button className="link danger" onClick={() => removeAddonPackingItem(addon.id, pi.id)}>Slett</button>
+                    </div>
+                  ))}
+                  <div className="form-grid three" style={{ marginTop: 8 }}>
+                    <input placeholder="Navn (f.eks. Knust is)" value={addonPackingForm.name} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, name: e.target.value })} />
+                    <input placeholder="Enhet (kg, stk...)" value={addonPackingForm.unit} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, unit: e.target.value })} />
+                    <input type="number" placeholder="Antall" value={addonPackingForm.qty} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, qty: e.target.value })} />
+                  </div>
+                  <button className="btn active" style={{ marginTop: 8 }} onClick={() => addAddonPackingItem(addon.id)}>Legg til artikkel</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
