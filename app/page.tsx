@@ -253,6 +253,17 @@ type StorkjokkenCustomer = {
   phone?: string;
   active?: boolean;
   internal?: boolean;
+  pin?: string;
+};
+
+type PendingPortalOrderLine = { productId: string; quantity: number };
+type PendingPortalOrder = {
+  id: string;
+  customerId: string;
+  date: string;
+  lines: PendingPortalOrderLine[];
+  submittedAt: string;
+  status: "pending" | "approved" | "rejected";
 };
 
 type StorkjokkenSpecialPrice = {
@@ -348,6 +359,7 @@ type AppData = {
   storkjokkenCustomers: StorkjokkenCustomer[];
   storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
   storkjokkenPickupOrders: StorkjokkenPickupOrder[];
+  pendingPortalOrders: PendingPortalOrder[];
   productPriceLog: ProductPriceLogEntry[];
   scheduledPriceChanges: ScheduledPriceChange[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
@@ -521,6 +533,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   storkjokkenCustomers: [],
   storkjokkenSpecialPrices: [],
   storkjokkenPickupOrders: [],
+  pendingPortalOrders: [],
   productPriceLog: [],
   scheduledPriceChanges: [],
   recurringStorkjokkenOrders: [],
@@ -593,6 +606,9 @@ storkjokkenSpecialPrices:
 
 storkjokkenPickupOrders:
   (raw as any).storkjokkenPickupOrders || [],
+
+pendingPortalOrders:
+  (raw as any).pendingPortalOrders || [],
 
 productPriceLog:
   (raw as any).productPriceLog || [],
@@ -5768,19 +5784,31 @@ function ProductionTab({
     updateData({ bakeryProductionTemplateLines: (data.bakeryProductionTemplateLines || []).filter((x) => x.id !== id) });
   }
 
+  function generateUniquePin(): string {
+    const existing = new Set((data.storkjokkenCustomers || []).map((c) => c.pin).filter(Boolean));
+    let pin: string;
+    do {
+      pin = String(Math.floor(10000 + Math.random() * 90000));
+    } while (existing.has(pin));
+    return pin;
+  }
+
   function addCustomer() {
     if (!newCustomer.name.trim()) return alert("Legg inn kundenavn.");
+    const pin = generateUniquePin();
     const customer: StorkjokkenCustomer = {
       id: `customer-${Date.now()}`, name: newCustomer.name.trim(), orgNumber: newCustomer.orgNumber,
       address: newCustomer.address, deliveryAddress: newCustomer.deliveryAddress, phone: newCustomer.phone, active: true,
+      pin,
     };
     updateData({ storkjokkenCustomers: [...(data.storkjokkenCustomers || []), customer] });
     setNewCustomer({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "" });
+    alert(`Kunde opprettet. Kundenummer/PIN: ${pin}`);
   }
 
   function startEditCustomer(customer: StorkjokkenCustomer) {
     setEditingCustomerId(customer.id);
-    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal });
+    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin });
   }
 
   function cancelEditCustomer() {
@@ -5822,6 +5850,30 @@ function ProductionTab({
     if (!productId || !quantity) return;
     const entry: StorkjokkenPickupOrder = { id: `pickup-${Date.now()}`, customerId, productId, quantity, date: today(), createdAt: new Date().toISOString(), priceExVat: priceForCustomer(productId, customerId) };
     updateData({ storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), entry] });
+  }
+
+  function approvePendingPortalOrder(id: string) {
+    const pending = (data.pendingPortalOrders || []).find((p) => p.id === id);
+    if (!pending) return;
+    const newPickups: StorkjokkenPickupOrder[] = pending.lines
+      .filter((l) => l.quantity > 0)
+      .map((l, i) => ({
+        id: `pickup-${Date.now()}-${i}`,
+        customerId: pending.customerId,
+        productId: l.productId,
+        quantity: l.quantity,
+        date: pending.date,
+        createdAt: new Date().toISOString(),
+        priceExVat: priceForCustomer(l.productId, pending.customerId),
+      }));
+    updateData({
+      storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), ...newPickups],
+      pendingPortalOrders: (data.pendingPortalOrders || []).map((p) => p.id === id ? { ...p, status: "approved" } : p),
+    });
+  }
+
+  function rejectPendingPortalOrder(id: string) {
+    updateData({ pendingPortalOrders: (data.pendingPortalOrders || []).map((p) => p.id === id ? { ...p, status: "rejected" } : p) });
   }
 
   function deletePickupOrder(id: string) {
@@ -6897,7 +6949,7 @@ ${orderPages}`;
                             <button className="link" disabled={i === 0} onClick={() => moveCustomer(customer.id, -1)}>↑</button>
                             <button className="link" disabled={i === (data.storkjokkenCustomers || []).length - 1} onClick={() => moveCustomer(customer.id, 1)}>↓</button>
                           </td>
-                          <td><b>{customer.name}</b>{!isActiveCustomer && <span style={{ color: "#94a3b8" }}> (arkivert)</span>}</td>
+                          <td><b>{customer.name}</b>{customer.pin && <span style={{ color: "#64748b", fontSize: 12 }}> · PIN {customer.pin}</span>}{!isActiveCustomer && <span style={{ color: "#94a3b8" }}> (arkivert)</span>}</td>
                           <td style={{ whiteSpace: "nowrap" }}>
                             {isActiveCustomer ? (
                               <>
@@ -6922,11 +6974,18 @@ ${orderPages}`;
                                   <input value={customerDraft.deliveryAddress || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
                                   <input value={customerDraft.phone || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
                                 </div>
-                                <div style={{ marginTop: 8 }}>
+                                <div style={{ marginTop: 8, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
                                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                                     <input type="checkbox" checked={!!customerDraft.internal} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
                                     Intern
                                   </label>
+                                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                    PIN-kode (portal)
+                                    <input style={{ width: 100 }} value={customerDraft.pin || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, pin: e.target.value.replace(/[^0-9]/g, "") })} placeholder="f.eks. 4821" maxLength={6} />
+                                  </label>
+                                  {!customerDraft.pin && (
+                                    <button type="button" className="link" onClick={() => setCustomerDraft({ ...customerDraft, pin: generateUniquePin() })}>Generer PIN</button>
+                                  )}
                                 </div>
                                 <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between" }}>
                                   <button className="link danger" onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
@@ -6993,6 +7052,41 @@ ${orderPages}`;
                   })}
                 </tbody>
               </table>
+
+              <h3 style={{ marginTop: 24 }}>Bestillinger fra kundeportal til godkjenning</h3>
+              {(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length === 0 ? (
+                <p className="muted">Ingen ventende bestillinger.</p>
+              ) : (
+                (data.pendingPortalOrders || []).filter((p) => p.status === "pending").map((p) => {
+                  const customer = (data.storkjokkenCustomers || []).find((c) => c.id === p.customerId);
+                  const isLate = p.date <= addDays(today(), 1) && new Date().getHours() >= 12;
+                  return (
+                    <div key={p.id} className="soft-box" style={{ marginBottom: 10 }}>
+                      <div className="between">
+                        <b>{customer?.name || "Ukjent kunde"} · levering {formatDateNo(p.date)}</b>
+                        <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(p.submittedAt).toLocaleString("no-NO")}</span>
+                      </div>
+                      {isLate && <p style={{ color: "#dc2626", fontWeight: 700, fontSize: 13 }}>⚠ Sendt inn etter kl. 12-fristen for denne datoen.</p>}
+                      <table style={{ marginTop: 8 }}>
+                        <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Antall</th></tr></thead>
+                        <tbody>
+                          {p.lines.map((l, i) => (
+                            <tr key={i}>
+                              <td>{data.products.find((prod) => prod.id === l.productId)?.name || "Ukjent produkt"}</td>
+                              <td style={{ textAlign: "right" }}>{l.quantity}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                        <button className="btn active" onClick={() => approvePendingPortalOrder(p.id)}>Godkjenn</button>
+                        <button className="btn" onClick={() => rejectPendingPortalOrder(p.id)}>Avslå</button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+
               <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
               {storkjokkenCustomers.map((customer) => {
                 const isOpen = expandedCustomerId === customer.id;
