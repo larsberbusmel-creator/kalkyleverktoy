@@ -9312,11 +9312,71 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.groupId === groupId ? { ...t, groupId: undefined, chairSides: undefined } : t) });
   }
 
+  function rotateLongTableGroup(groupId: string) {
+    const tables = rental.floorPlanTables || [];
+    const members = tables.filter((t) => t.groupId === groupId);
+    if (!members.length) return;
+    const first = members[0];
+    const tt = tableTypeById(first.tableTypeId);
+    if (!tt) return;
+
+    const cx = (Math.min(...members.map((m) => m.x)) + Math.max(...members.map((m) => m.x))) / 2;
+    const cy = (Math.min(...members.map((m) => m.y)) + Math.max(...members.map((m) => m.y))) / 2;
+
+    const newRotation = (first.rotation + 90) % 360;
+    const rot = ((Math.round(newRotation / 90) * 90) % 360 + 360) % 360;
+    const rotatedSideways = rot === 90 || rot === 270;
+    const screenW = rotatedSideways ? tt.length : tt.width;
+    const screenL = rotatedSideways ? tt.width : tt.length;
+
+    const screenToLocal: Record<number, Record<"up" | "right" | "down" | "left", keyof ChairSides>> = {
+      0:   { up: "north", right: "east",  down: "south", left: "west" },
+      90:  { up: "west",  right: "north", down: "east",  left: "south" },
+      180: { up: "south", right: "west",  down: "north", left: "east" },
+      270: { up: "east",  right: "south", down: "west",  left: "north" },
+    };
+    const map = screenToLocal[rot];
+
+    const spanX = Math.max(...members.map((m) => m.x)) - Math.min(...members.map((m) => m.x));
+    const spanY = Math.max(...members.map((m) => m.y)) - Math.min(...members.map((m) => m.y));
+    const wasVertical = spanY >= spanX;
+    const vertical = !wasVertical;
+    const step = vertical ? screenL : screenW;
+    const totalSpan = step * (members.length - 1);
+    const startX = vertical ? cx : cx - totalSpan / 2;
+    const startY = vertical ? cy - totalSpan / 2 : cy;
+
+    const updated = members.map((t, i) => {
+      const isFirst = i === 0, isLast = i === members.length - 1;
+      const chairSides: ChairSides = {};
+      if (vertical) {
+        chairSides[map.left] = true;
+        chairSides[map.right] = true;
+        chairSides[map.up] = isFirst;
+        chairSides[map.down] = isLast;
+      } else {
+        chairSides[map.up] = true;
+        chairSides[map.down] = true;
+        chairSides[map.left] = isFirst;
+        chairSides[map.right] = isLast;
+      }
+      return vertical
+        ? { ...t, rotation: newRotation, x: Math.round(startX), y: Math.round(startY + i * step), chairSides }
+        : { ...t, rotation: newRotation, x: Math.round(startX + i * step), y: Math.round(startY), chairSides };
+    });
+    setRental({ ...rental, floorPlanTables: tables.map((t) => updated.find((u) => u.id === t.id) || t) });
+  }
+
   function toggleRoomSelected(roomId: string) {
     const current = rental.floorPlanRoomIds || [];
-    const next = current.includes(roomId) ? current.filter((id) => id !== roomId) : [...current, roomId];
+    const alreadySelected = current.includes(roomId);
+    const next = alreadySelected ? current.filter((id) => id !== roomId) : [...current, roomId];
     setRental({ ...rental, floorPlanRoomIds: next });
-    if (!next.includes(plannerActiveRoomId)) setPlannerActiveRoomId(next[0] || "");
+    if (!alreadySelected) {
+      setPlannerActiveRoomId(roomId);
+    } else if (!next.includes(plannerActiveRoomId)) {
+      setPlannerActiveRoomId(next[0] || "");
+    }
   }
 
   function clientToRoomCm(clientX: number, clientY: number, scale: number) {
@@ -10190,6 +10250,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                         {block.groupId && (
                                           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: "#f1f5f9", padding: "4px 8px", borderRadius: 6, marginBottom: 4 }}>
                                             <b style={{ fontSize: 13 }}>Langbord (#{firstIdx}–#{lastIdx})</b>
+                                            <button className="link" onClick={() => rotateLongTableGroup(block.groupId!)}>Roter langbord</button>
                                             <button className="link" onClick={() => reverseGroupOrder(block.groupId!)}>Snu rekkefølge</button>
                                             <button className="link" onClick={() => ungroupAllInGroup(block.groupId!)}>Løs opp langbord</button>
                                           </div>
@@ -10220,7 +10281,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                                         <button className="link" onClick={() => moveTableNumberInGroup(t.id, 1)}>▼ nr</button>
                                                       </>
                                                     )}
-                                                    <button className="link" onClick={() => rotateTable(t.id)}>Roter</button>
+                                                    {!t.groupId && <button className="link" onClick={() => rotateTable(t.id)}>Roter</button>}
                                                     <button className="link danger" onClick={() => deleteTable(t.id)}>Slett</button>
                                                   </div>
                                                   {seatCount > 0 && (
@@ -10234,6 +10295,34 @@ ${opts.produksjon ? productionPageHtml : ""}
                                                       ))}
                                                     </div>
                                                   )}
+                                                  <div style={{ marginTop: 8 }}>
+                                                    {!t.groupId && (
+                                                      <label>Retning (grader)
+                                                        <input type="number" value={t.rotation} onChange={(e) => setTableRotation(t.id, Number(e.target.value) || 0)} step={15} />
+                                                      </label>
+                                                    )}
+                                                    {tt && (
+                                                      <label style={{ marginTop: 8, display: "block" }}>Antall stoler (maks {tt.seats})
+                                                        <input type="number" min={0} max={tt.seats} value={t.seatsOverride ?? tt.seats} onChange={(e) => updateSeatsOverride(t.id, Number(e.target.value) || 0)} />
+                                                      </label>
+                                                    )}
+                                                    {tt && tt.shape !== "rund" && (
+                                                      <div style={{ marginTop: 8 }}>
+                                                        <b style={{ fontSize: 13 }}>Stoler på side:</b>
+                                                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+                                                          {(["north", "east", "south", "west"] as const).map((side) => (
+                                                            <label key={side} className="check">
+                                                              <input type="checkbox" checked={chairSidesFor(t)[side]} onChange={() => toggleChairSide(t.id, side)} />
+                                                              {side === "north" ? "Topp" : side === "south" ? "Bunn" : side === "east" ? "Høyre" : "Venstre"}
+                                                            </label>
+                                                          ))}
+                                                        </div>
+                                                      </div>
+                                                    )}
+                                                    <label style={{ marginTop: 8, display: "block" }}>Notat for bord #{idx + 1}
+                                                      <textarea className="textarea" value={t.note || ""} onChange={(e) => updateTableNote(t.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
+                                                    </label>
+                                                  </div>
                                                 </div>
                                               )}
                                             </div>
