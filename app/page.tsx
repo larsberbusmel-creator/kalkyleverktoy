@@ -9253,6 +9253,32 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === id ? { ...t, rotation: (t.rotation + 90) % 360 } : t) });
   }
 
+  function moveTableNumberInGroup(id: string, dir: -1 | 1) {
+    const tables = rental.floorPlanTables || [];
+    const t = tables.find((x) => x.id === id);
+    if (!t?.groupId) return;
+    const indices = tables.map((x, i) => x.groupId === t.groupId ? i : -1).filter((i) => i >= 0);
+    const posInGroup = indices.indexOf(tables.indexOf(t));
+    const targetPos = posInGroup + dir;
+    if (targetPos < 0 || targetPos >= indices.length) return;
+    const idxA = indices[posInGroup];
+    const idxB = indices[targetPos];
+    const next = [...tables];
+    [next[idxA], next[idxB]] = [next[idxB], next[idxA]];
+    setRental({ ...rental, floorPlanTables: next });
+  }
+
+  function reverseGroupOrder(groupId: string) {
+    const tables = rental.floorPlanTables || [];
+    const indices = tables.map((t, i) => t.groupId === groupId ? i : -1).filter((i) => i >= 0);
+    if (indices.length < 2) return;
+    const items = indices.map((i) => tables[i]);
+    const reversed = [...items].reverse();
+    const next = [...tables];
+    indices.forEach((idx, k) => { next[idx] = reversed[k]; });
+    setRental({ ...rental, floorPlanTables: next });
+  }
+
   function setTableRotation(id: string, degrees: number) {
     const normalized = ((degrees % 360) + 360) % 360;
     setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.id === id ? { ...t, rotation: normalized } : t) });
@@ -10129,7 +10155,14 @@ ${opts.produksjon ? productionPageHtml : ""}
                                         </label>
                                       )}
                                       <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}{t.groupId ? " · del av langbord" : ""}</span>
+                                      {t.groupId && (
+                                        <>
+                                          <button className="link" onClick={(e) => { e.stopPropagation(); moveTableNumberInGroup(t.id, -1); }}>▲ nr</button>
+                                          <button className="link" onClick={(e) => { e.stopPropagation(); moveTableNumberInGroup(t.id, 1); }}>▼ nr</button>
+                                        </>
+                                      )}
                                       <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
+                                      {t.groupId && <button className="link" onClick={(e) => { e.stopPropagation(); reverseGroupOrder(t.groupId!); }}>Snu rekkefølge</button>}
                                       {t.groupId && <button className="link" onClick={(e) => { e.stopPropagation(); ungroupTable(t.id); }}>Løs opp langbord</button>}
                                       <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
                                     </div>
