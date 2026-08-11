@@ -10842,40 +10842,44 @@ function removeAddonPackingItem(addonId: string, itemId: string) {
       <Section id="rentalAddons" title="Leie av lokale, tillegg">
         <div>
           {localRentalAddons.map((addon, i) => (
-            <div key={addon.id} className="editable-row">
-              <input
-                value={addon.name}
-                onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
-                onBlur={() => updateData({ rentalAddons: localRentalAddons })}
-              />
-              <input
-                type="number"
-                value={addon.price}
-                onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
-                onBlur={() => updateData({ rentalAddons: localRentalAddons })}
-              />
-              <label className="check" style={{ whiteSpace: "nowrap" }}>
-  <input
-    type="checkbox"
-    checked={!!addon.perUnit}
-    onChange={(e) => {
-      const next = localRentalAddons.map((x, ix) => ix === i ? { ...x, perUnit: e.target.checked } : x);
-      setLocalRentalAddons(next);
-      updateData({ rentalAddons: next });
-    }}
-  />
-  pr stk
-</label>
-              <button className="link danger" onClick={() => {
-                const next = localRentalAddons.filter((x) => x.id !== addon.id);
-                setLocalRentalAddons(next);
-                updateData({ rentalAddons: next });
-              }}>Slett</button>
-              <button className="link" onClick={() => setExpandedAddonId(expandedAddonId === addon.id ? null : addon.id)}>
-                Pakkeliste-innhold ({(addon.packingItems || []).length})
-              </button>
+            <React.Fragment key={addon.id}>
+              <div className="editable-row">
+                <input
+                  value={addon.name}
+                  onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                  onBlur={() => updateData({ rentalAddons: localRentalAddons })}
+                  style={{ flex: "2 1 240px", minWidth: 160, whiteSpace: "normal", height: "auto", minHeight: 38 }}
+                />
+                <input
+                  type="number"
+                  value={addon.price}
+                  onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
+                  onBlur={() => updateData({ rentalAddons: localRentalAddons })}
+                  style={{ flex: "0 0 100px", width: 100, height: 38 }}
+                />
+                <label className="check" style={{ whiteSpace: "nowrap" }}>
+    <input
+      type="checkbox"
+      checked={!!addon.perUnit}
+      onChange={(e) => {
+        const next = localRentalAddons.map((x, ix) => ix === i ? { ...x, perUnit: e.target.checked } : x);
+        setLocalRentalAddons(next);
+        updateData({ rentalAddons: next });
+      }}
+    />
+    pr stk
+  </label>
+                <button className="link danger" onClick={() => {
+                  const next = localRentalAddons.filter((x) => x.id !== addon.id);
+                  setLocalRentalAddons(next);
+                  updateData({ rentalAddons: next });
+                }}>Slett</button>
+                <button className="link" onClick={() => setExpandedAddonId(expandedAddonId === addon.id ? null : addon.id)}>
+                  Pakkeliste-innhold ({(addon.packingItems || []).length})
+                </button>
+              </div>
               {expandedAddonId === addon.id && (
-                <div className="soft-box" style={{ width: "100%", marginTop: 8 }}>
+                <div className="soft-box" style={{ marginTop: -8, marginBottom: 8 }}>
                   <p className="muted" style={{ fontSize: 12 }}>Faste artikler som legges til pakkelisten når kunden velger "{addon.name}" (uavhengig av gjesteantall).</p>
                   {(addon.packingItems || []).map((pi) => (
                     <div key={pi.id} className="editable-row">
@@ -10891,7 +10895,7 @@ function removeAddonPackingItem(addonId: string, itemId: string) {
                   <button className="btn active" style={{ marginTop: 8 }} onClick={() => addAddonPackingItem(addon.id)}>Legg til artikkel</button>
                 </div>
               )}
-            </div>
+            </React.Fragment>
           ))}
         </div>
         <div className="form-grid four">
