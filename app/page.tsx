@@ -9894,7 +9894,7 @@ ${opts.produksjon ? productionPageHtml : ""}
 
                           {activeRoom && (
                             <div className={plannerLargeView ? "grid" : "grid two"} style={{ marginTop: 12 }}>
-                              <div>
+                              <div style={{ order: plannerLargeView ? 2 : 0 }}>
                                 <button
                                   type="button"
                                   className="btn"
@@ -9979,7 +9979,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Dra bordene (eller løse stoler) for å flytte. Klikk et bord for å velge og redigere.</p>
                               </div>
 
-                              <div>
+                              <div style={{ order: plannerLargeView ? 1 : 0 }}>
                                 <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
                                 {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
                                 {tablesInRoom.map((t, idx) => {
