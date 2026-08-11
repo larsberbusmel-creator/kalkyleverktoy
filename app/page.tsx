@@ -8999,18 +8999,49 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const first = selected[0];
     const tt = tableTypeById(first.tableTypeId);
     if (!tt) return;
-    const length = tt.shape === "rund" ? tt.width : tt.length;
-    const horizontal = first.rotation % 180 === 0;
+
+    // Rund til nærmeste 90° for å avgjøre hvilken led som er "vannrett"/"loddrett" på skjermen akkurat nå
+    const rot = ((Math.round(first.rotation / 90) * 90) % 360 + 360) % 360;
+    const rotatedSideways = rot === 90 || rot === 270;
+    const screenW = rotatedSideways ? tt.length : tt.width;   // bordets bredde slik det faktisk vises på skjermen
+    const screenL = rotatedSideways ? tt.width : tt.length;   // bordets lengde slik det faktisk vises på skjermen
+
+    // Hvilken lokal side (Topp/Høyre/Bunn/Venstre) havner hvor på skjermen ved denne rotasjonen
+    const screenToLocal: Record<number, Record<"up" | "right" | "down" | "left", keyof ChairSides>> = {
+      0:   { up: "north", right: "east",  down: "south", left: "west" },
+      90:  { up: "west",  right: "north", down: "east",  left: "south" },
+      180: { up: "south", right: "west",  down: "north", left: "east" },
+      270: { up: "east",  right: "south", down: "west",  left: "north" },
+    };
+    const map = screenToLocal[rot];
+
+    // Avgjør om bordene faktisk står på rad vannrett eller loddrett, ut fra hvor du har plassert dem
+    const xs = selected.map((t) => t.x);
+    const ys = selected.map((t) => t.y);
+    const spreadX = Math.max(...xs) - Math.min(...xs);
+    const spreadY = Math.max(...ys) - Math.min(...ys);
+    const vertical = spreadY >= spreadX;
+    const step = vertical ? screenL : screenW;
+
     const groupId = `grp-${Date.now()}`;
     const positioned = selected.map((t, i) => {
       const isFirst = i === 0;
       const isLast = i === selected.length - 1;
-      const chairSides: ChairSides = horizontal
-        ? { north: true, south: true, east: isLast, west: isFirst }
-        : { east: true, west: true, south: isLast, north: isFirst };
-      return horizontal
-        ? { ...t, groupId, rotation: first.rotation, x: first.x + i * length, y: first.y, chairSides }
-        : { ...t, groupId, rotation: first.rotation, y: first.y + i * length, x: first.x, chairSides };
+      const chairSides: ChairSides = {};
+      if (vertical) {
+        chairSides[map.left] = true;
+        chairSides[map.right] = true;
+        chairSides[map.up] = isFirst;
+        chairSides[map.down] = isLast;
+      } else {
+        chairSides[map.up] = true;
+        chairSides[map.down] = true;
+        chairSides[map.left] = isFirst;
+        chairSides[map.right] = isLast;
+      }
+      return vertical
+        ? { ...t, groupId, rotation: first.rotation, x: first.x, y: first.y + i * step, chairSides }
+        : { ...t, groupId, rotation: first.rotation, x: first.x + i * step, y: first.y, chairSides };
     });
     setRental({ ...rental, floorPlanTables: tables.map((t) => positioned.find((p) => p.id === t.id) || t) });
     setGroupSelection([]);
