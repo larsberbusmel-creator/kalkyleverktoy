@@ -8519,7 +8519,7 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
     const [groupSelection, setGroupSelection] = useState<string[]>([]);
     const [expandedTableIds, setExpandedTableIds] = useState<Set<string>>(new Set());
     const svgRef = useRef<SVGSVGElement>(null);
-  const [printOpts, setPrintOpts] = useState({ tilbud: true, recipes: false, kjoreplan: false, produksjon: false });
+  const [printOpts, setPrintOpts] = useState({ tilbud: true, recipes: false, kjoreplan: false, produksjon: false, riggedokument: false, gjesteillustrasjon: false, pakkeliste: false });
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
     ((data as any).deletedRentalOffers || []) as RentalOffer[]
   );
@@ -10290,7 +10290,12 @@ ${opts.produksjon ? productionPageHtml : ""}
                                                       {Array.from({ length: seatCount }).map((_, si) => (
                                                         <div key={si} className="form-grid two" style={{ marginTop: 4 }}>
                                                           <input placeholder={`Navn, stol ${si + 1}`} value={t.seatInfo?.[si]?.name || ""} onChange={(e) => updateSeatInfo(t.id, si, { name: e.target.value })} />
-                                                          <input placeholder="Allergier" value={t.seatInfo?.[si]?.allergies || ""} onChange={(e) => updateSeatInfo(t.id, si, { allergies: e.target.value })} />
+                                                          <select value={t.seatInfo?.[si]?.allergies || ""} onChange={(e) => updateSeatInfo(t.id, si, { allergies: e.target.value })}>
+                                                            <option value="">Ingen allergi</option>
+                                                            {Object.entries(rental.allergens || {}).filter(([, count]) => Number(count) > 0).map(([a]) => (
+                                                              <option key={a} value={a}>{a}</option>
+                                                            ))}
+                                                          </select>
                                                         </div>
                                                       ))}
                                                     </div>
@@ -10411,7 +10416,13 @@ ${opts.produksjon ? productionPageHtml : ""}
               </table>
             )}
             <div className="soft-box" style={{ marginTop: 12 }}>
-              <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Hva skal skrives ut?</label>
+              <div className="between" style={{ marginBottom: 6 }}>
+                <label style={{ fontWeight: 800, fontSize: 14 }}>Hva skal skrives ut?</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" className="link" onClick={() => setPrintOpts({ tilbud: true, recipes: true, kjoreplan: !!rental.runSheetEnabled, produksjon: true, riggedokument: true, gjesteillustrasjon: true, pakkeliste: true })}>Velg alle</button>
+                  <button type="button" className="link" onClick={() => setPrintOpts({ tilbud: false, recipes: false, kjoreplan: false, produksjon: false, riggedokument: false, gjesteillustrasjon: false, pakkeliste: false })}>Fjern alle</button>
+                </div>
+              </div>
               <label className="check">
                 <input type="checkbox" checked={printOpts.tilbud} onChange={(e) => setPrintOpts({ ...printOpts, tilbud: e.target.checked })} />
                 Tilbud (spesifikasjon/pris)
@@ -10430,13 +10441,30 @@ ${opts.produksjon ? productionPageHtml : ""}
                 <input type="checkbox" checked={printOpts.produksjon} onChange={(e) => setPrintOpts({ ...printOpts, produksjon: e.target.checked })} />
                 Produksjonsgrunnlag (kjøkken)
               </label>
+              <label className="check">
+                <input type="checkbox" checked={printOpts.riggedokument} onChange={(e) => setPrintOpts({ ...printOpts, riggedokument: e.target.checked })} />
+                Riggedokument (bordplan)
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={printOpts.gjesteillustrasjon} onChange={(e) => setPrintOpts({ ...printOpts, gjesteillustrasjon: e.target.checked })} />
+                Gjesteillustrasjon (bordplan)
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={printOpts.pakkeliste} onChange={(e) => setPrintOpts({ ...printOpts, pakkeliste: e.target.checked })} />
+                Pakkeliste
+              </label>
             </div>
             <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
             <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
               <button className="btn active" onClick={saveOffer}>
                 {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
               </button>
-              <button className="btn" onClick={() => printOffer(printOpts)}>Skriv ut</button>
+              <button className="btn" onClick={() => {
+                if (printOpts.tilbud || printOpts.recipes || printOpts.kjoreplan || printOpts.produksjon) printOffer(printOpts);
+                if (printOpts.riggedokument) printRiggingDocument();
+                if (printOpts.gjesteillustrasjon) printGuestIllustration();
+                if (printOpts.pakkeliste) printPackingList();
+              }}>Skriv ut</button>
               <button className="btn" onClick={cancelEdit}>Avbryt</button>
             </div>
           </div>
