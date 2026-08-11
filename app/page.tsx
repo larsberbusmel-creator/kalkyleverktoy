@@ -10550,13 +10550,15 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
         <div className="card">
           <h3>Forhåndsvisning</h3>
           {roomForm.width > 0 && roomForm.length > 0 ? (
-            <svg viewBox={`0 0 ${roomPxW + 40} ${roomPxH + 40}`} style={{ width: "100%", maxWidth: 560, background: "#f8fafc", borderRadius: 8 }}>
+            <svg viewBox={`0 0 ${roomPxW + 70} ${roomPxH + 70}`} style={{ width: "100%", maxWidth: 560, background: "#f8fafc", borderRadius: 8 }}>
               <defs>
                 <clipPath id="roomClipLib">
                   <rect x={0} y={0} width={roomPxW} height={roomPxH} />
                 </clipPath>
               </defs>
-              <g transform="translate(20,20)">
+              <text x={roomPxW / 2} y={-8} textAnchor="middle" fontSize={13} fontWeight={700} fill="#334155">{roomForm.width} cm</text>
+              <text x={-8} y={roomPxH / 2} textAnchor="middle" fontSize={13} fontWeight={700} fill="#334155" transform={`translate(0,0) rotate(-90, -8, ${roomPxH / 2})`}>{roomForm.length} cm</text>
+              <g transform="translate(50,20)">
                 <g clipPath="url(#roomClipLib)">
                   {(roomForm.exclusionZones || []).map((z) => (
                     <g key={z.id}>
