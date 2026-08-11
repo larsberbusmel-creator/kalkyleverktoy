@@ -152,7 +152,8 @@ type RentalProductLine = { productId: string; guests: number };
 type RunSheetItem = { id: string; task: string; responsible?: string; time?: string; groupLabel?: string };
 
 type ChairSides = { north?: boolean; east?: boolean; south?: boolean; west?: boolean };
-type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string; chairSides?: ChairSides; seatsOverride?: number };
+type TableSeatInfo = { name?: string; allergies?: string };
+type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string; chairSides?: ChairSides; seatsOverride?: number; seatInfo?: TableSeatInfo[] };
 type PlacedChair = { id: string; roomId: string; x: number; y: number; rotation: number };
 type RoomLayoutTemplate = { id: string; name: string; roomId: string; tables: PlacedTable[]; chairs: PlacedChair[] };
 type CoverItem = { id: string; name: string; unit: string; rule: "per_person" | "per_person_per_course" | "per_table"; qtyPerUnit: number; mealType?: "buffet" | "flere_retter"; tableShape?: "rund" | "rektangulær" | "firkantet" };
@@ -8516,6 +8517,7 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
     const [plannerSelectedTableId, setPlannerSelectedTableId] = useState<string | null>(null);
     const [dragTableId, setDragTableId] = useState<string | null>(null);
     const [groupSelection, setGroupSelection] = useState<string[]>([]);
+    const [expandedTableIds, setExpandedTableIds] = useState<Set<string>>(new Set());
     const svgRef = useRef<SVGSVGElement>(null);
   const [printOpts, setPrintOpts] = useState({ tilbud: true, recipes: false, kjoreplan: false, produksjon: false });
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
@@ -9289,6 +9291,27 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     if (plannerSelectedTableId === id) setPlannerSelectedTableId(null);
   }
 
+  function toggleExpandedTable(id: string) {
+    setExpandedTableIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function updateSeatInfo(tableId: string, seatIndex: number, patch: Partial<TableSeatInfo>) {
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => {
+      if (t.id !== tableId) return t;
+      const seatInfo = [...(t.seatInfo || [])];
+      seatInfo[seatIndex] = { ...seatInfo[seatIndex], ...patch };
+      return { ...t, seatInfo };
+    }) });
+  }
+
+  function ungroupAllInGroup(groupId: string) {
+    setRental({ ...rental, floorPlanTables: (rental.floorPlanTables || []).map((t) => t.groupId === groupId ? { ...t, groupId: undefined, chairSides: undefined } : t) });
+  }
+
   function toggleRoomSelected(roomId: string) {
     const current = rental.floorPlanRoomIds || [];
     const next = current.includes(roomId) ? current.filter((id) => id !== roomId) : [...current, roomId];
@@ -9423,12 +9446,12 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const pages = roomsToPrint.map((room) => {
       const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
       const scale = Math.min(680 / Math.max(room.width, 1), 480 / Math.max(room.length, 1));
-      const rows = tables.map((t, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(tableTypeName(t.tableTypeId))}</td><td>${t.rotation}°</td><td>${escapeHtml(t.note || "-")}</td></tr>`).join("");
+      const rows = tables.map((t, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(tableTypeName(t.tableTypeId))}</td><td>${escapeHtml(t.note || "-")}</td></tr>`).join("");
       return `<div class="page-break"></div>
 <h2>Riggeplan: ${escapeHtml(room.name)}</h2>
 <p>Rom: ${room.width}×${room.length} cm · ${tables.length} bord</p>
 ${renderStaticRoomSvg(room, tables, scale, true)}
-<table><thead><tr><th>#</th><th>Bordtype</th><th>Rotasjon</th><th>Notat</th></tr></thead><tbody>${rows}</tbody></table>`;
+<table><thead><tr><th>#</th><th>Bordtype</th><th>Notat</th></tr></thead><tbody>${rows}</tbody></table>`;
     }).join("");
     const w = window.open("", "_blank");
     if (!w) return;
@@ -10144,30 +10167,82 @@ ${opts.produksjon ? productionPageHtml : ""}
                               <div style={{ order: plannerLargeView ? 1 : 0 }}>
                                 <h3>Bord i {activeRoom.name} ({tablesInRoom.length})</h3>
                                 {tablesInRoom.length === 0 && <p className="muted">Ingen bord plassert ennå.</p>}
-                                {tablesInRoom.map((t, idx) => {
-                                  const tt = tableTypeById(t.tableTypeId);
-                                  return (
-                                    <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexWrap: "wrap" }} onClick={() => setPlannerSelectedTableId(t.id)}>
-                                      {tt?.joinable && (
-                                        <label className="check" style={{ marginRight: 4 }} onClick={(e) => e.stopPropagation()}>
-                                          <input type="checkbox" checked={groupSelection.includes(t.id)} onChange={() => toggleGroupSelection(t.id)} />
-                                          Velg for langbord
-                                        </label>
-                                      )}
-                                      <span><b>#{idx + 1}</b> {tableTypeName(t.tableTypeId)}{t.groupId ? " · del av langbord" : ""}</span>
-                                      {t.groupId && (
-                                        <>
-                                          <button className="link" onClick={(e) => { e.stopPropagation(); moveTableNumberInGroup(t.id, -1); }}>▲ nr</button>
-                                          <button className="link" onClick={(e) => { e.stopPropagation(); moveTableNumberInGroup(t.id, 1); }}>▼ nr</button>
-                                        </>
-                                      )}
-                                      <button className="link" onClick={(e) => { e.stopPropagation(); rotateTable(t.id); }}>Roter</button>
-                                      {t.groupId && <button className="link" onClick={(e) => { e.stopPropagation(); reverseGroupOrder(t.groupId!); }}>Snu rekkefølge</button>}
-                                      {t.groupId && <button className="link" onClick={(e) => { e.stopPropagation(); ungroupTable(t.id); }}>Løs opp langbord</button>}
-                                      <button className="link danger" onClick={(e) => { e.stopPropagation(); deleteTable(t.id); }}>Slett</button>
-                                    </div>
-                                  );
-                                })}
+                                {(() => {
+                                  const seenGroups = new Set<string>();
+                                  const blocks: { groupId?: string; members: typeof tablesInRoom }[] = [];
+                                  tablesInRoom.forEach((t) => {
+                                    if (t.groupId) {
+                                      if (seenGroups.has(t.groupId)) {
+                                        blocks.find((b) => b.groupId === t.groupId)!.members.push(t);
+                                      } else {
+                                        seenGroups.add(t.groupId);
+                                        blocks.push({ groupId: t.groupId, members: [t] });
+                                      }
+                                    } else {
+                                      blocks.push({ members: [t] });
+                                    }
+                                  });
+                                  return blocks.map((block) => {
+                                    const firstIdx = tablesInRoom.indexOf(block.members[0]) + 1;
+                                    const lastIdx = tablesInRoom.indexOf(block.members[block.members.length - 1]) + 1;
+                                    return (
+                                      <div key={block.groupId || block.members[0].id} style={{ marginBottom: 8, border: block.groupId ? "1px solid #e2e8f0" : undefined, borderRadius: block.groupId ? 8 : undefined, padding: block.groupId ? 6 : undefined }}>
+                                        {block.groupId && (
+                                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: "#f1f5f9", padding: "4px 8px", borderRadius: 6, marginBottom: 4 }}>
+                                            <b style={{ fontSize: 13 }}>Langbord (#{firstIdx}–#{lastIdx})</b>
+                                            <button className="link" onClick={() => reverseGroupOrder(block.groupId!)}>Snu rekkefølge</button>
+                                            <button className="link" onClick={() => ungroupAllInGroup(block.groupId!)}>Løs opp langbord</button>
+                                          </div>
+                                        )}
+                                        {block.members.map((t) => {
+                                          const idx = tablesInRoom.indexOf(t);
+                                          const tt = tableTypeById(t.tableTypeId);
+                                          const isExpanded = expandedTableIds.has(t.id);
+                                          const seatCount = seatsFor(t);
+                                          return (
+                                            <div key={t.id} className="editable-row" style={{ background: plannerSelectedTableId === t.id ? "#eef2ff" : undefined, flexDirection: "column", alignItems: "stretch" }}>
+                                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => { setPlannerSelectedTableId(t.id); toggleExpandedTable(t.id); }}>
+                                                <b>#{idx + 1}</b>
+                                                <span style={{ color: "#64748b" }}>{isExpanded ? "▲ skjul" : "▼ vis"}</span>
+                                              </div>
+                                              {isExpanded && (
+                                                <div style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+                                                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                                                    {tt?.joinable && (
+                                                      <label className="check">
+                                                        <input type="checkbox" checked={groupSelection.includes(t.id)} onChange={() => toggleGroupSelection(t.id)} />
+                                                        Velg for langbord
+                                                      </label>
+                                                    )}
+                                                    {t.groupId && (
+                                                      <>
+                                                        <button className="link" onClick={() => moveTableNumberInGroup(t.id, -1)}>▲ nr</button>
+                                                        <button className="link" onClick={() => moveTableNumberInGroup(t.id, 1)}>▼ nr</button>
+                                                      </>
+                                                    )}
+                                                    <button className="link" onClick={() => rotateTable(t.id)}>Roter</button>
+                                                    <button className="link danger" onClick={() => deleteTable(t.id)}>Slett</button>
+                                                  </div>
+                                                  {seatCount > 0 && (
+                                                    <div style={{ marginTop: 8 }}>
+                                                      <b style={{ fontSize: 12 }}>Gjester ved bordet:</b>
+                                                      {Array.from({ length: seatCount }).map((_, si) => (
+                                                        <div key={si} className="form-grid two" style={{ marginTop: 4 }}>
+                                                          <input placeholder={`Navn, stol ${si + 1}`} value={t.seatInfo?.[si]?.name || ""} onChange={(e) => updateSeatInfo(t.id, si, { name: e.target.value })} />
+                                                          <input placeholder="Allergier" value={t.seatInfo?.[si]?.allergies || ""} onChange={(e) => updateSeatInfo(t.id, si, { allergies: e.target.value })} />
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  });
+                                })()}
                                 <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
                                   <button className="btn active" disabled={groupSelection.length < 2} onClick={joinIntoLongTable}>
                                     Slå sammen{groupSelection.length >= 2 ? ` (${groupSelection.length} valgt)` : ""} til langbord
