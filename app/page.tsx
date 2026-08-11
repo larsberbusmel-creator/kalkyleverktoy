@@ -155,6 +155,7 @@ type ChairSides = { north?: boolean; east?: boolean; south?: boolean; west?: boo
 type PlacedTable = { id: string; tableTypeId: string; roomId: string; x: number; y: number; rotation: number; note?: string; groupId?: string; chairSides?: ChairSides; seatsOverride?: number };
 type PlacedChair = { id: string; roomId: string; x: number; y: number; rotation: number };
 type RoomLayoutTemplate = { id: string; name: string; roomId: string; tables: PlacedTable[]; chairs: PlacedChair[] };
+type CoverItem = { id: string; name: string; unit: string; rule: "per_person" | "per_person_per_course" | "per_table"; qtyPerUnit: number; mealType?: "buffet" | "flere_retter"; tableShape?: "rund" | "rektangulær" | "firkantet" };
 
 type RentalOffer = {
   id?: string;
@@ -164,6 +165,8 @@ type RentalOffer = {
   email?: string;
   note?: string;
   guestCount?: number;
+  courseCount?: number;
+  mealType?: "buffet" | "flere_retter";
   floorPlanRoomIds?: string[];
   floorPlanTables?: PlacedTable[];
   floorPlanChairs?: PlacedChair[];
@@ -331,6 +334,7 @@ type AppData = {
   rooms: Room[];
   tableTypes: TableType[];
   roomLayoutTemplates: RoomLayoutTemplate[];
+  coverItems: CoverItem[];
   menuCategories: string[];
   productCategories: string[];
   materialCategories: string[];
@@ -520,7 +524,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
   seenOrderIds: [],
-  rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [],
+  rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -615,6 +619,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     rooms: raw.rooms || [],
     tableTypes: raw.tableTypes || [],
     roomLayoutTemplates: raw.roomLayoutTemplates || [],
+    coverItems: raw.coverItems || [],
   };
 }
 
@@ -8501,7 +8506,7 @@ function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, prod
   const [offerSearch, setOfferSearch] = useState("");
   const [showTerms, setShowTerms] = useState(false);
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
-  const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan">("forside");
+  const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan" | "pakkeliste">("forside");
     const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
     const [plannerLargeView, setPlannerLargeView] = useState(false);
     const [plannerMargin, setPlannerMargin] = useState(40);
@@ -9393,6 +9398,47 @@ h2{margin-bottom:16px}
     w.document.close();
   }
 
+  function packingListRows(): { name: string; unit: string; qty: number }[] {
+    const guests = rental.guestCount || 0;
+    const courses = rental.courseCount || 1;
+    const tablesAll = rental.floorPlanTables || [];
+    function tableCountForShape(shape?: "rund" | "rektangulær" | "firkantet") {
+      return tablesAll.filter((t) => {
+        const tt = tableTypeById(t.tableTypeId);
+        return tt && (!shape || tt.shape === shape);
+      }).length;
+    }
+    return (data.coverItems || [])
+      .filter((item) => !item.mealType || item.mealType === rental.mealType)
+      .map((item) => {
+        let qty = 0;
+        if (item.rule === "per_person") qty = guests * item.qtyPerUnit;
+        if (item.rule === "per_person_per_course") qty = guests * courses * item.qtyPerUnit;
+        if (item.rule === "per_table") qty = tableCountForShape(item.tableShape) * item.qtyPerUnit;
+        return { name: item.name, unit: item.unit, qty: Math.ceil(qty) };
+      });
+  }
+
+  function printPackingList() {
+    const rows = packingListRows();
+    const rowsHtml = rows.map((r) => `<tr><td>${escapeHtml(r.name)}</td><td class="right">${r.qty} ${escapeHtml(r.unit)}</td></tr>`).join("");
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<html><head><title>Pakkeliste – ${escapeHtml(rental.customer)}</title><style>
+body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{border-bottom:1px solid #e5e7eb;padding:8px 10px;text-align:left}
+.right{text-align:right}
+h1{margin-bottom:4px}
+</style></head><body>
+<h1>Pakkeliste</h1>
+<p>${escapeHtml(rental.customer)} · ${rental.guestCount || 0} gjester · ${rental.courseCount || 1} retter · ${rental.mealType === "buffet" ? "Buffet" : "Flere retter"}</p>
+<table><thead><tr><th>Artikkel</th><th class="right">Antall</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+<script>window.print()</script>
+</body></html>`);
+    w.document.close();
+  }
+
   function printOffer(opts: { tilbud?: boolean; recipes?: boolean; kjoreplan?: boolean; produksjon?: boolean }) {
     const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
     const productRows = rental.productLines.map((l) => {
@@ -9579,6 +9625,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                 { key: "kjoreplan", label: "Kjøreplan" },
                 { key: "vilkar", label: "Vilkår" },
                 { key: "bordplan", label: "Bordplan" },
+                { key: "pakkeliste", label: "Pakkeliste" },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -9792,6 +9839,35 @@ ${opts.produksjon ? productionPageHtml : ""}
                         </tbody>
                       </table>
                     )}
+                  </>
+                )}
+              </>
+            )}
+
+            {rentalSubTab === "pakkeliste" && (
+              <>
+                <div className="form-grid two">
+                  <label>Antall retter<input type="number" value={rental.courseCount || 1} onChange={(e) => setRental({ ...rental, courseCount: Number(e.target.value) || 1 })} /></label>
+                  <label>Type servering
+                    <select value={rental.mealType || "flere_retter"} onChange={(e) => setRental({ ...rental, mealType: e.target.value as "buffet" | "flere_retter" })}>
+                      <option value="flere_retter">Flere retter</option>
+                      <option value="buffet">Buffet</option>
+                    </select>
+                  </label>
+                </div>
+                {(data.coverItems || []).length === 0 ? (
+                  <p className="muted">Ingen kuvertartikler definert ennå – gå til Innstillinger → Rombibliotek → Kuvertartikler for å legge dem inn.</p>
+                ) : (
+                  <>
+                    <table style={{ marginTop: 12 }}>
+                      <thead><tr><th>Artikkel</th><th style={{ textAlign: "right" }}>Antall</th></tr></thead>
+                      <tbody>
+                        {packingListRows().map((r, i) => (
+                          <tr key={i}><td>{r.name}</td><td style={{ textAlign: "right" }}>{r.qty} {r.unit}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <button className="btn" style={{ marginTop: 12 }} onClick={printPackingList}>Skriv ut pakkeliste</button>
                   </>
                 )}
               </>
@@ -10275,6 +10351,31 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
     });
   }
 
+  const coverItems = data.coverItems || [];
+  const [editingCoverItemId, setEditingCoverItemId] = useState<string | null>(null);
+  const [coverItemForm, setCoverItemForm] = useState<CoverItem>({ id: "", name: "", unit: "stk", rule: "per_person", qtyPerUnit: 1 });
+
+  function resetCoverItemForm() {
+    setCoverItemForm({ id: "", name: "", unit: "stk", rule: "per_person", qtyPerUnit: 1 });
+    setEditingCoverItemId(null);
+  }
+  function saveCoverItem() {
+    if (!coverItemForm.name.trim()) return;
+    const item: CoverItem = { ...coverItemForm, id: coverItemForm.id || `ci-${Date.now()}` };
+    const next = editingCoverItemId ? coverItems.map((c) => c.id === editingCoverItemId ? item : c) : [...coverItems, item];
+    updateData({ coverItems: next });
+    resetCoverItemForm();
+  }
+  function editCoverItem(item: CoverItem) {
+    setCoverItemForm(item);
+    setEditingCoverItemId(item.id);
+  }
+  function deleteCoverItem(id: string) {
+    if (!confirm("Slette denne kuvertartikkelen?")) return;
+    updateData({ coverItems: coverItems.filter((c) => c.id !== id) });
+    if (editingCoverItemId === id) resetCoverItemForm();
+  }
+
   return (
     <section className="card">
       <div className="between">
@@ -10493,6 +10594,63 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
               <div>
                 <button className="link" onClick={() => editTableType(t)}>Rediger</button>
                 <button className="link danger" onClick={() => deleteTableType(t.id)}>Slett</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <h2 style={{ marginTop: 32 }}>Kuvertartikler (for pakkeliste)</h2>
+      <div className="grid two">
+        <div className="card">
+          <h3>{editingCoverItemId ? "Rediger artikkel" : "Ny artikkel"}</h3>
+          <div className="form-grid two">
+            <label>Navn<input value={coverItemForm.name} onChange={(e) => setCoverItemForm({ ...coverItemForm, name: e.target.value })} placeholder="F.eks. Tøyserviett" /></label>
+            <label>Enhet<input value={coverItemForm.unit} onChange={(e) => setCoverItemForm({ ...coverItemForm, unit: e.target.value })} placeholder="stk, flaske, duk..." /></label>
+            <label>Regel
+              <select value={coverItemForm.rule} onChange={(e) => setCoverItemForm({ ...coverItemForm, rule: e.target.value as CoverItem["rule"] })}>
+                <option value="per_person">Per person</option>
+                <option value="per_person_per_course">Per person per rett</option>
+                <option value="per_table">Per bord</option>
+              </select>
+            </label>
+            <label>Antall per enhet<input type="number" step={0.1} value={coverItemForm.qtyPerUnit} onChange={(e) => setCoverItemForm({ ...coverItemForm, qtyPerUnit: Number(e.target.value) || 0 })} /></label>
+            <label>Kun ved serveringsform (valgfritt)
+              <select value={coverItemForm.mealType || ""} onChange={(e) => setCoverItemForm({ ...coverItemForm, mealType: (e.target.value || undefined) as CoverItem["mealType"] })}>
+                <option value="">Alle</option>
+                <option value="buffet">Buffet</option>
+                <option value="flere_retter">Flere retter</option>
+              </select>
+            </label>
+            {coverItemForm.rule === "per_table" && (
+              <label>Kun for bordform (valgfritt)
+                <select value={coverItemForm.tableShape || ""} onChange={(e) => setCoverItemForm({ ...coverItemForm, tableShape: (e.target.value || undefined) as CoverItem["tableShape"] })}>
+                  <option value="">Alle former</option>
+                  <option value="rund">Rund</option>
+                  <option value="rektangulær">Rektangulær</option>
+                  <option value="firkantet">Firkantet</option>
+                </select>
+              </label>
+            )}
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Eksempel: vinflaske = "Per person per rett", antall per enhet 0,2 (1/5 flaske). Duk til rundbord = "Per bord", bordform "Rund", antall per enhet 2.</p>
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <button className="btn active" onClick={saveCoverItem}>{editingCoverItemId ? "Lagre endringer" : "Lagre artikkel"}</button>
+            {editingCoverItemId && <button className="btn" onClick={resetCoverItemForm}>Avbryt</button>}
+          </div>
+        </div>
+        <div className="card">
+          <h3>Lagrede artikler</h3>
+          {coverItems.length === 0 && <p className="muted">Ingen kuvertartikler lagret ennå.</p>}
+          {coverItems.map((c) => (
+            <div key={c.id} className="editable-row">
+              <span>
+                <b>{c.name}</b> · {c.qtyPerUnit} {c.unit} {c.rule === "per_person" ? "per person" : c.rule === "per_person_per_course" ? "per person/rett" : `per bord${c.tableShape ? ` (${c.tableShape})` : ""}`}
+                {c.mealType ? ` · kun ${c.mealType === "buffet" ? "buffet" : "flere retter"}` : ""}
+              </span>
+              <div>
+                <button className="link" onClick={() => editCoverItem(c)}>Rediger</button>
+                <button className="link danger" onClick={() => deleteCoverItem(c.id)}>Slett</button>
               </div>
             </div>
           ))}
