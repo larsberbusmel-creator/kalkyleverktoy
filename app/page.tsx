@@ -10492,10 +10492,11 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
             <label>X fra venstre (cm)<input type="number" value={obstacleForm.x} onChange={(e) => setObstacleForm({ ...obstacleForm, x: Number(e.target.value) || 0 })} /></label>
             <label>Y fra topp (cm)<input type="number" value={obstacleForm.y} onChange={(e) => setObstacleForm({ ...obstacleForm, y: Number(e.target.value) || 0 })} /></label>
             <label>Bredde (cm)<input type="number" value={obstacleForm.width} onChange={(e) => setObstacleForm({ ...obstacleForm, width: Number(e.target.value) || 0 })} /></label>
-            <label>Dybde (cm)<input type="number" value={obstacleForm.height} onChange={(e) => setObstacleForm({ ...obstacleForm, height: Number(e.target.value) || 0 })} /></label><label>Dybde (cm)<input type="number" value={obstacleForm.height} onChange={(e) => setObstacleForm({ ...obstacleForm, height: Number(e.target.value) || 0 })} /></label>
+            <label>Dybde (cm)<input type="number" value={obstacleForm.height} onChange={(e) => setObstacleForm({ ...obstacleForm, height: Number(e.target.value) || 0 })} /></label>
             <label>Farge<input type="color" value={obstacleForm.color || "#fecaca"} onChange={(e) => setObstacleForm({ ...obstacleForm, color: e.target.value })} /></label>
           </div>
-          <button className="btn" onClick={addObstacle}>Legg til hindring</button>
+          <button className="btn" onClick={addObstacle}>{editingObstacleId ? "Lagre endring" : "Legg til hindring"}</button>
+          {editingObstacleId && <button className="btn" onClick={cancelEditObstacle}>Avbryt</button>}
           {roomForm.obstacles.length > 0 && (
             <table style={{ marginTop: 8 }}>
               <thead><tr><th>Type</th><th>Navn</th><th>Posisjon</th><th>Størrelse</th><th></th></tr></thead>
@@ -10503,7 +10504,10 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
                 {roomForm.obstacles.map((o) => (
                   <tr key={o.id}>
                     <td>{o.type}</td><td>{o.label || "-"}</td><td>{o.x}, {o.y} cm</td><td>{o.width}×{o.height} cm</td>
-                    <td><button className="link danger" onClick={() => removeObstacle(o.id)}>Slett</button></td>
+                    <td>
+                      <button className="link" onClick={() => editObstacle(o)}>Rediger</button>
+                      <button className="link danger" onClick={() => removeObstacle(o.id)}>Slett</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -10518,7 +10522,8 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
             <label>Bredde (cm)<input type="number" value={zoneForm.width} onChange={(e) => setZoneForm({ ...zoneForm, width: Number(e.target.value) || 0 })} /></label>
             <label>Dybde (cm)<input type="number" value={zoneForm.height} onChange={(e) => setZoneForm({ ...zoneForm, height: Number(e.target.value) || 0 })} /></label>
           </div>
-          <button className="btn" onClick={addZone}>Legg til skjult sone</button>
+          <button className="btn" onClick={addZone}>{editingZoneId ? "Lagre endring" : "Legg til skjult sone"}</button>
+          {editingZoneId && <button className="btn" onClick={cancelEditZone}>Avbryt</button>}
           {(roomForm.exclusionZones || []).length > 0 && (
             <table style={{ marginTop: 8 }}>
               <thead><tr><th>Navn</th><th>Posisjon</th><th>Størrelse</th><th></th></tr></thead>
@@ -10526,7 +10531,10 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
                 {(roomForm.exclusionZones || []).map((z) => (
                   <tr key={z.id}>
                     <td>{z.label || "-"}</td><td>{z.x}, {z.y} cm</td><td>{z.width}×{z.height} cm</td>
-                    <td><button className="link danger" onClick={() => removeZone(z.id)}>Slett</button></td>
+                    <td>
+                      <button className="link" onClick={() => editZone(z)}>Rediger</button>
+                      <button className="link danger" onClick={() => removeZone(z.id)}>Slett</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
