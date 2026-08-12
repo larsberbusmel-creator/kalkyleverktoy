@@ -6878,7 +6878,7 @@ ${orderPages}`;
                     <div style={{ marginTop: 8 }}>
                       <div className="between">
                         <span>{(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length} bestilling(er) venter på godkjenning</span>
-                        <button className="btn" onClick={() => setPanel("customers")}>Se og godkjenn →</button>
+                        <button className="btn" onClick={() => { setPanel("customers"); setOpenBlock("pending"); }}>Se og godkjenn →</button>
                       </div>
                     </div>
                   )}
@@ -6886,7 +6886,7 @@ ${orderPages}`;
                     <div style={{ marginTop: 8 }}>
                       <div className="between">
                         <span>{(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length} fastordre-forespørsel(er) venter på godkjenning</span>
-                        <button className="btn" onClick={() => setPanel("customers")}>Se og godkjenn →</button>
+                        <button className="btn" onClick={() => { setPanel("customers"); setOpenBlock("recurring"); }}>Se og godkjenn →</button>
                       </div>
                     </div>
                   )}
@@ -7065,7 +7065,81 @@ ${orderPages}`;
                 </div>
               )}
 
-              <div className="soft-box">
+              <div className="between" style={{ cursor: "pointer" }} onClick={() => setOpenBlock(openBlock === "pending" ? null : "pending")}>
+                <h3 style={{ margin: 0 }}>Bestillinger til godkjenning ({(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length})</h3>
+                <span>{openBlock === "pending" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "pending" && ((data.pendingPortalOrders || []).filter((p) => p.status === "pending").length === 0 ? (
+                <p className="muted">Ingen ventende bestillinger.</p>
+              ) : (
+                (data.pendingPortalOrders || []).filter((p) => p.status === "pending").map((p) => {
+                  const cust = (data.storkjokkenCustomers || []).find((c) => c.id === p.customerId);
+                  const isLate = p.date <= addDays(today(), 1) && new Date().getHours() >= 12;
+                  return (
+                    <div key={p.id} className="soft-box" style={{ marginBottom: 10 }}>
+                      <div className="between">
+                        <b>{cust?.name || "Ukjent kunde"} · levering {formatDateNo(p.date)}</b>
+                        <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(p.submittedAt).toLocaleString("no-NO")}</span>
+                      </div>
+                      {isLate && <p style={{ color: "#dc2626", fontWeight: 700, fontSize: 13 }}>⚠ Sendt inn etter kl. 12-fristen for denne datoen.</p>}
+                      <table style={{ marginTop: 8 }}>
+                        <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Antall</th></tr></thead>
+                        <tbody>
+                          {p.lines.map((l, i) => (
+                            <tr key={i}>
+                              <td>{data.products.find((prod) => prod.id === l.productId)?.name || "Ukjent produkt"}</td>
+                              <td style={{ textAlign: "right" }}>{l.quantity}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                        <button className="btn active" onClick={() => approvePendingPortalOrder(p.id)}>Godkjenn</button>
+                        <button className="btn" onClick={() => rejectPendingPortalOrder(p.id)}>Avslå</button>
+                      </div>
+                    </div>
+                  );
+                })
+              ))}
+
+              <div className="between" style={{ cursor: "pointer", marginTop: 16 }} onClick={() => setOpenBlock(openBlock === "recurring" ? null : "recurring")}>
+                <h3 style={{ margin: 0 }}>Fastordre-forespørsler ({(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length})</h3>
+                <span>{openBlock === "recurring" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "recurring" && ((data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length === 0 ? (
+                <p className="muted">Ingen ventende fastordre-forespørsler.</p>
+              ) : (
+                (data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").map((r) => {
+                  const cust = (data.storkjokkenCustomers || []).find((c) => c.id === r.customerId);
+                  const dayNames = ["", "Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
+                  return (
+                    <div key={r.id} className="soft-box" style={{ marginBottom: 10 }}>
+                      <div className="between">
+                        <b>{cust?.name || "Ukjent kunde"} · {r.weekdays.map((d) => dayNames[d]).join(", ")}</b>
+                        <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(r.submittedAt).toLocaleString("no-NO")}</span>
+                      </div>
+                      {r.note && <p style={{ fontStyle: "italic", fontSize: 13 }}>{r.note}</p>}
+                      <table style={{ marginTop: 8 }}>
+                        <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Antall per gang</th></tr></thead>
+                        <tbody>
+                          {r.lines.map((l, i) => (
+                            <tr key={i}>
+                              <td>{data.products.find((p) => p.id === l.productId)?.name || "Ukjent"}</td>
+                              <td style={{ textAlign: "right" }}>{l.quantity}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                        <button className="btn active" onClick={() => approveRecurringRequest(r.id)}>Godkjenn</button>
+                        <button className="btn" onClick={() => rejectRecurringRequest(r.id)}>Avslå</button>
+                      </div>
+                    </div>
+                  );
+                })
+              ))}
+
+              <div className="soft-box" style={{ marginTop: 16 }}>
                 <h3>Ny kunde</h3>
                 <div className="form-grid five">
                   <input value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} placeholder="Kundenavn" />
@@ -7235,80 +7309,6 @@ ${orderPages}`;
                 </tbody>
               </table>
               )}
-
-              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "pending" ? null : "pending")}>
-                <h3 style={{ margin: 0 }}>Bestillinger til godkjenning ({(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length})</h3>
-                <span>{openBlock === "pending" ? "▲" : "▼"}</span>
-              </div>
-              {openBlock === "pending" && ((data.pendingPortalOrders || []).filter((p) => p.status === "pending").length === 0 ? (
-                <p className="muted">Ingen ventende bestillinger.</p>
-              ) : (
-                (data.pendingPortalOrders || []).filter((p) => p.status === "pending").map((p) => {
-                  const customer = (data.storkjokkenCustomers || []).find((c) => c.id === p.customerId);
-                  const isLate = p.date <= addDays(today(), 1) && new Date().getHours() >= 12;
-                  return (
-                    <div key={p.id} className="soft-box" style={{ marginBottom: 10 }}>
-                      <div className="between">
-                        <b>{customer?.name || "Ukjent kunde"} · levering {formatDateNo(p.date)}</b>
-                        <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(p.submittedAt).toLocaleString("no-NO")}</span>
-                      </div>
-                      {isLate && <p style={{ color: "#dc2626", fontWeight: 700, fontSize: 13 }}>⚠ Sendt inn etter kl. 12-fristen for denne datoen.</p>}
-                      <table style={{ marginTop: 8 }}>
-                        <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Antall</th></tr></thead>
-                        <tbody>
-                          {p.lines.map((l, i) => (
-                            <tr key={i}>
-                              <td>{data.products.find((prod) => prod.id === l.productId)?.name || "Ukjent produkt"}</td>
-                              <td style={{ textAlign: "right" }}>{l.quantity}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                        <button className="btn active" onClick={() => approvePendingPortalOrder(p.id)}>Godkjenn</button>
-                        <button className="btn" onClick={() => rejectPendingPortalOrder(p.id)}>Avslå</button>
-                      </div>
-                    </div>
-                  );
-                })
-              ))}
-
-              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "recurring" ? null : "recurring")}>
-                <h3 style={{ margin: 0 }}>Fastordre-forespørsler ({(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length})</h3>
-                <span>{openBlock === "recurring" ? "▲" : "▼"}</span>
-              </div>
-              {openBlock === "recurring" && ((data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length === 0 ? (
-                <p className="muted">Ingen ventende fastordre-forespørsler.</p>
-              ) : (
-                (data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").map((r) => {
-                  const cust = (data.storkjokkenCustomers || []).find((c) => c.id === r.customerId);
-                  const dayNames = ["", "Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
-                  return (
-                    <div key={r.id} className="soft-box" style={{ marginBottom: 10 }}>
-                      <div className="between">
-                        <b>{cust?.name || "Ukjent kunde"} · {r.weekdays.map((d) => dayNames[d]).join(", ")}</b>
-                        <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(r.submittedAt).toLocaleString("no-NO")}</span>
-                      </div>
-                      {r.note && <p style={{ fontStyle: "italic", fontSize: 13 }}>{r.note}</p>}
-                      <table style={{ marginTop: 8 }}>
-                        <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Antall per gang</th></tr></thead>
-                        <tbody>
-                          {r.lines.map((l, i) => (
-                            <tr key={i}>
-                              <td>{data.products.find((p) => p.id === l.productId)?.name || "Ukjent"}</td>
-                              <td style={{ textAlign: "right" }}>{l.quantity}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                        <button className="btn active" onClick={() => approveRecurringRequest(r.id)}>Godkjenn</button>
-                        <button className="btn" onClick={() => rejectRecurringRequest(r.id)}>Avslå</button>
-                      </div>
-                    </div>
-                  );
-                })
-              ))}
 
               <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "deadlines" ? null : "deadlines")}>
                 <h3 style={{ margin: 0 }}>Bestillingsfrister</h3>
