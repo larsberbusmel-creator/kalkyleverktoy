@@ -1,7 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
-// Server-only client — uses the service role key, never exposed to the browser.
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
   process.env.SUPABASE_SERVICE_ROLE_KEY as string
@@ -26,7 +25,7 @@ export async function POST(req: Request) {
     const { data: row, error } = await supabaseAdmin
       .from("app_data")
       .select("data")
-      .limit(1)
+      .eq("id", "main")
       .single();
 
     if (error || !row) {
@@ -42,26 +41,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Feil PIN-kode" }, { status: 401 });
     }
 
-    // Only products explicitly priced for storkjøkken — the curated selection.
-    const products = (appData.products || [])
-      .filter((p: any) => p.storkjokkenPriceExVat)
-      .map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        category: p.category,
-        priceExVat: priceForCustomer(p, customer.id, customer, appData.storkjokkenSpecialPrices),
-      }));
+    let visibleProducts = (appData.products || []).filter((p: any) => p.storkjokkenPriceExVat);
+    if (Array.isArray(customer.allowedProductIds) && customer.allowedProductIds.length > 0) {
+      const allowed = new Set(customer.allowedProductIds);
+      visibleProducts = visibleProducts.filter((p: any) => allowed.has(p.id));
+    }
 
-    // Order history: this customer's own pickup orders + pending portal orders only.
-    const history = (appData.storkjokkenPickupOrders || [])
+    const products = visibleProducts.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category,
+      priceExVat: priceForCustomer(p, customer.id, customer, appData.storkjokkenSpecialPrices),
+    }));
+
+    const productName = (id: string) =>
+      (appData.products || []).find((prod: any) => prod.id === id)?.name || "Ukjent";
+
+    const byDate: Record<string, { id: string; productId: string; productName: string; quantity: number }[]> = {};
+    (appData.storkjokkenPickupOrders || [])
       .filter((p: any) => p.customerId === customer.id)
-      .sort((a: any, b: any) => b.date.localeCompare(a.date))
-      .slice(0, 50)
-      .map((p: any) => ({
-        date: p.date,
-        productName: (appData.products || []).find((prod: any) => prod.id === p.productId)?.name || "Ukjent",
-        quantity: p.quantity,
-      }));
+      .forEach((p: any) => {
+        if (!byDate[p.date]) byDate[p.date] = [];
+        byDate[p.date].push({ id: p.id, productId: p.productId, productName: productName(p.productId), quantity: p.quantity });
+      });
+    const history = Object.entries(byDate)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 30)
+      .map(([date, lines]) => ({ date, lines }));
 
     const pending = (appData.pendingPortalOrders || [])
       .filter((p: any) => p.customerId === customer.id && p.status === "pending")
@@ -69,10 +75,31 @@ export async function POST(req: Request) {
         id: p.id,
         date: p.date,
         submittedAt: p.submittedAt,
-        lines: p.lines.map((l: any) => ({
-          productName: (appData.products || []).find((prod: any) => prod.id === l.productId)?.name || "Ukjent",
-          quantity: l.quantity,
+        lines: p.lines.map((l: any) => ({ productId: l.productId, productName: productName(l.productId), quantity: l.quantity })),
+      }));
+
+    const deadlines = appData.portalDeadlines || { weekday: { 7: { closed: true } }, exceptions: {} };
+
+    const activeRecurring = (appData.recurringStorkjokkenOrders || [])
+      .filter((r: any) => r.customerId === customer.id && r.active)
+      .map((r: any) => ({
+        id: r.id,
+        weekdays: r.weekdays,
+        note: r.note,
+        lines: r.lines.map((l: any) => ({
+          productName: productName(l.productId),
+          quantityByDay: l.quantityByDay,
         })),
+      }));
+
+    const pendingRecurring = (appData.pendingRecurringOrderRequests || [])
+      .filter((r: any) => r.customerId === customer.id && r.status === "pending")
+      .map((r: any) => ({
+        id: r.id,
+        weekdays: r.weekdays,
+        note: r.note,
+        submittedAt: r.submittedAt,
+        lines: r.lines.map((l: any) => ({ productId: l.productId, productName: productName(l.productId), quantity: l.quantity })),
       }));
 
     return NextResponse.json({
@@ -80,6 +107,10 @@ export async function POST(req: Request) {
       products,
       history,
       pending,
+      deadlines,
+      favoriteProductIds: customer.favoriteProductIds || [],
+      activeRecurring,
+      pendingRecurring,
     });
   } catch (e) {
     return NextResponse.json({ error: "Noe gikk galt" }, { status: 500 });

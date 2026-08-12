@@ -254,6 +254,14 @@ type StorkjokkenCustomer = {
   active?: boolean;
   internal?: boolean;
   pin?: string;
+  allowedProductIds?: string[];
+  favoriteProductIds?: string[];
+};
+
+type PortalDeadlineDay = { closed?: boolean; cutoffTime?: string };
+type PortalDeadlines = {
+  weekday: Record<number, PortalDeadlineDay>;
+  exceptions: Record<string, PortalDeadlineDay>;
 };
 
 type PendingPortalOrderLine = { productId: string; quantity: number };
@@ -262,6 +270,16 @@ type PendingPortalOrder = {
   customerId: string;
   date: string;
   lines: PendingPortalOrderLine[];
+  submittedAt: string;
+  status: "pending" | "approved" | "rejected";
+};
+
+type PendingRecurringOrderRequest = {
+  id: string;
+  customerId: string;
+  weekdays: number[];
+  lines: { productId: string; quantity: number }[];
+  note?: string;
   submittedAt: string;
   status: "pending" | "approved" | "rejected";
 };
@@ -360,6 +378,8 @@ type AppData = {
   storkjokkenSpecialPrices: StorkjokkenSpecialPrice[];
   storkjokkenPickupOrders: StorkjokkenPickupOrder[];
   pendingPortalOrders: PendingPortalOrder[];
+  portalDeadlines: PortalDeadlines;
+  pendingRecurringOrderRequests: PendingRecurringOrderRequest[];
   productPriceLog: ProductPriceLogEntry[];
   scheduledPriceChanges: ScheduledPriceChange[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
@@ -534,6 +554,8 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   storkjokkenSpecialPrices: [],
   storkjokkenPickupOrders: [],
   pendingPortalOrders: [],
+  portalDeadlines: { weekday: { 7: { closed: true } }, exceptions: {} },
+  pendingRecurringOrderRequests: [],
   productPriceLog: [],
   scheduledPriceChanges: [],
   recurringStorkjokkenOrders: [],
@@ -609,6 +631,12 @@ storkjokkenPickupOrders:
 
 pendingPortalOrders:
   (raw as any).pendingPortalOrders || [],
+
+portalDeadlines:
+  (raw as any).portalDeadlines || { weekday: { 7: { closed: true } }, exceptions: {} },
+
+pendingRecurringOrderRequests:
+  (raw as any).pendingRecurringOrderRequests || [],
 
 productPriceLog:
   (raw as any).productPriceLog || [],
@@ -5808,7 +5836,22 @@ function ProductionTab({
 
   function startEditCustomer(customer: StorkjokkenCustomer) {
     setEditingCustomerId(customer.id);
-    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin });
+    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin, allowedProductIds: customer.allowedProductIds });
+  }
+
+  function toggleAllowedProduct(productId: string) {
+    const current = customerDraft.allowedProductIds || [];
+    const next = current.includes(productId) ? current.filter((id) => id !== productId) : [...current, productId];
+    setCustomerDraft({ ...customerDraft, allowedProductIds: next });
+  }
+
+  function toggleAllowedCategory(category: string, productIds: string[]) {
+    const current = customerDraft.allowedProductIds || [];
+    const allSelected = productIds.every((id) => current.includes(id));
+    const next = allSelected
+      ? current.filter((id) => !productIds.includes(id))
+      : [...new Set([...current, ...productIds])];
+    setCustomerDraft({ ...customerDraft, allowedProductIds: next });
   }
 
   function cancelEditCustomer() {
@@ -5874,6 +5917,52 @@ function ProductionTab({
 
   function rejectPendingPortalOrder(id: string) {
     updateData({ pendingPortalOrders: (data.pendingPortalOrders || []).map((p) => p.id === id ? { ...p, status: "rejected" } : p) });
+  }
+
+  function approveRecurringRequest(id: string) {
+    const req = (data.pendingRecurringOrderRequests || []).find((r) => r.id === id);
+    if (!req) return;
+    const lines: RecurringOrderLine[] = req.lines.map((l) => ({
+      productId: l.productId,
+      quantityByDay: Object.fromEntries(req.weekdays.map((d) => [d, l.quantity])),
+    }));
+    const newOrder: RecurringStorkjokkenOrder = {
+      id: `recurring-${Date.now()}`,
+      customerId: req.customerId,
+      weekdays: req.weekdays,
+      lines,
+      active: true,
+      note: req.note,
+    };
+    updateData({
+      recurringStorkjokkenOrders: [...(data.recurringStorkjokkenOrders || []), newOrder],
+      pendingRecurringOrderRequests: (data.pendingRecurringOrderRequests || []).map((r) => r.id === id ? { ...r, status: "approved" } : r),
+    });
+  }
+
+  function rejectRecurringRequest(id: string) {
+    updateData({ pendingRecurringOrderRequests: (data.pendingRecurringOrderRequests || []).map((r) => r.id === id ? { ...r, status: "rejected" } : r) });
+  }
+
+  function updateWeekdayDeadline(weekday: number, patch: Partial<PortalDeadlineDay>) {
+    const deadlines = data.portalDeadlines || { weekday: {}, exceptions: {} };
+    updateData({ portalDeadlines: { ...deadlines, weekday: { ...deadlines.weekday, [weekday]: { ...deadlines.weekday?.[weekday], ...patch } } } });
+  }
+
+  const [newException, setNewException] = useState({ date: "", closed: true, cutoffTime: "12:00" });
+
+  function addExceptionDeadline() {
+    if (!newException.date) return;
+    const deadlines = data.portalDeadlines || { weekday: {}, exceptions: {} };
+    updateData({ portalDeadlines: { ...deadlines, exceptions: { ...deadlines.exceptions, [newException.date]: { closed: newException.closed, cutoffTime: newException.cutoffTime } } } });
+    setNewException({ date: "", closed: true, cutoffTime: "12:00" });
+  }
+
+  function removeExceptionDeadline(date: string) {
+    const deadlines = data.portalDeadlines || { weekday: {}, exceptions: {} };
+    const nextExceptions = { ...deadlines.exceptions };
+    delete nextExceptions[date];
+    updateData({ portalDeadlines: { ...deadlines, exceptions: nextExceptions } });
   }
 
   function deletePickupOrder(id: string) {
@@ -6987,6 +7076,41 @@ ${orderPages}`;
                                     <button type="button" className="link" onClick={() => setCustomerDraft({ ...customerDraft, pin: generateUniquePin() })}>Generer PIN</button>
                                   )}
                                 </div>
+
+                                <div style={{ marginTop: 12 }}>
+                                  <b style={{ fontSize: 13 }}>Produkttilgang i kundeportalen</b>
+                                  <p className="muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>
+                                    Ingenting huket av = kunden ser alle storkjøkkenprodukter (standard). Huk av spesifikke produkter for å begrense hva denne kunden kan bestille.
+                                  </p>
+                                  {Object.entries(
+                                    data.products
+                                      .filter((p) => p.storkjokkenPriceExVat)
+                                      .reduce((acc: Record<string, typeof data.products>, p) => {
+                                        (acc[p.category] = acc[p.category] || []).push(p);
+                                        return acc;
+                                      }, {})
+                                  ).map(([category, prods]) => {
+                                    const ids = prods.map((p) => p.id);
+                                    const current = customerDraft.allowedProductIds || [];
+                                    const allSelected = ids.every((id) => current.includes(id));
+                                    return (
+                                      <div key={category} style={{ marginBottom: 8, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8 }}>
+                                        <label className="check" style={{ fontWeight: 700 }}>
+                                          <input type="checkbox" checked={allSelected} onChange={() => toggleAllowedCategory(category, ids)} />
+                                          {category}
+                                        </label>
+                                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 4, paddingLeft: 20 }}>
+                                          {prods.map((p) => (
+                                            <label key={p.id} className="check" style={{ fontSize: 13 }}>
+                                              <input type="checkbox" checked={current.includes(p.id)} onChange={() => toggleAllowedProduct(p.id)} />
+                                              {p.name}
+                                            </label>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                                 <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between" }}>
                                   <button className="link danger" onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
                                   <div style={{ display: "flex", gap: 8 }}>
@@ -7086,6 +7210,86 @@ ${orderPages}`;
                   );
                 })
               )}
+
+              <h3 style={{ marginTop: 24 }}>Fastordre-forespørsler fra kundeportal</h3>
+              {(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length === 0 ? (
+                <p className="muted">Ingen ventende fastordre-forespørsler.</p>
+              ) : (
+                (data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").map((r) => {
+                  const cust = (data.storkjokkenCustomers || []).find((c) => c.id === r.customerId);
+                  const dayNames = ["", "Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
+                  return (
+                    <div key={r.id} className="soft-box" style={{ marginBottom: 10 }}>
+                      <div className="between">
+                        <b>{cust?.name || "Ukjent kunde"} · {r.weekdays.map((d) => dayNames[d]).join(", ")}</b>
+                        <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(r.submittedAt).toLocaleString("no-NO")}</span>
+                      </div>
+                      {r.note && <p style={{ fontStyle: "italic", fontSize: 13 }}>{r.note}</p>}
+                      <table style={{ marginTop: 8 }}>
+                        <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Antall per gang</th></tr></thead>
+                        <tbody>
+                          {r.lines.map((l, i) => (
+                            <tr key={i}>
+                              <td>{data.products.find((p) => p.id === l.productId)?.name || "Ukjent"}</td>
+                              <td style={{ textAlign: "right" }}>{l.quantity}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                        <button className="btn active" onClick={() => approveRecurringRequest(r.id)}>Godkjenn</button>
+                        <button className="btn" onClick={() => rejectRecurringRequest(r.id)}>Avslå</button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+
+              <h3 style={{ marginTop: 24 }}>Bestillingsfrister for kundeportalen</h3>
+              <div className="soft-box">
+                <b style={{ fontSize: 13 }}>Standard per ukedag</b>
+                <div className="form-grid four" style={{ marginTop: 8 }}>
+                  {[
+                    { n: 1, label: "Mandag" }, { n: 2, label: "Tirsdag" }, { n: 3, label: "Onsdag" },
+                    { n: 4, label: "Torsdag" }, { n: 5, label: "Fredag" }, { n: 6, label: "Lørdag" }, { n: 7, label: "Søndag" },
+                  ].map((d) => {
+                    const wd = (data.portalDeadlines || { weekday: {}, exceptions: {} }).weekday?.[d.n] || {};
+                    return (
+                      <div key={d.n} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8 }}>
+                        <b style={{ fontSize: 13 }}>{d.label}</b>
+                        <label className="check" style={{ display: "block", marginTop: 4 }}>
+                          <input type="checkbox" checked={!!wd.closed} onChange={(e) => updateWeekdayDeadline(d.n, { closed: e.target.checked })} />
+                          Stengt
+                        </label>
+                        {!wd.closed && (
+                          <label style={{ display: "block", marginTop: 4 }}>Frist kl.
+                            <input type="time" value={wd.cutoffTime || "12:00"} onChange={(e) => updateWeekdayDeadline(d.n, { cutoffTime: e.target.value })} />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <b style={{ fontSize: 13, marginTop: 16, display: "block" }}>Avvik / røde dager</b>
+                <div className="form-grid four" style={{ marginTop: 8 }}>
+                  <label>Dato<input type="date" value={newException.date} onChange={(e) => setNewException({ ...newException, date: e.target.value })} /></label>
+                  <label className="check" style={{ alignSelf: "end" }}>
+                    <input type="checkbox" checked={newException.closed} onChange={(e) => setNewException({ ...newException, closed: e.target.checked })} />
+                    Stengt denne dagen
+                  </label>
+                  {!newException.closed && (
+                    <label>Frist kl.<input type="time" value={newException.cutoffTime} onChange={(e) => setNewException({ ...newException, cutoffTime: e.target.value })} /></label>
+                  )}
+                  <button className="btn active" style={{ alignSelf: "end" }} onClick={addExceptionDeadline}>Legg til avvik</button>
+                </div>
+                {Object.entries((data.portalDeadlines || { weekday: {}, exceptions: {} }).exceptions || {}).sort().map(([date, d]) => (
+                  <div key={date} className="editable-row">
+                    <span>{formatDateNo(date)} – {d.closed ? "Stengt" : `Frist kl. ${d.cutoffTime}`}</span>
+                    <button className="link danger" onClick={() => removeExceptionDeadline(date)}>Slett</button>
+                  </div>
+                ))}
+              </div>
 
               <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
               {storkjokkenCustomers.map((customer) => {
