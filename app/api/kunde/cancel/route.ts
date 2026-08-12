@@ -52,6 +52,21 @@ export async function POST(req: Request) {
 
     const deadlines = appData.portalDeadlines || { weekday: { 7: { closed: true } }, exceptions: {} };
 
+    function pushCancelNotification(date: string, lines: { productId: string; quantity: number }[]) {
+      const productName = (id: string) => (appData.products || []).find((prod: any) => prod.id === id)?.name || "Ukjent";
+      appData.cancelledOrderNotifications = [
+        ...(appData.cancelledOrderNotifications || []),
+        {
+          id: `cancelnote-${Date.now()}`,
+          customerId: customer.id,
+          customerName: customer.name,
+          date,
+          lines: lines.map((l) => ({ productName: productName(l.productId), quantity: l.quantity })),
+          cancelledAt: new Date().toISOString(),
+        },
+      ];
+    }
+
     if (kind === "pending") {
       const order = (appData.pendingPortalOrders || []).find((o: any) => o.id === orderId);
       if (!order || order.customerId !== customer.id) {
@@ -60,6 +75,7 @@ export async function POST(req: Request) {
       if (isPastDeadline(deadlines, order.date)) {
         return NextResponse.json({ error: "Fristen for denne datoen er passert, kan ikke avbestille." }, { status: 403 });
       }
+      pushCancelNotification(order.date, order.lines);
       appData.pendingPortalOrders = (appData.pendingPortalOrders || []).filter((o: any) => o.id !== orderId);
     } else if (kind === "pickup") {
       const order = (appData.storkjokkenPickupOrders || []).find((o: any) => o.id === orderId);
@@ -69,6 +85,7 @@ export async function POST(req: Request) {
       if (isPastDeadline(deadlines, order.date)) {
         return NextResponse.json({ error: "Fristen for denne datoen er passert, kan ikke avbestille." }, { status: 403 });
       }
+      pushCancelNotification(order.date, [{ productId: order.productId, quantity: order.quantity }]);
       appData.storkjokkenPickupOrders = (appData.storkjokkenPickupOrders || []).filter((o: any) => o.id !== orderId);
     } else if (kind === "recurring") {
       const reqOrder = (appData.pendingRecurringOrderRequests || []).find((o: any) => o.id === orderId);

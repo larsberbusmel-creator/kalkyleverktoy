@@ -57,12 +57,12 @@ export async function POST(req: Request) {
     const productName = (id: string) =>
       (appData.products || []).find((prod: any) => prod.id === id)?.name || "Ukjent";
 
-    const byDate: Record<string, { id: string; productId: string; productName: string; quantity: number }[]> = {};
+    const byDate: Record<string, { id: string; productId: string; productName: string; quantity: number; priceExVat: number }[]> = {};
     (appData.storkjokkenPickupOrders || [])
       .filter((p: any) => p.customerId === customer.id)
       .forEach((p: any) => {
         if (!byDate[p.date]) byDate[p.date] = [];
-        byDate[p.date].push({ id: p.id, productId: p.productId, productName: productName(p.productId), quantity: p.quantity });
+        byDate[p.date].push({ id: p.id, productId: p.productId, productName: productName(p.productId), quantity: p.quantity, priceExVat: p.priceExVat || 0 });
       });
     const history = Object.entries(byDate)
       .sort((a, b) => b[0].localeCompare(a[0]))
@@ -111,6 +111,7 @@ export async function POST(req: Request) {
       favoriteProductIds: customer.favoriteProductIds || [],
       activeRecurring,
       pendingRecurring,
+      vatRate: appData.settings?.foodVat || 15,
     });
   } catch (e) {
     return NextResponse.json({ error: "Noe gikk galt" }, { status: 500 });

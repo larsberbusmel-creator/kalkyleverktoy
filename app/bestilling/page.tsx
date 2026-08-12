@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 
 type Product = { id: string; name: string; category: string; priceExVat: number };
-type HistoryGroup = { date: string; lines: { id: string; productId: string; productName: string; quantity: number }[] };
+type HistoryGroup = { date: string; lines: { id: string; productId: string; productName: string; quantity: number; priceExVat: number }[] };
 type PendingItem = { id: string; date: string; submittedAt: string; lines: { productId: string; productName: string; quantity: number }[] };
 type DeadlineDay = { closed?: boolean; cutoffTime?: string };
 type Deadlines = { weekday: Record<number, DeadlineDay>; exceptions: Record<string, DeadlineDay> };
@@ -43,6 +43,7 @@ export default function BestillingPortal() {
   const [history, setHistory] = useState<HistoryGroup[]>([]);
   const [pending, setPending] = useState<PendingItem[]>([]);
   const [deadlines, setDeadlines] = useState<Deadlines>({ weekday: {}, exceptions: {} });
+  const [vatRate, setVatRate] = useState(15);
   const [tab, setTab] = useState<"bestill" | "historikk" | "fastordre">("bestill");
   const [categoryFilter, setCategoryFilter] = useState("Alle");
 
@@ -92,6 +93,7 @@ export default function BestillingPortal() {
       setHistory(json.history);
       setPending(json.pending);
       setDeadlines(json.deadlines);
+      setVatRate(json.vatRate || 15);
       setFavorites(json.favoriteProductIds || []);
       setActiveRecurring(json.activeRecurring || []);
       setPendingRecurring(json.pendingRecurring || []);
@@ -177,21 +179,61 @@ export default function BestillingPortal() {
     setCancellingId(null);
   }
 
+ async function editPendingOrder(p: PendingItem) {
+    const q: Record<string, string> = {};
+    p.lines.forEach((l) => { q[l.productId] = String(l.quantity); });
+    setQuantities(q);
+    setOrderDate(p.date);
+    setTab("bestill");
+    await cancelOrder(p.id, "pending");
+  }
+
+  async function editHistoryGroup(group: HistoryGroup) {
+    if (isPastDeadline(deadlines, group.date)) {
+      alert("Fristen for denne datoen er passert, kan ikke lenger endres.");
+      return;
+    }
+    const q: Record<string, string> = {};
+    group.lines.forEach((l) => { q[l.productId] = String(l.quantity); });
+    setQuantities(q);
+    setOrderDate(group.date);
+    setTab("bestill");
+    for (const l of group.lines) {
+      await cancelOrder(l.id, "pickup");
+    }
+  }
+
   function printPakkseddel(group: HistoryGroup) {
+    let sumExVat = 0;
     const rows = group.lines
-      .map((l) => `<tr><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb">${l.productName}</td><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${l.quantity}</td></tr>`)
+      .map((l) => {
+        const lineSum = l.priceExVat * l.quantity;
+        sumExVat += lineSum;
+        return `<tr><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb">${l.productName}</td><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${l.quantity}</td><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${l.priceExVat.toFixed(2)} kr</td><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${lineSum.toFixed(2)} kr</td></tr>`;
+      })
       .join("");
+    const vat = sumExVat * (vatRate / 100);
+    const sumIncVat = sumExVat + vat;
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`<html><head><title>Pakkseddel – ${group.date}</title><style>
 body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827}
 table{width:100%;border-collapse:collapse;margin-top:12px}
 th{text-align:left;padding:6px 8px;border-bottom:2px solid #111827}
+tfoot td{padding:6px 8px;font-weight:700}
 </style></head><body>
 <img src="/logo.png" style="height:48px;margin-bottom:12px" />
 <h1 style="margin:0">Pakkseddel</h1>
 <p>${customer?.name || ""} · ${group.date}</p>
-<table><thead><tr><th>Produkt</th><th style="text-align:right">Antall</th></tr></thead><tbody>${rows}</tbody></table>
+<table>
+<thead><tr><th>Produkt</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/stk</th><th style="text-align:right">Sum</th></tr></thead>
+<tbody>${rows}</tbody>
+<tfoot>
+<tr><td colspan="3" style="text-align:right">Sum eks. mva</td><td style="text-align:right">${sumExVat.toFixed(2)} kr</td></tr>
+<tr><td colspan="3" style="text-align:right">Mva (${vatRate}%)</td><td style="text-align:right">${vat.toFixed(2)} kr</td></tr>
+<tr><td colspan="3" style="text-align:right">Sum inkl. mva</td><td style="text-align:right">${sumIncVat.toFixed(2)} kr</td></tr>
+</tfoot>
+</table>
 <script>window.print()</script>
 </body></html>`);
     w.document.close();
@@ -321,13 +363,22 @@ async function toggleFavorite(productId: string) {
               {pending.map((p) => (
                 <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                   <span>{p.date}: {p.lines.map((l) => `${l.quantity}× ${l.productName}`).join(", ")}</span>
-                  <button
-                    onClick={() => cancelOrder(p.id, "pending")}
-                    disabled={cancellingId === p.id || isPastDeadline(deadlines, p.date)}
-                    style={{ background: "none", border: "1px solid #dc2626", color: "#dc2626", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12 }}
-                  >
-                    Avbestill
-                  </button>
+                  <span style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={() => editPendingOrder(p)}
+                      disabled={isPastDeadline(deadlines, p.date)}
+                      style={{ background: "none", border: "1px solid #2563eb", color: "#2563eb", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12 }}
+                    >
+                      Rediger
+                    </button>
+                    <button
+                      onClick={() => cancelOrder(p.id, "pending")}
+                      disabled={cancellingId === p.id || isPastDeadline(deadlines, p.date)}
+                      style={{ background: "none", border: "1px solid #dc2626", color: "#dc2626", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12 }}
+                    >
+                      Avbestill
+                    </button>
+                  </span>
                 </div>
               ))}
             </div>
@@ -417,6 +468,11 @@ async function toggleFavorite(productId: string) {
                     <button onClick={() => printPakkseddel(group)} style={{ background: "none", border: "1px solid #cbd5e1", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 13 }}>
                       Last ned pakkseddel
                     </button>
+                    {canCancel && (
+                      <button onClick={() => editHistoryGroup(group)} style={{ background: "none", border: "1px solid #2563eb", color: "#2563eb", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 13 }}>
+                        Rediger
+                      </button>
+                    )}
                   </div>
                 </div>
                 <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>

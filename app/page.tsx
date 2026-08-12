@@ -6870,6 +6870,29 @@ ${orderPages}`;
 
           {panel === "day" && (
             <>
+              {((data.pendingPortalOrders || []).filter((p) => p.status === "pending").length > 0 ||
+                (data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length > 0) && (
+                <div className="card" style={{ background: "#eef2ff", border: "1px solid #6366f1" }}>
+                  <b style={{ fontSize: 14 }}>📋 Fra kundeportalen</b>
+                  {(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <div className="between">
+                        <span>{(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length} bestilling(er) venter på godkjenning</span>
+                        <button className="btn" onClick={() => setPanel("customers")}>Se og godkjenn →</button>
+                      </div>
+                    </div>
+                  )}
+                  {(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <div className="between">
+                        <span>{(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length} fastordre-forespørsel(er) venter på godkjenning</span>
+                        <button className="btn" onClick={() => setPanel("customers")}>Se og godkjenn →</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="metric-row">
                 <Metric label="Produksjonslinjer" value={String(activeRows.length)} />
                 <Metric label="Totalt antall" value={String(totalUnits)} dark />
