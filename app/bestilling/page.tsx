@@ -158,34 +158,41 @@ export default function BestillingPortal() {
     setSubmitting(false);
   }
 
-  async function cancelOrder(orderId: string, kind: "pending" | "pickup" | "recurring") {
-    if (!confirm("Avbestille denne bestillingen?")) return;
+  async function performCancel(orderId: string, kind: "pending" | "pickup" | "recurring", reason: "cancel" | "edit" = "cancel") {
     setCancellingId(orderId);
+    let ok = false;
     try {
       const res = await fetch("/api/kunde/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin, orderId, kind }),
+        body: JSON.stringify({ pin, orderId, kind, reason }),
       });
       const json = await res.json();
       if (!res.ok) {
         alert(json.error || "Kunne ikke avbestille.");
       } else {
-        await refresh();
+        ok = true;
       }
     } catch {
       alert("Noe gikk galt.");
     }
     setCancellingId(null);
+    return ok;
+  }
+
+  async function cancelOrder(orderId: string, kind: "pending" | "pickup" | "recurring") {
+    if (!confirm("Avbestille denne bestillingen?")) return;
+    if (await performCancel(orderId, kind)) await refresh();
   }
 
  async function editPendingOrder(p: PendingItem) {
     const q: Record<string, string> = {};
     p.lines.forEach((l) => { q[l.productId] = String(l.quantity); });
+    if (!(await performCancel(p.id, "pending", "edit"))) return;
     setQuantities(q);
     setOrderDate(p.date);
     setTab("bestill");
-    await cancelOrder(p.id, "pending");
+    await refresh();
   }
 
   async function editHistoryGroup(group: HistoryGroup) {
@@ -195,12 +202,13 @@ export default function BestillingPortal() {
     }
     const q: Record<string, string> = {};
     group.lines.forEach((l) => { q[l.productId] = String(l.quantity); });
+    for (const l of group.lines) {
+      await performCancel(l.id, "pickup", "edit");
+    }
     setQuantities(q);
     setOrderDate(group.date);
     setTab("bestill");
-    for (const l of group.lines) {
-      await cancelOrder(l.id, "pickup");
-    }
+    await refresh();
   }
 
   function printPakkseddel(group: HistoryGroup) {

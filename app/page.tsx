@@ -380,7 +380,7 @@ type AppData = {
   pendingPortalOrders: PendingPortalOrder[];
   portalDeadlines: PortalDeadlines;
   pendingRecurringOrderRequests: PendingRecurringOrderRequest[];
-  cancelledOrderNotifications: { id: string; customerId: string; customerName: string; date: string; lines: { productName: string; quantity: number }[]; cancelledAt: string }[];
+  cancelledOrderNotifications: { id: string; customerId: string; customerName: string; date: string; lines: { productName: string; quantity: number }[]; cancelledAt: string; type?: "cancelled" | "edited" }[];
   productPriceLog: ProductPriceLogEntry[];
   scheduledPriceChanges: ScheduledPriceChange[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
@@ -7058,7 +7058,7 @@ ${orderPages}`;
                   </div>
                   {data.cancelledOrderNotifications.map((n) => (
                     <div key={n.id} className="between" style={{ marginTop: 6, fontSize: 13 }}>
-                      <span>{n.customerName} · {formatDateNo(n.date)}: {n.lines.map((l) => `${l.quantity}× ${l.productName}`).join(", ")}</span>
+                      <span><b>{n.type === "edited" ? "Redigert" : "Avbestilt"}:</b> {n.customerName} · {formatDateNo(n.date)}: {n.lines.map((l) => `${l.quantity}× ${l.productName}`).join(", ")}</span>
                       <button className="link" onClick={() => dismissCancelNotification(n.id)}>Lest</button>
                     </div>
                   ))}

@@ -27,7 +27,7 @@ function isPastDeadline(deadlines: any, date: string) {
 
 export async function POST(req: Request) {
   try {
-    const { pin, orderId, kind } = await req.json(); // kind: "pending" | "pickup"
+    const { pin, orderId, kind, reason } = await req.json(); // kind: "pending" | "pickup" | "recurring", reason: "cancel" | "edit"
     if (!pin || !orderId || !kind) {
       return NextResponse.json({ error: "Mangler felt" }, { status: 400 });
     }
@@ -63,6 +63,7 @@ export async function POST(req: Request) {
           date,
           lines: lines.map((l) => ({ productName: productName(l.productId), quantity: l.quantity })),
           cancelledAt: new Date().toISOString(),
+          type: reason === "edit" ? "edited" : "cancelled",
         },
       ];
     }
