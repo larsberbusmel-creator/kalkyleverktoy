@@ -8897,6 +8897,28 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   );
 
   const [rental, setRental] = useState<RentalOffer>(() => ({ ...initialData.rental }));
+  
+
+  useEffect(() => {
+    if (!showNewOffer) return;
+    if (!rental.customer.trim()) return;
+    if (!rental.id) {
+      setRental((r) => ({ ...r, id: `rental-${Date.now()}` }));
+      return;
+    }
+    const timeout = setTimeout(() => {
+      updateListRpc("rentalOffers", { [rental.id!]: rental });
+    }, 1500);
+    return () => clearTimeout(timeout);
+  }, [rental, showNewOffer]);
+  function discardDraftOffer() {
+    if (!confirm("Forkaste dette tilbudet? Alt du har skrevet blir slettet.")) return;
+    if (rental.id) {
+      const existing = ((data as any).rentalOffers || []) as RentalOffer[];
+      updateData({ rentalOffers: existing.filter((o) => o.id !== rental.id) } as any);
+    }
+    cancelEdit();
+  }
   const plannerGuestCount = rental.guestCount || 0;
 
   const addonLines = rental.extraLines || [];
