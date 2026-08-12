@@ -958,7 +958,7 @@ export default function Page() {
     });
   }, []);
 
-  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => {
+  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => {
     setData((prev) => {
       const list = (prev as any)[listKey] as any[];
       const next = { ...prev } as any;
@@ -1194,7 +1194,7 @@ return (
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
-        {tab === "rental"     && <RentalTab data={data} updateData={updateData} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
+        {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
 
@@ -8871,7 +8871,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     </section>
   );
 }
-function RentalTab({ data, updateData, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[] }) {
+function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[] }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -9060,16 +9060,13 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
 
   function saveOffer() {
     if (!rental.customer.trim()) return alert("Legg inn kundenavn.");
-    const offer: RentalOffer = { ...rental, id: rental.id || `rental-${Date.now()}` };
-    const existing = ((data as any).rentalOffers || []) as RentalOffer[];
-    const next = existing.find((o) => o.id === offer.id)
-      ? existing.map((o) => o.id === offer.id ? offer : o)
-      : [offer, ...existing];
-    updateData({ rentalOffers: next } as any);
+    const offerId = rental.id || `rental-${Date.now()}`;
+    const offer: RentalOffer = { ...rental, id: offerId };
+    updateListRpc("rentalOffers", { [offerId]: offer });
 
     if (offer.date) {
       const rentalOrder = {
-        id: `rental-order-${offer.id}`,
+        id: `rental-order-${offerId}`,
         orderNumber: offer.id,
         type: "catering" as const,
         customerType: "bedrift" as const,
@@ -9085,12 +9082,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         recurringNote: `Leieavtale: ${rental.venueExternal ? (rental.venueExternalName || "Eksternt") : rental.venue}`,
         allergens: offer.allergens || {}, dietVegan: offer.dietVegan || "0", dietVegetarian: offer.dietVegetarian || "0", dietPregnant: offer.dietPregnant || "0", dietOther: offer.dietOther || "",
       };
-      const orders = data.orders || [];
-      const existingOrderIdx = orders.findIndex((o) => o.id === rentalOrder.id);
-      const nextOrders = existingOrderIdx >= 0
-        ? orders.map((o, i) => i === existingOrderIdx ? rentalOrder : o)
-        : [rentalOrder, ...orders];
-      updateData({ orders: nextOrders });
+      updateListRpc("orders", { [rentalOrder.id]: rentalOrder });
     }
 
     setEditingOfferId(null);
