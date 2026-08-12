@@ -380,6 +380,7 @@ type AppData = {
   pendingPortalOrders: PendingPortalOrder[];
   portalDeadlines: PortalDeadlines;
   pendingRecurringOrderRequests: PendingRecurringOrderRequest[];
+  cancelledOrderNotifications: { id: string; customerId: string; customerName: string; date: string; lines: { productName: string; quantity: number }[]; cancelledAt: string }[];
   productPriceLog: ProductPriceLogEntry[];
   scheduledPriceChanges: ScheduledPriceChange[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
@@ -556,6 +557,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   pendingPortalOrders: [],
   portalDeadlines: { weekday: { 7: { closed: true } }, exceptions: {} },
   pendingRecurringOrderRequests: [],
+  cancelledOrderNotifications: [],
   productPriceLog: [],
   scheduledPriceChanges: [],
   recurringStorkjokkenOrders: [],
@@ -637,6 +639,9 @@ portalDeadlines:
 
 pendingRecurringOrderRequests:
   (raw as any).pendingRecurringOrderRequests || [],
+
+cancelledOrderNotifications:
+  (raw as any).cancelledOrderNotifications || [],
 
 productPriceLog:
   (raw as any).productPriceLog || [],
@@ -5950,6 +5955,15 @@ function ProductionTab({
   }
 
   const [newException, setNewException] = useState({ date: "", closed: true, cutoffTime: "12:00" });
+  const [openBlock, setOpenBlock] = useState<string | null>(null);
+
+  function dismissCancelNotification(id: string) {
+    updateData({ cancelledOrderNotifications: (data.cancelledOrderNotifications || []).filter((n) => n.id !== id) });
+  }
+
+  function dismissAllCancelNotifications() {
+    updateData({ cancelledOrderNotifications: [] });
+  }
 
   function addExceptionDeadline() {
     if (!newException.date) return;
@@ -7012,6 +7026,22 @@ ${orderPages}`;
           {panel === "customers" && (
             <div className="card">
               <h3>Storkjøkkenkunder</h3>
+
+              {(data.cancelledOrderNotifications || []).length > 0 && (
+                <div style={{ background: "#fef2f2", border: "1px solid #dc2626", borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                  <div className="between">
+                    <b style={{ color: "#991b1b" }}>⚠ {data.cancelledOrderNotifications.length} avbestilling{data.cancelledOrderNotifications.length === 1 ? "" : "er"} fra kundeportalen</b>
+                    <button className="link" onClick={dismissAllCancelNotifications}>Merk alle som lest</button>
+                  </div>
+                  {data.cancelledOrderNotifications.map((n) => (
+                    <div key={n.id} className="between" style={{ marginTop: 6, fontSize: 13 }}>
+                      <span>{n.customerName} · {formatDateNo(n.date)}: {n.lines.map((l) => `${l.quantity}× ${l.productName}`).join(", ")}</span>
+                      <button className="link" onClick={() => dismissCancelNotification(n.id)}>Lest</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="soft-box">
                 <h3>Ny kunde</h3>
                 <div className="form-grid five">
@@ -7023,6 +7053,11 @@ ${orderPages}`;
                 </div>
                 <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
               </div>
+              <div className="between" style={{ cursor: "pointer", marginTop: 8 }} onClick={() => setOpenBlock(openBlock === "list" ? null : "list")}>
+                <h3 style={{ margin: 0 }}>Kunder ({(data.storkjokkenCustomers || []).length})</h3>
+                <span>{openBlock === "list" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "list" && (
               <table>
                 <thead><tr><th></th><th>Kunde</th><th></th></tr></thead>
                 <tbody>
@@ -7176,9 +7211,13 @@ ${orderPages}`;
                   })}
                 </tbody>
               </table>
+              )}
 
-              <h3 style={{ marginTop: 24 }}>Bestillinger fra kundeportal til godkjenning</h3>
-              {(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length === 0 ? (
+              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "pending" ? null : "pending")}>
+                <h3 style={{ margin: 0 }}>Bestillinger til godkjenning ({(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length})</h3>
+                <span>{openBlock === "pending" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "pending" && ((data.pendingPortalOrders || []).filter((p) => p.status === "pending").length === 0 ? (
                 <p className="muted">Ingen ventende bestillinger.</p>
               ) : (
                 (data.pendingPortalOrders || []).filter((p) => p.status === "pending").map((p) => {
@@ -7209,10 +7248,13 @@ ${orderPages}`;
                     </div>
                   );
                 })
-              )}
+              ))}
 
-              <h3 style={{ marginTop: 24 }}>Fastordre-forespørsler fra kundeportal</h3>
-              {(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length === 0 ? (
+              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "recurring" ? null : "recurring")}>
+                <h3 style={{ margin: 0 }}>Fastordre-forespørsler ({(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length})</h3>
+                <span>{openBlock === "recurring" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "recurring" && ((data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length === 0 ? (
                 <p className="muted">Ingen ventende fastordre-forespørsler.</p>
               ) : (
                 (data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").map((r) => {
@@ -7243,9 +7285,13 @@ ${orderPages}`;
                     </div>
                   );
                 })
-              )}
+              ))}
 
-              <h3 style={{ marginTop: 24 }}>Bestillingsfrister for kundeportalen</h3>
+              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "deadlines" ? null : "deadlines")}>
+                <h3 style={{ margin: 0 }}>Bestillingsfrister</h3>
+                <span>{openBlock === "deadlines" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "deadlines" && (
               <div className="soft-box">
                 <b style={{ fontSize: 13 }}>Standard per ukedag</b>
                 <div className="form-grid four" style={{ marginTop: 8 }}>
@@ -7290,9 +7336,13 @@ ${orderPages}`;
                   </div>
                 ))}
               </div>
+              )}
 
-              <h3 style={{ marginTop: 24 }}>Spesialpriser per kunde</h3>
-              {storkjokkenCustomers.map((customer) => {
+              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "prices" ? null : "prices")}>
+                <h3 style={{ margin: 0 }}>Spesialpriser per kunde</h3>
+                <span>{openBlock === "prices" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "prices" && storkjokkenCustomers.map((customer) => {
                 const isOpen = expandedCustomerId === customer.id;
                 const specialPrices = (data.storkjokkenSpecialPrices || []).filter((x) => x.customerId === customer.id);
                 return (
