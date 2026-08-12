@@ -284,25 +284,28 @@ async function toggleFavorite(productId: string) {
   
   if (!customer) {
     return (
-      <div style={{ maxWidth: 360, margin: "60px auto", fontFamily: "Arial, Helvetica, sans-serif", padding: 16, textAlign: "center" }}>
-        <img src="/logo.png" style={{ height: 64, marginBottom: 16 }} alt="Logo" />
-        <p style={{ color: "#64748b", marginBottom: 20 }}>Storkjøkken-portal</p>
-        <label style={{ display: "block", marginBottom: 8, fontWeight: 700, textAlign: "left" }}>PIN-kode</label>
-        <input
-          value={pinInput}
-          onChange={(e) => setPinInput(e.target.value.replace(/[^0-9]/g, ""))}
-          onKeyDown={(e) => e.key === "Enter" && login()}
-          placeholder="f.eks. 48213"
-          style={{ width: "100%", padding: 10, fontSize: 16, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
-        />
-        {error && <p style={{ color: "#dc2626", marginTop: 8 }}>{error}</p>}
-        <button
-          onClick={login}
-          disabled={loading}
-          style={{ width: "100%", marginTop: 16, padding: 12, fontSize: 16, fontWeight: 700, background: "#111827", color: "white", border: "none", borderRadius: 8, cursor: "pointer" }}
-        >
-          {loading ? "Logger inn..." : "Logg inn"}
-        </button>
+      <div style={{ minHeight: "100vh", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Arial, Helvetica, sans-serif", padding: 16 }}>
+        <div style={{ maxWidth: 380, width: "100%", background: "white", borderRadius: 16, boxShadow: "0 10px 40px rgba(0,0,0,0.08)", padding: "40px 32px", textAlign: "center", boxSizing: "border-box" }}>
+          <div style={{ display: "inline-block", padding: 20, border: "1px solid #e2e8f0", borderRadius: 12, marginBottom: 20 }}>
+            <img src="/logo.png" style={{ height: 90 }} alt="Logo" />
+          </div>
+          <p style={{ color: "#64748b", marginBottom: 24, fontSize: 15 }}>Storkjøkken-portal</p>
+          <label style={{ display: "block", marginBottom: 8, fontWeight: 700, textAlign: "left" }}>Kundenr</label>
+          <input
+            value={pinInput}
+            onChange={(e) => setPinInput(e.target.value.replace(/[^0-9]/g, ""))}
+            onKeyDown={(e) => e.key === "Enter" && login()}
+            style={{ width: "100%", padding: 12, fontSize: 16, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+          />
+          {error && <p style={{ color: "#dc2626", marginTop: 8 }}>{error}</p>}
+          <button
+            onClick={login}
+            disabled={loading}
+            style={{ width: "100%", marginTop: 20, padding: 12, fontSize: 16, fontWeight: 700, background: "#111827", color: "white", border: "none", borderRadius: 8, cursor: "pointer" }}
+          >
+            {loading ? "Logger inn..." : "Logg inn"}
+          </button>
+        </div>
       </div>
     );
   }
