@@ -675,6 +675,26 @@ rentalOffers: (raw as any).rentalOffers || [],
   };
 }
 
+function PageHeader({ icon, title, color }: { icon: string; title: string; color: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        background: color,
+        color: "white",
+        borderRadius: 16,
+        padding: "14px 20px",
+        marginBottom: 20,
+      }}
+    >
+      <span style={{ fontSize: 24, lineHeight: 1 }}>{icon}</span>
+      <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "white" }}>{title}</h1>
+    </div>
+  );
+}
+
 export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -1115,17 +1135,19 @@ function productCost(product: Product, visited: string[] = []) {
 
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
-  const tabConfig: { key: Tab; label: string; icon: string }[] = [
-  { key: "dashboard",  label: "Startside",         icon: "📅" },
-  { key: "materials",  label: "Råvarer",            icon: "🥕" },
-  { key: "recipes",    label: "Grunnoppskrifter",   icon: "📖" },
-  { key: "products",   label: "Produkter",          icon: "🍽" },
-  { key: "orders",     label: "Ordre",              icon: "📋" },
-  { key: "production", label: "Produksjon",         icon: "🥖" },
-  { key: "inventory",  label: "Varetelling",        icon: "📦" },
-  { key: "rental",     label: "Leie av lokale",     icon: "🏠" },
-  { key: "settings",   label: "Innstillinger",      icon: "⚙️" },
+  const tabConfig: { key: Tab; label: string; icon: string; color: string }[] = [
+  { key: "dashboard",  label: "Startside",         icon: "📅", color: "#0ea5e9" },
+  { key: "materials",  label: "Råvarer",            icon: "🥕", color: "#16a34a" },
+  { key: "recipes",    label: "Grunnoppskrifter",   icon: "📖", color: "#7c3aed" },
+  { key: "products",   label: "Produkter",          icon: "🍽", color: "#db2777" },
+  { key: "orders",     label: "Ordre",              icon: "📋", color: "#2563eb" },
+  { key: "production", label: "Produksjon",         icon: "🥖", color: "#ea580c" },
+  { key: "inventory",  label: "Varetelling",        icon: "📦", color: "#0891b2" },
+  { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
+  { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
 ];
+
+  const activeTabConfig = tabConfig.find((t) => t.key === tab);
 
 return (
   <main style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
@@ -1187,6 +1209,7 @@ return (
 
       {/* ── INNHOLD ── */}
       <div className="main-content">
+        {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
@@ -1896,7 +1919,7 @@ function defaultRetailMargin(category: string) {
 }
 
   return <section className="card">
-    <div className="between"><h2>Råvarer</h2><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>
+    <div className="between" style={{ justifyContent: "flex-end" }}><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>
 
     {showForm && <div className="soft-box">
       <div className="form-grid">
@@ -2513,8 +2536,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   return (
     <section className="grid two">
       <div className="card">
-        <div className="between">
-          <h2>Grunnoppskrifter</h2>
+        <div className="between" style={{ justifyContent: "flex-end" }}>
           <button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button>
         </div>
         <input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />
@@ -4020,9 +4042,7 @@ th{background:#f3f4f6}
   return (
   <section>
     <div className="card">
-      <div className="between">
-        <h2>Produkter</h2>
-
+      <div className="between" style={{ justifyContent: "flex-end" }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={() => setShowProductListEditor(true)}>
             Lag produktliste
@@ -5159,8 +5179,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
   const calSelectedOrders = calDayOrders(calendarSelectedDate);
   return (
     <section className="card">
-      <div className="between">
-        <h2>Ordre</h2>
+      <div className="between" style={{ justifyContent: "flex-end" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             className={showTrash ? "btn active" : "btn"}
@@ -6825,8 +6844,7 @@ ${orderPages}`;
       <div className="card">
         <div className="between">
           <div>
-            <h2>Produksjon</h2>
-            <p style={{ color: "#64748b" }}>Velg dag og kategori.</p>
+            <p style={{ color: "#64748b", margin: 0 }}>Velg dag og kategori.</p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {/* Bakeri / Catering hovedvalg */}
@@ -8499,8 +8517,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
 
   return (
     <section className="card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <h2 style={{ margin: 0 }}>Varetelling</h2>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: isRealtimeConnected ? "#166534" : "#991b1b" }}>
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: isRealtimeConnected ? "#16a34a" : "#dc2626" }} />
           {isRealtimeConnected ? "Live" : "Frakoblet"}
@@ -10203,8 +10220,7 @@ ${opts.produksjon ? productionPageHtml : ""}
   return (
     <section>
       <div className="card">
-        <div className="between">
-          <h2>Leie av lokale</h2>
+        <div className="between" style={{ justifyContent: "flex-end" }}>
           <div style={{ display: "flex", gap: 8 }}>
             <button className={showTrash ? "btn active" : "btn"} onClick={() => setShowTrash(!showTrash)}>
               🗑 Papirkurv {deletedOffers.length > 0 && `(${deletedOffers.length})`}
@@ -11598,8 +11614,6 @@ function removeAddonPackingItem(addonId: string, itemId: string) {
 
   return (
     <section className="card">
-      <h2>Innstillinger</h2>
-
       <Section id="personell" title="Personell">
         <div className="form-grid">
           <label>MVA mat<input type="number" value={localSettings.foodVat}
