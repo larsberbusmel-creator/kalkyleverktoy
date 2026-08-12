@@ -107,6 +107,31 @@ export default function LoginPage() {
         >
           Logg inn
         </button>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0" }}>
+          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+          <span style={{ color: "#94a3b8", fontSize: 13 }}>eller</span>
+          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+        </div>
+         <a   
+        
+          href="/bestilling"
+          style={{
+            display: "block",
+            width: "100%",
+            padding: 14,
+            borderRadius: 8,
+            border: "1px solid #0f172a",
+            background: "white",
+            color: "#0f172a",
+            fontWeight: 600,
+            textAlign: "center",
+            textDecoration: "none",
+            boxSizing: "border-box",
+          }}
+        >
+          Logg inn for bestilling
+        </a>
       </div>
     </main>
   );
