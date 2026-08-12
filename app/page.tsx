@@ -168,6 +168,7 @@ type RentalOffer = {
   guestCount?: number;
   courseCount?: number;
   mealType?: "buffet" | "flere_retter";
+  customPackingItems?: { id: string; name: string; unit: string; qty: number }[];
   floorPlanRoomIds?: string[];
   floorPlanTables?: PlacedTable[];
   floorPlanChairs?: PlacedChair[];
@@ -9945,7 +9946,21 @@ h2{margin-bottom:16px}
         addonRowsMap[key].qty += pi.qty;
       });
     });
-    return [...coverRows, ...Object.values(addonRowsMap)];
+    const customRows = (rental.customPackingItems || []).map((c) => ({ name: c.name, unit: c.unit, qty: c.qty }));
+    return [...customRows, ...coverRows, ...Object.values(addonRowsMap)];
+  }
+
+  const [customPackingForm, setCustomPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
+
+  function addCustomPackingItem() {
+    if (!customPackingForm.name.trim()) return;
+    const item = { id: `custom-${Date.now()}`, name: customPackingForm.name.trim(), unit: customPackingForm.unit, qty: Number(customPackingForm.qty) || 0 };
+    setRental({ ...rental, customPackingItems: [...(rental.customPackingItems || []), item] });
+    setCustomPackingForm({ name: "", unit: "stk", qty: "1" });
+  }
+
+  function removeCustomPackingItem(id: string) {
+    setRental({ ...rental, customPackingItems: (rental.customPackingItems || []).filter((c) => c.id !== id) });
   }
 
   function printPackingList() {
@@ -10384,7 +10399,25 @@ ${opts.produksjon ? productionPageHtml : ""}
                     </select>
                   </label>
                 </div>
-                {(data.coverItems || []).length === 0 ? (
+                <h3 style={{ marginTop: 16 }}>Egne artikler</h3>
+                <div className="form-grid three">
+                  <input placeholder="Navn (f.eks. Ekstra stoler)" value={customPackingForm.name} onChange={(e) => setCustomPackingForm({ ...customPackingForm, name: e.target.value })} />
+                  <input placeholder="Enhet (stk, kg...)" value={customPackingForm.unit} onChange={(e) => setCustomPackingForm({ ...customPackingForm, unit: e.target.value })} />
+                  <input type="number" placeholder="Antall" value={customPackingForm.qty} onChange={(e) => setCustomPackingForm({ ...customPackingForm, qty: e.target.value })} />
+                </div>
+                <button className="btn active" style={{ marginTop: 8 }} onClick={addCustomPackingItem}>Legg til artikkel</button>
+                {(rental.customPackingItems || []).length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    {(rental.customPackingItems || []).map((c) => (
+                      <div key={c.id} className="editable-row">
+                        <span>{c.name} · {c.qty} {c.unit}</span>
+                        <button className="link danger" onClick={() => removeCustomPackingItem(c.id)}>Slett</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {(data.coverItems || []).length === 0 && !(rental.customPackingItems || []).length ? (
                   <p className="muted">Ingen kuvertartikler definert ennå – gå til Innstillinger → Rombibliotek → Kuvertartikler for å legge dem inn.</p>
                 ) : (
                   <>
