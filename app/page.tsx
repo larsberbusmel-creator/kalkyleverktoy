@@ -9222,6 +9222,16 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
   function rentalLineAllergenBreakdown(line: RentalProductLine): { dish: string; name: string; allergens: string[] }[] {
     const product = data.products.find((p) => p.id === line.productId);
     if (!product) return [];
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length && line.menuSelections?.length) {
+      return line.menuSelections.flatMap((sel) => {
+        const chosen = data.products.find((p) => p.id === sel.productId);
+        if (!chosen) return [];
+        const breakdown = rentalProductAllergenBreakdown(chosen);
+        return (breakdown.length ? breakdown : [{ name: chosen.name, allergens: productAllergens(chosen) }])
+          .filter((b) => b.allergens.length)
+          .map((b) => ({ dish: chosen.name, name: b.name, allergens: b.allergens }));
+      });
+    }
     const breakdown = rentalProductAllergenBreakdown(product);
     return (breakdown.length ? breakdown : [{ name: product.name, allergens: productAllergens(product) }])
       .filter((b) => b.allergens.length)
