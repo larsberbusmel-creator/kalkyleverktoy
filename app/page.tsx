@@ -10188,13 +10188,17 @@ ${opts.produksjon ? productionPageHtml : ""}
     productSearch === "" || p.name.toLowerCase().includes(productSearch.toLowerCase())
   ).slice(0, 50);
 
-  const offers = (((data as any).rentalOffers || []) as RentalOffer[])
+ const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const allMatchingOffers = (((data as any).rentalOffers || []) as RentalOffer[])
     .filter((o) => offerSearch === "" ||
       o.customer.toLowerCase().includes(offerSearch.toLowerCase()) ||
       (o.venue || "").toLowerCase().includes(offerSearch.toLowerCase()) ||
       (o.venueExternalName || "").toLowerCase().includes(offerSearch.toLowerCase())
     )
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const offers = allMatchingOffers.filter((o) => !o.date || o.date >= sevenDaysAgo);
+  const archivedOffers = allMatchingOffers.filter((o) => o.date && o.date < sevenDaysAgo);
+  const [showArchive, setShowArchive] = useState(false);
 
   return (
     <section>
@@ -11035,6 +11039,35 @@ ${opts.produksjon ? productionPageHtml : ""}
             </div>
           );
         })}
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="between" style={{ cursor: "pointer" }} onClick={() => setShowArchive(!showArchive)}>
+          <h2 style={{ margin: 0 }}>Arkiv ({archivedOffers.length})</h2>
+          <span>{showArchive ? "▲" : "▼"}</span>
+        </div>
+        {showArchive && (
+          archivedOffers.length === 0 ? (
+            <p style={{ color: "#64748b", marginTop: 12 }}>Ingen arkiverte tilbud.</p>
+          ) : (
+            archivedOffers.map((offer) => {
+              const isEditing = editingOfferId === offer.id;
+              return (
+                <div key={offer.id} className="editable-row" style={{ marginTop: 12 }}>
+                  <div>
+                    <b>{offer.customer}</b>
+                    {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
+                    <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
+                    <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
+                  </div>
+                </div>
+              );
+            })
+          )
+        )}
       </div>
     </section>
   );
