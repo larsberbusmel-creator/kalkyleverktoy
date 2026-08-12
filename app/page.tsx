@@ -147,7 +147,7 @@ note?: string;
 };
 
 type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
-type RentalProductLine = { productId: string; guests: number };
+type RentalProductLine = { productId: string; guests: number; menuSelections?: MenuCourseSelection[] };
 
 type RunSheetItem = { id: string; task: string; responsible?: string; time?: string; groupLabel?: string };
 
@@ -9080,6 +9080,42 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
 <table><thead><tr><th>Oppgave</th><th>Ansvar</th><th>Tidspunkt</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
+  function updateRentalMenuSelection(lineIndex: number, courseId: string, selIndex: number, patch: Partial<MenuCourseSelection>) {
+    setRental({
+      ...rental,
+      productLines: rental.productLines.map((l, i) => {
+        if (i !== lineIndex) return l;
+        const current = l.menuSelections || [];
+        const courseRows = current.filter((s) => s.courseId === courseId).map((s, si) => si === selIndex ? { ...s, ...patch } : s);
+        const otherRows = current.filter((s) => s.courseId !== courseId);
+        return { ...l, menuSelections: [...otherRows, ...courseRows] };
+      }),
+    });
+  }
+
+  function addRentalMenuSelectionRow(lineIndex: number, courseId: string) {
+    setRental({
+      ...rental,
+      productLines: rental.productLines.map((l, i) => i === lineIndex
+        ? { ...l, menuSelections: [...(l.menuSelections || []), { courseId, productId: "", guestCount: 0 }] }
+        : l),
+    });
+  }
+
+  function removeRentalMenuSelectionRow(lineIndex: number, courseId: string, selIndex: number) {
+    setRental({
+      ...rental,
+      productLines: rental.productLines.map((l, i) => {
+        if (i !== lineIndex) return l;
+        const current = l.menuSelections || [];
+        const courseRows = current.filter((s) => s.courseId === courseId);
+        courseRows.splice(selIndex, 1);
+        const otherRows = current.filter((s) => s.courseId !== courseId);
+        return { ...l, menuSelections: [...otherRows, ...courseRows] };
+      }),
+    });
+  }
+
   function saveOffer() {
     if (!rental.customer.trim()) return alert("Legg inn kundenavn.");
     const offerId = rental.id || `rental-${Date.now()}`;
@@ -10270,11 +10306,49 @@ ${opts.produksjon ? productionPageHtml : ""}
                   )}
                   {rental.productLines.map((l, i) => {
                     const p = data.products.find((x) => x.id === l.productId);
+                    const isMenu = p?.type === "selskapsmeny" && (p.menuCourses || []).length > 0;
                     return (
-                      <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
-                        <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
-                        <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
-                        <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
+                      <div key={i} style={{ marginBottom: 12 }}>
+                        <div className="form-grid three" style={{ alignItems: "end" }}>
+                          <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
+                          <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
+                          <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
+                        </div>
+                        {isMenu && (
+                          <div className="soft-box" style={{ marginTop: 8 }}>
+                            <b style={{ fontSize: 13 }}>Fordel gjester per rett ({p!.name})</b>
+                            {(p!.menuCourses || []).map((course) => {
+                              const rows = (l.menuSelections || []).filter((s) => s.courseId === course.id);
+                              const totalGuests = rows.reduce((sum, r) => sum + (Number(r.guestCount) || 0), 0);
+                              const mismatch = totalGuests !== l.guests;
+                              return (
+                                <div key={course.id} style={{ marginTop: 10 }}>
+                                  <div className="between">
+                                    <span>{course.name}</span>
+                                    <span style={{ color: mismatch ? "#dc2626" : "#166534", fontSize: 13, fontWeight: 700 }}>
+                                      {totalGuests} / {l.guests} gjester fordelt
+                                    </span>
+                                  </div>
+                                  {rows.map((row, si) => (
+                                    <div key={si} className="form-grid three" style={{ alignItems: "end", marginTop: 4 }}>
+                                      <select value={row.productId} onChange={(e) => updateRentalMenuSelection(i, course.id, si, { productId: e.target.value })}>
+                                        <option value="">Velg alternativ</option>
+                                        {course.options.map((opt) => {
+                                          const optProd = data.products.find((x) => x.id === opt.productId);
+                                          return <option key={opt.id} value={opt.productId}>{optProd?.name || "Ukjent"}</option>;
+                                        })}
+                                      </select>
+                                      <input type="number" value={row.guestCount || ""} onChange={(e) => updateRentalMenuSelection(i, course.id, si, { guestCount: Number(e.target.value) || 0 })} placeholder="Antall gjester" />
+                                      <button className="link danger" onClick={() => removeRentalMenuSelectionRow(i, course.id, si)}>Slett valg</button>
+                                    </div>
+                                  ))}
+                                  <button className="btn" style={{ marginTop: 4 }} onClick={() => addRentalMenuSelectionRow(i, course.id)}>+ Legg til alternativ valg</button>
+                                  {mismatch && <div className="warning" style={{ marginTop: 6 }}>Summen ({totalGuests}) stemmer ikke med antall gjester ({l.guests}) for denne linjen.</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
