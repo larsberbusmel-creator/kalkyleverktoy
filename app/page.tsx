@@ -9238,14 +9238,22 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     );
   }
 
-  function expandRentalProductForProduction(product: Product, multiplier: number, path: string[] = [], courseName?: string): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
+  function expandRentalProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
     if (path.includes(product.id)) return [];
     const bakeryNoExpandCategories = ["Søtbakst", "Bakeri, egenprodusert"];
     if (bakeryNoExpandCategories.includes(product.category)) {
       return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
     }
     if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
-      return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+      if (!menuSelections || !menuSelections.length) {
+        return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+      }
+      return menuSelections.flatMap((sel) => {
+        const chosenProduct = data.products.find((x) => x.id === sel.productId);
+        if (!chosenProduct) return [];
+        const course = (product.menuCourses || []).find((c) => c.id === sel.courseId);
+        return expandRentalProductForProduction(chosenProduct, sel.guestCount, [...path, product.id], undefined, course?.name || courseName);
+      });
     }
     if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
     const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
@@ -9314,8 +9322,15 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         if (rl.itemType === "recipe") expandRecipe(rl.itemId, amt, [...path, recipeId]);
       });
     }
-    function expandProduct(product: Product, multiplier: number, path: string[]) {
+    function expandProduct(product: Product, multiplier: number, path: string[], menuSelections?: MenuCourseSelection[]) {
       if (path.includes(product.id) || bakeryNoExpand.includes(product.category)) return;
+      if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
+        (menuSelections || []).forEach((sel) => {
+          const chosenProduct = data.products.find((x) => x.id === sel.productId);
+          if (chosenProduct) expandProduct(chosenProduct, sel.guestCount, [...path, product.id]);
+        });
+        return;
+      }
       const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
         ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
         : multiplier;
@@ -9334,14 +9349,23 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     }
     rental.productLines.forEach((line) => {
       const product = data.products.find((p) => p.id === line.productId);
-      if (product) expandProduct(product, Number(line.guests) || 0, []);
+      if (product) expandProduct(product, Number(line.guests) || 0, [], line.menuSelections);
     });
     return acc;
   }
 
-  function scaledRecipeHtmlForRental(product: Product, quantity: number, includeMaterials = false): string {
+  function scaledRecipeHtmlForRental(product: Product, quantity: number, includeMaterials = false, menuSelections?: MenuCourseSelection[]): string {
     const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
     if (bakeryNoExpand.includes(product.category)) return "";
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
+      if (!menuSelections || !menuSelections.length) return "<p>Ingen menyvalg registrert for denne linjen.</p>";
+      return menuSelections.map((sel) => {
+        const chosenProduct = data.products.find((x) => x.id === sel.productId);
+        if (!chosenProduct) return "";
+        const course = (product.menuCourses || []).find((c) => c.id === sel.courseId);
+        return `<h3 style="margin-top:16px">${escapeHtml(course?.name || "")}: ${escapeHtml(chosenProduct.name)} – ${sel.guestCount} stk</h3>${scaledRecipeHtmlForRental(chosenProduct, sel.guestCount, true)}`;
+      }).join("");
+    }
     let html = "";
     product.lines.forEach((pl) => {
       if (pl.itemType === "recipe") {
@@ -10057,13 +10081,13 @@ h1{margin-bottom:4px}
     const recipePagesHtml = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
       if (!p) return "";
-      const html = scaledRecipeHtmlForRental(p, l.guests);
+      const html = scaledRecipeHtmlForRental(p, l.guests, false, l.menuSelections);
       if (!html) return "";
       return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${l.guests} × ${escapeHtml(p.name)}</div>${html}</div>`;
     }).join("");
     const productionItems = rental.productLines.flatMap((l) => {
       const p = data.products.find((x) => x.id === l.productId);
-      return p ? expandRentalProductForProduction(p, Number(l.guests) || 0, []) : [];
+      return p ? expandRentalProductForProduction(p, Number(l.guests) || 0, [], l.menuSelections) : [];
     });
     const productionHtml = rentalProductionTwoColumnHtml(productionItems);
     const materialsAggR = collectRentalMaterials();
