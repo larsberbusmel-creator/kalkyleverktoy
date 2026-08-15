@@ -146,6 +146,8 @@ note?: string;
   dietVegetarian?: string;
   dietPregnant?: string;
   dietOther?: string;
+  rungInName?: string;
+  rungInAt?: string;
 };
 
 type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
@@ -5193,6 +5195,21 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
     return sortDir === "asc" ? " ↑" : " ↓";
   }
 
+  function isPaidOnline(o: Order) {
+    return /betalt.*p.?\s*nett/i.test(o.paymentInfo || "");
+  }
+
+  function toggleOrderRungIn(order: Order) {
+    if (order.rungInName) {
+      if (!confirm(`Fjerne "slått inn"-merking (${order.rungInName})?`)) return;
+      updateListRpc("orders", { [order.id]: { ...order, rungInName: undefined, rungInAt: undefined } });
+      return;
+    }
+    const name = window.prompt("Slått inn\nSignatur");
+    if (!name || !name.trim()) return;
+    updateListRpc("orders", { [order.id]: { ...order, rungInName: name.trim(), rungInAt: new Date().toISOString() } });
+  }
+
   const threeDaysAgo = (() => {
     const d = new Date(); d.setDate(d.getDate() - 3);
     return d.toISOString().slice(0, 10);
@@ -5625,7 +5642,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           <b>Uke {weekNumber} ({formatDateNo(weekStartKey)}–{formatDateNo(weekEndKey)})</b>
           <button className="btn" onClick={() => { setWeekOffset(weekOffset + 1); setOrderPage(1); }}>Neste uke →</button>
           {weekOffset !== 0 && (
-            <button className="link" onClick={() => { setWeekOffset(0); setOrderPage(1); }}>Til denne uken</button>
+            <button className="btn" onClick={() => { setWeekOffset(0); setOrderPage(1); }}>Inneværende uke</button>
           )}
         </div>
       )}
@@ -5651,11 +5668,30 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
         const displayName = o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer;
         const total = orderTotalIncVat(o);
         const isToday = o.date === todayStr;
+        const isPast = o.date < todayStr;
+        const paidOnline = isPaidOnline(o);
         return (
-          <div key={o.id} className="order-row" style={{ borderLeft: isToday ? "4px solid #166534" : undefined, background: isToday ? "#f0fdf4" : undefined }}>
+          <div key={o.id} className="order-row" style={{ borderLeft: isToday ? "4px solid #166534" : undefined, background: isToday ? "#f0fdf4" : isPast ? "#f5efe3" : undefined }}>
             <button className="order-row-header" onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}>
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 {isToday && <span style={{ background: "#166534", color: "white", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>I dag</span>}
+                {paidOnline && <span style={{ background: "#16a34a", color: "white", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>✓ Betalt på nett</span>}
+                {!paidOnline && (
+                  <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {o.rungInName && (
+                      <span style={{ fontSize: 12, color: "#166534" }}>
+                        ✓ Slått inn {formatDateNo(o.rungInAt!.slice(0, 10))} ({o.rungInName})
+                      </span>
+                    )}
+                    <button
+                      className={o.rungInName ? "btn active" : "btn"}
+                      style={{ padding: "2px 8px", fontSize: 12, ...(o.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : {}) }}
+                      onClick={() => toggleOrderRungIn(o)}
+                    >
+                      {o.rungInName ? "Angre" : "Slått inn"}
+                    </button>
+                  </span>
+                )}
                 <b>{formatDateNo(o.date)} {o.time || ""}</b>
                 <span>{displayName}</span>
                 {o.orderNumber && <span style={{ background: "#f1f5f9", borderRadius: 6, padding: "2px 8px", fontSize: 12 }}>#{o.orderNumber}</span>}
