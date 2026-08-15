@@ -11597,6 +11597,20 @@ const SettingsTab = React.memo(function SettingsTab({
 const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", perUnit: false });
 const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null);
 const [addonPackingForm, setAddonPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
+const [newNotifyEmail, setNewNotifyEmail] = useState("");
+
+function addNotifyEmail() {
+  const email = newNotifyEmail.trim();
+  if (!email || !email.includes("@")) return;
+  const current = data.settings.notificationEmails || [];
+  if (current.includes(email)) return;
+  updateData({ settings: { ...data.settings, notificationEmails: [...current, email] } });
+  setNewNotifyEmail("");
+}
+
+function removeNotifyEmail(email: string) {
+  updateData({ settings: { ...data.settings, notificationEmails: (data.settings.notificationEmails || []).filter((e) => e !== email) } });
+}
 
 function addAddonPackingItem(addonId: string) {
   if (!addonPackingForm.name.trim()) return;
@@ -11656,6 +11670,20 @@ function removeAddonPackingItem(addonId: string, itemId: string) {
             onChange={(e) => setLocalSettings({ ...localSettings, waiterAfterMidnightHourlyRate: Number(e.target.value) })}
             onBlur={() => updateData({ settings: localSettings })} /></label>
         </div>
+      </Section>
+
+      <Section id="notifications" title="Varsel-e-post for nye portalbestillinger">
+        <div className="form-grid two">
+          <input value={newNotifyEmail} onChange={(e) => setNewNotifyEmail(e.target.value)} placeholder="navn@berbusmel.no" />
+          <button className="btn active" onClick={addNotifyEmail}>Legg til</button>
+        </div>
+        {(data.settings.notificationEmails || []).length === 0 && <p className="muted">Ingen mottakere lagt til – bruker `NOTIFY_EMAIL` fra miljøvariabler som reserveløsning.</p>}
+        {(data.settings.notificationEmails || []).map((email) => (
+          <div key={email} className="editable-row">
+            <span>{email}</span>
+            <button className="link danger" onClick={() => removeNotifyEmail(email)}>Slett</button>
+          </div>
+        ))}
       </Section>
 
       <Section id="retailMargins" title="Standard marginer for videresalg">
