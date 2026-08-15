@@ -1,10 +1,29 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { Resend } from "resend";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
   process.env.SUPABASE_SERVICE_ROLE_KEY as string
 );
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+async function sendOrderNotification(customerName: string, date: string, lines: { productId: string; quantity: number }[], products: any[]) {
+  if (!resend || !process.env.NOTIFY_EMAIL) return;
+  const productName = (id: string) => products.find((p: any) => p.id === id)?.name || "Ukjent";
+  const linesHtml = lines.map((l) => `<li>${l.quantity} × ${productName(l.productId)}</li>`).join("");
+  try {
+    await resend.emails.send({
+      from: "Misemetrics <onboarding@resend.dev>",
+      to: process.env.NOTIFY_EMAIL,
+      subject: `Ny bestilling fra ${customerName} – levering ${date}`,
+      html: `<p><b>${customerName}</b> har sendt inn en bestilling for levering <b>${date}</b>:</p><ul>${linesHtml}</ul><p>Logg inn i appen for å godkjenne.</p>`,
+    });
+  } catch (e) {
+    console.error("Kunne ikke sende varsel-e-post:", e);
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -58,6 +77,8 @@ export async function POST(req: Request) {
       console.error("update_list_items feilet:", rpcError);
       return NextResponse.json({ error: `Kunne ikke lagre bestillingen: ${rpcError.message}` }, { status: 500 });
     }
+
+    await sendOrderNotification(customer.name, date, cleanLines, appData.products || []);
 
     return NextResponse.json({ ok: true, orderId: newOrder.id });
   } catch (e) {
