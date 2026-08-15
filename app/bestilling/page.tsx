@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 
 type Product = { id: string; name: string; category: string; priceExVat: number; unitsPerCase?: number };
+type Delivery = { productId: string; name: string; priceExVat: number } | null;
 type HistoryGroup = { date: string; lines: { id: string; productId: string; productName: string; quantity: number; priceExVat: number }[] };
 type PendingItem = { id: string; date: string; submittedAt: string; lines: { productId: string; productName: string; quantity: number }[] };
 type DeadlineDay = { closed?: boolean; cutoffTime?: string };

@@ -109,6 +109,7 @@ type Product = {
   recipeYieldAmount?: number;
   unitWeightKg?: number;
   unitsPerCase?: number;
+  isDeliveryProduct?: boolean;
   menuCourses?: MenuCourse[];
   instructions?: string;
 };
@@ -194,6 +195,7 @@ type Venue = { id: string; name: string; price: number; roomIds?: string[] };
 
 type Settings = {
   foodVat: number;
+  notificationEmails?: string[];
   alcoholVat?: number;
   chefHourlyRate: number;
   chefBaseMinutes: number;
@@ -257,6 +259,7 @@ type StorkjokkenCustomer = {
   pin?: string;
   allowedProductIds?: string[];
   favoriteProductIds?: string[];
+  deliveryAvailable?: boolean;
 };
 
 type PortalDeadlineDay = { closed?: boolean; cutoffTime?: string };
@@ -2628,6 +2631,7 @@ unitWeightKg: "1",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
   unitsPerCase: "",
+  isDeliveryProduct: false,
   instructions: "",
 });  
 const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
@@ -2736,6 +2740,7 @@ unitWeightKg: "1",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
   unitsPerCase: "",
+  isDeliveryProduct: false,
   instructions: "",
 });    
 setDraftLines([]);
@@ -2867,6 +2872,7 @@ unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
       storkjokkenPriceExVat: String(p.storkjokkenPriceExVat || ""),
       targetMargin: String(p.targetMargin || 70),
       unitsPerCase: String(p.unitsPerCase || ""),
+      isDeliveryProduct: !!p.isDeliveryProduct,
       instructions: p.instructions || "",
     });
     setDraftLines(p.lines.map((l) => ({ ...l })));
@@ -2931,6 +2937,7 @@ unitWeightKg: "1",
     storkjokkenPriceExVat: String(copy.storkjokkenPriceExVat || ""),
     targetMargin: String(copy.targetMargin || 70),
     unitsPerCase: String(copy.unitsPerCase || ""),
+    isDeliveryProduct: !!copy.isDeliveryProduct,
     instructions: copy.instructions || "",
   });
 
@@ -3708,6 +3715,10 @@ th{background:#f3f4f6}
       />
     </label>
   )}
+  <label className="check" style={{ marginTop: 8 }}>
+    <input type="checkbox" checked={!!form.isDeliveryProduct} onChange={(e) => setForm({ ...form, isDeliveryProduct: e.target.checked })} />
+    Dette er utkjøring/leveringsprodukt (legges automatisk til som valg i kundeportalen)
+  </label>
 
   {form.type === "pasmuurt" && (
     <label>Deles på antall porsjoner
@@ -5861,7 +5872,7 @@ function ProductionTab({
 
   function startEditCustomer(customer: StorkjokkenCustomer) {
     setEditingCustomerId(customer.id);
-    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin, allowedProductIds: customer.allowedProductIds });
+    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin, allowedProductIds: customer.allowedProductIds, deliveryAvailable: customer.deliveryAvailable });
   }
 
   function toggleAllowedProduct(productId: string) {
@@ -7218,6 +7229,10 @@ ${orderPages}`;
                                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                                     <input type="checkbox" checked={!!customerDraft.internal} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
                                     Intern
+                                  </label>
+                                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                    <input type="checkbox" checked={!!customerDraft.deliveryAvailable} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAvailable: e.target.checked })} />
+                                    Har tilgang til utkjøring
                                   </label>
                                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                                     PIN-kode (portal)

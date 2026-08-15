@@ -9,14 +9,15 @@ const supabaseAdmin = createClient(
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-async function sendOrderNotification(customerName: string, date: string, lines: { productId: string; quantity: number }[], products: any[]) {
-  if (!resend || !process.env.NOTIFY_EMAIL) return;
+async function sendOrderNotification(customerName: string, date: string, lines: { productId: string; quantity: number }[], products: any[], notificationEmails: string[]) {
+  const recipients = notificationEmails.length ? notificationEmails : (process.env.NOTIFY_EMAIL ? [process.env.NOTIFY_EMAIL] : []);
+  if (!resend || !recipients.length) return;
   const productName = (id: string) => products.find((p: any) => p.id === id)?.name || "Ukjent";
   const linesHtml = lines.map((l) => `<li>${l.quantity} × ${productName(l.productId)}</li>`).join("");
   try {
     await resend.emails.send({
       from: "Misemetrics <onboarding@resend.dev>",
-      to: process.env.NOTIFY_EMAIL,
+      to: recipients,
       subject: `Ny bestilling fra ${customerName} – levering ${date}`,
       html: `<p><b>${customerName}</b> har sendt inn en bestilling for levering <b>${date}</b>:</p><ul>${linesHtml}</ul><p>Logg inn i appen for å godkjenne.</p>`,
     });
@@ -27,7 +28,7 @@ async function sendOrderNotification(customerName: string, date: string, lines: 
 
 export async function POST(req: Request) {
   try {
-    const { pin, date, lines } = await req.json();
+    const { pin, date, lines, wantsDelivery } = await req.json();
     if (!pin || !date || !Array.isArray(lines) || lines.length === 0) {
       return NextResponse.json({ error: "Mangler felt" }, { status: 400 });
     }
@@ -51,8 +52,17 @@ export async function POST(req: Request) {
     }
 
     const cleanLines = lines
-      .map((l: any) => ({ productId: String(l.productId), quantity: Number(l.quantity) || 0 }))
+      .map((l: any) => {
+        const product = (appData.products || []).find((p: any) => p.id === l.productId);
+        const unitsPerCase = Number(product?.unitsPerCase) || 1;
+        return { productId: String(l.productId), quantity: (Number(l.quantity) || 0) * unitsPerCase };
+      })
       .filter((l: any) => l.quantity > 0);
+
+    if (wantsDelivery && customer.deliveryAvailable) {
+      const deliveryProduct = (appData.products || []).find((p: any) => p.isDeliveryProduct);
+      if (deliveryProduct) cleanLines.push({ productId: deliveryProduct.id, quantity: 1 });
+    }
 
     if (!cleanLines.length) {
       return NextResponse.json({ error: "Ingen varer valgt" }, { status: 400 });
@@ -78,7 +88,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Kunne ikke lagre bestillingen: ${rpcError.message}` }, { status: 500 });
     }
 
-    await sendOrderNotification(customer.name, date, cleanLines, appData.products || []);
+    await sendOrderNotification(customer.name, date, cleanLines, appData.products || [], appData.settings?.notificationEmails || []);
 
     return NextResponse.json({ ok: true, orderId: newOrder.id });
   } catch (e) {

@@ -47,12 +47,17 @@ export async function POST(req: Request) {
       visibleProducts = visibleProducts.filter((p: any) => allowed.has(p.id));
     }
 
-    const products = visibleProducts.map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      category: p.category,
-      priceExVat: priceForCustomer(p, customer.id, customer, appData.storkjokkenSpecialPrices),
-    }));
+    const products = visibleProducts.map((p: any) => {
+      const perStkPrice = priceForCustomer(p, customer.id, customer, appData.storkjokkenSpecialPrices);
+      const unitsPerCase = Number(p.unitsPerCase) || 1;
+      return {
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        unitsPerCase,
+        priceExVat: perStkPrice * unitsPerCase,
+      };
+    });
 
     const productName = (id: string) =>
       (appData.products || []).find((prod: any) => prod.id === id)?.name || "Ukjent";
@@ -102,9 +107,15 @@ export async function POST(req: Request) {
         lines: r.lines.map((l: any) => ({ productId: l.productId, productName: productName(l.productId), quantity: l.quantity })),
       }));
 
+    const deliveryProduct = (appData.products || []).find((p: any) => p.isDeliveryProduct);
+    const delivery = customer.deliveryAvailable && deliveryProduct
+      ? { productId: deliveryProduct.id, name: deliveryProduct.name, priceExVat: priceForCustomer(deliveryProduct, customer.id, customer, appData.storkjokkenSpecialPrices) }
+      : null;
+
     return NextResponse.json({
       customer: { id: customer.id, name: customer.name },
       products,
+      delivery,
       history,
       pending,
       deadlines,
