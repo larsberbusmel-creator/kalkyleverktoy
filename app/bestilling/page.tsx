@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 
-type Product = { id: string; name: string; category: string; priceExVat: number };
+type Product = { id: string; name: string; category: string; priceExVat: number; unitsPerCase?: number };
 type HistoryGroup = { date: string; lines: { id: string; productId: string; productName: string; quantity: number; priceExVat: number }[] };
 type PendingItem = { id: string; date: string; submittedAt: string; lines: { productId: string; productName: string; quantity: number }[] };
 type DeadlineDay = { closed?: boolean; cutoffTime?: string };
@@ -433,8 +433,8 @@ async function toggleFavorite(productId: string) {
                     {products.filter((p) => p.category === cat).map((p) => (
                       <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
                         <div>
-                          <div>{p.name}</div>
-                          <div style={{ color: "#94a3b8", fontSize: 12 }}>{p.priceExVat.toFixed(2)} kr eks. mva</div>
+                          <div>{p.name}{p.unitsPerCase && p.unitsPerCase > 1 ? ` (eske à ${p.unitsPerCase} stk)` : ""}</div>
+                          <div style={{ color: "#94a3b8", fontSize: 12 }}>{p.priceExVat.toFixed(2)} kr eks. mva{p.unitsPerCase && p.unitsPerCase > 1 ? " / eske" : ""}</div>
                         </div>
                         <button onClick={() => toggleFavorite(p.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: favorites.includes(p.id) ? "#f59e0b" : "#cbd5e1" }}>★</button>
                         <input
