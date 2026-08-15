@@ -5939,8 +5939,8 @@ function ProductionTab({
   function approvePendingPortalOrder(id: string) {
     const pending = (data.pendingPortalOrders || []).find((p) => p.id === id);
     if (!pending) return;
-    const newPickups: StorkjokkenPickupOrder[] = pending.lines
-      .filter((l) => l.quantity > 0)
+    const approvedLines = pending.lines.filter((l) => l.quantity > 0);
+    const newPickups: StorkjokkenPickupOrder[] = approvedLines
       .map((l, i) => ({
         id: `pickup-${Date.now()}-${i}`,
         customerId: pending.customerId,
@@ -5952,9 +5952,22 @@ function ProductionTab({
         note: pending.note,
         deliveryTime: pending.deliveryTime,
       }));
+
+    // Skriv også inn i selve produksjonsgriden for dagen, i riktig kunde-kolonne.
+    const existingDay = productionDays[pending.date];
+    const baseDay: BakeryProductionDay = existingDay || { date: pending.date, approved: false, quantities: recurringQuantitiesForDate(pending.date) };
+    const nextQuantities = { ...baseDay.quantities };
+    approvedLines.forEach((l) => {
+      const productQty = { ...(nextQuantities[l.productId] || {}) };
+      productQty[pending.customerId] = Number(productQty[pending.customerId] || 0) + l.quantity;
+      nextQuantities[l.productId] = productQty;
+    });
+    const nextDay: BakeryProductionDay = { ...baseDay, quantities: nextQuantities };
+
     updateData({
       storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), ...newPickups],
       pendingPortalOrders: (data.pendingPortalOrders || []).map((p) => p.id === id ? { ...p, status: "approved" } : p),
+      bakeryProductionDays: { ...productionDays, [nextDay.date]: nextDay },
     });
   }
 
