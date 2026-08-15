@@ -11,16 +11,24 @@ const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KE
 
 async function sendOrderNotification(customerName: string, date: string, lines: { productId: string; quantity: number }[], products: any[], notificationEmails: string[]) {
   const recipients = notificationEmails.length ? notificationEmails : (process.env.NOTIFY_EMAIL ? [process.env.NOTIFY_EMAIL] : []);
-  if (!resend || !recipients.length) return;
+  if (!resend) {
+    console.error("Resend-varsel hoppet over: RESEND_API_KEY er ikke satt.");
+    return;
+  }
+  if (!recipients.length) {
+    console.error("Resend-varsel hoppet over: ingen mottakere funnet (verken i Innstillinger eller NOTIFY_EMAIL).");
+    return;
+  }
   const productName = (id: string) => products.find((p: any) => p.id === id)?.name || "Ukjent";
   const linesHtml = lines.map((l) => `<li>${l.quantity} × ${productName(l.productId)}</li>`).join("");
   try {
-    await resend.emails.send({
+    const result = await resend.emails.send({
       from: "Misemetrics <onboarding@resend.dev>",
       to: recipients,
       subject: `Ny bestilling fra ${customerName} – levering ${date}`,
       html: `<p><b>${customerName}</b> har sendt inn en bestilling for levering <b>${date}</b>:</p><ul>${linesHtml}</ul><p>Logg inn i appen for å godkjenne.</p>`,
     });
+    console.log("Resend-svar:", JSON.stringify(result));
   } catch (e) {
     console.error("Kunne ikke sende varsel-e-post:", e);
   }
