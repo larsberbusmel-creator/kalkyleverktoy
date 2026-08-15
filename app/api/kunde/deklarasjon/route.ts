@@ -255,7 +255,7 @@ export async function POST(req: Request) {
     const ingredients = productIngredients(product).join(", ") || "-";
     const allergens = productAllergens(product).join(", ") || "Ingen registrert";
     const wholegrainPercent = calculateWholegrainPercent(product);
-    const showWholegrain = product.category === "Brød" || product.subType === "brød";
+    const showWholegrain = product.showWholegrainInDeclaration !== false;
 
     const html = `<!doctype html><html><head><meta charset="utf-8" /><title>Deklarasjon ${escapeHtml(product.name)}</title><style>
 body{font-family:Arial,sans-serif;color:#111827;padding:32px}
