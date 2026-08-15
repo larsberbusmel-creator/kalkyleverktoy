@@ -9334,7 +9334,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
       if (rental.id === offer.id) setRental(updated);
       return;
     }
-    const name = window.prompt("Hvem slo inn betalingen på kassasystemet?");
+    const name = window.prompt("Signatur");
     if (!name || !name.trim()) return;
     const updated: RentalOffer = { ...offer, rungInName: name.trim(), rungInAt: new Date().toISOString() };
     updateListRpc("rentalOffers", { [offer.id!]: updated });
