@@ -4529,7 +4529,7 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
 }
 
 function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen }: {
-  updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void;
+  updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productAllergens: (p: Product, visited?: string[]) => string[];
@@ -5200,14 +5200,20 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
   }
 
   function toggleOrderRungIn(order: Order) {
+    const linkedOfferId = order.id.startsWith("rental-order-") ? order.id.replace("rental-order-", "") : null;
+    const linkedOffer = linkedOfferId ? ((data as any).rentalOffers || []).find((o: any) => o.id === linkedOfferId) : null;
+
     if (order.rungInName) {
       if (!confirm(`Fjerne "slått inn"-merking (${order.rungInName})?`)) return;
       updateListRpc("orders", { [order.id]: { ...order, rungInName: undefined, rungInAt: undefined } });
+      if (linkedOffer) updateListRpc("rentalOffers", { [linkedOffer.id]: { ...linkedOffer, rungInName: undefined, rungInAt: undefined } });
       return;
     }
     const name = window.prompt("Slått inn\nSignatur");
     if (!name || !name.trim()) return;
-    updateListRpc("orders", { [order.id]: { ...order, rungInName: name.trim(), rungInAt: new Date().toISOString() } });
+    const rungInAt = new Date().toISOString();
+    updateListRpc("orders", { [order.id]: { ...order, rungInName: name.trim(), rungInAt } });
+    if (linkedOffer) updateListRpc("rentalOffers", { [linkedOffer.id]: { ...linkedOffer, rungInName: name.trim(), rungInAt } });
   }
 
   const threeDaysAgo = (() => {
@@ -9399,6 +9405,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     updateListRpc("rentalOffers", { [offerId]: offer });
 
     if (offer.date) {
+      const existingLinkedOrder = (data.orders || []).find((o) => o.id === `rental-order-${offerId}`);
       const rentalOrder = {
         id: `rental-order-${offerId}`,
         orderNumber: offer.id,
@@ -9415,6 +9422,8 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         discountPercent: 0, isRecurring: false, recurringDays: [],
         recurringNote: `Leieavtale: ${rental.venueExternal ? (rental.venueExternalName || "Eksternt") : rental.venue}`,
         allergens: offer.allergens || {}, dietVegan: offer.dietVegan || "0", dietVegetarian: offer.dietVegetarian || "0", dietPregnant: offer.dietPregnant || "0", dietOther: offer.dietOther || "",
+        rungInName: offer.rungInName ?? existingLinkedOrder?.rungInName,
+        rungInAt: offer.rungInAt ?? existingLinkedOrder?.rungInAt,
       };
       updateListRpc("orders", { [rentalOrder.id]: rentalOrder });
     }
@@ -9445,17 +9454,23 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
   }
 
   function toggleRungIn(offer: RentalOffer) {
+    const linkedOrderId = `rental-order-${offer.id}`;
+    const linkedOrder = (data.orders || []).find((o) => o.id === linkedOrderId);
+
     if (offer.rungInName) {
       if (!confirm(`Fjerne "slått inn"-merking (${offer.rungInName})?`)) return;
       const updated: RentalOffer = { ...offer, rungInName: undefined, rungInAt: undefined };
       updateListRpc("rentalOffers", { [offer.id!]: updated });
+      if (linkedOrder) updateListRpc("orders", { [linkedOrderId]: { ...linkedOrder, rungInName: undefined, rungInAt: undefined } });
       if (rental.id === offer.id) setRental(updated);
       return;
     }
-    const name = window.prompt("Signatur");
+    const name = window.prompt("Slått inn\nSignatur");
     if (!name || !name.trim()) return;
-    const updated: RentalOffer = { ...offer, rungInName: name.trim(), rungInAt: new Date().toISOString() };
+    const rungInAt = new Date().toISOString();
+    const updated: RentalOffer = { ...offer, rungInName: name.trim(), rungInAt };
     updateListRpc("rentalOffers", { [offer.id!]: updated });
+    if (linkedOrder) updateListRpc("orders", { [linkedOrderId]: { ...linkedOrder, rungInName: name.trim(), rungInAt } });
     if (rental.id === offer.id) setRental(updated);
   }
 
