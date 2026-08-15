@@ -12051,7 +12051,7 @@ function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: str
     <>
       <div>
         {localValues.map((v, i) => (
-          <div key={`${v}-${i}`} className="editable-row">
+          <div key={i} className="editable-row">
             <input
               value={v}
               onChange={(e) => setLocalValues(localValues.map((x, ix) => ix === i ? e.target.value : x))}
