@@ -2130,7 +2130,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
   const [lineSearch, setLineSearch] = useState("");
   const [recipeSearch, setRecipeSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("Alle");
+  const [categoryFilter, setCategoryFilter] = useState(data.recipeCategories[0] || "Grunnoppskrift");
   const [newRecipeCategory, setNewRecipeCategory] = useState("");
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newStep, setNewStep] = useState<{ action: string; inputs: RecipeStepInput[] }>({ action: "", inputs: [] });
@@ -2148,10 +2148,12 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     steps: draftSteps,
   };
 
+  const activeCategoryTab = data.recipeCategories.includes(categoryFilter) ? categoryFilter : (data.recipeCategories[0] || categoryFilter);
+
   const filteredRecipes = data.recipes
     .filter((r) => `${r.productNumber} ${r.name} ${r.category}`.toLowerCase().includes(recipeSearch.toLowerCase()))
-    .filter((r) => categoryFilter === "Alle" || r.category === categoryFilter)
-    .sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "no-NO"));
+    .filter((r) => r.category === activeCategoryTab)
+    .sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
 
   function startNewRecipe() {
     setMode("new");
@@ -2558,12 +2560,12 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
         <div className="between" style={{ justifyContent: "flex-end" }}>
           <button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button>
         </div>
-        <input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />
         <div className="chips">
-          {["Alle", ...data.recipeCategories].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => (
-            <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat)}>{cat}</button>
+          {data.recipeCategories.map((cat) => (
+            <button key={cat} className={activeCategoryTab === cat ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat)}>{cat}</button>
           ))}
         </div>
+        <input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />
         <div className="section-toggle" onClick={() => setShowCategoryManager(!showCategoryManager)}>
           <h3>Kategorier for grunnoppskrifter</h3>
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
