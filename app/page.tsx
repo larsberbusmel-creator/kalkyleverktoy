@@ -189,6 +189,8 @@ type RentalOffer = {
   dietOther?: string;
   runSheetEnabled?: boolean;
   runSheet?: RunSheetItem[];
+  rungInName?: string;
+  rungInAt?: string;
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -9324,6 +9326,21 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     setShowNewOffer(false);
   }
 
+  function toggleRungIn(offer: RentalOffer) {
+    if (offer.rungInName) {
+      if (!confirm(`Fjerne "slått inn"-merking (${offer.rungInName})?`)) return;
+      const updated: RentalOffer = { ...offer, rungInName: undefined, rungInAt: undefined };
+      updateListRpc("rentalOffers", { [offer.id!]: updated });
+      if (rental.id === offer.id) setRental(updated);
+      return;
+    }
+    const name = window.prompt("Hvem slo inn betalingen på kassasystemet?");
+    if (!name || !name.trim()) return;
+    const updated: RentalOffer = { ...offer, rungInName: name.trim(), rungInAt: new Date().toISOString() };
+    updateListRpc("rentalOffers", { [offer.id!]: updated });
+    if (rental.id === offer.id) setRental(updated);
+  }
+
   function deleteOffer(id: string) {
     if (!confirm("Flytte tilbudet til papirkurv?")) return;
     const existing = ((data as any).rentalOffers || []) as RentalOffer[];
@@ -10395,7 +10412,23 @@ ${opts.produksjon ? productionPageHtml : ""}
           <div className="card">
             <div className="between">
               <h2>{editingOfferId ? "Rediger tilbud" : "Nytt tilbud"}</h2>
-              <button className="btn" onClick={cancelEdit}>Avbryt</button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {rental.rungInName && (
+                  <span style={{ fontSize: 12, color: "#166534" }}>
+                    ✓ {formatDateNo(rental.rungInAt!.slice(0, 10))} ({rental.rungInName})
+                  </span>
+                )}
+                {editingOfferId && (
+                  <button
+                    className={rental.rungInName ? "btn active" : "btn"}
+                    style={rental.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                    onClick={() => toggleRungIn(rental)}
+                  >
+                    {rental.rungInName ? "Angre" : "Slå inn"}
+                  </button>
+                )}
+                <button className="btn" onClick={cancelEdit}>Avbryt</button>
+              </div>
             </div>
 
             {editingOfferId && (
@@ -11187,7 +11220,19 @@ ${opts.produksjon ? productionPageHtml : ""}
                 <br />
                 <small style={{ color: "#64748b" }}>Total: {currency(offerTotal)}</small>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {offer.rungInName && (
+                  <span style={{ fontSize: 12, color: "#166534" }}>
+                    ✓ {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
+                  </span>
+                )}
+                <button
+                  className={offer.rungInName ? "btn active" : "btn"}
+                  style={offer.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                  onClick={() => toggleRungIn(offer)}
+                >
+                  {offer.rungInName ? "Angre" : "Slå inn"}
+                </button>
                 {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
                 <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
               </div>
@@ -11217,7 +11262,19 @@ ${opts.produksjon ? productionPageHtml : ""}
                     {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
                     <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {offer.rungInName && (
+                      <span style={{ fontSize: 12, color: "#166534" }}>
+                        ✓ {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
+                      </span>
+                    )}
+                    <button
+                      className={offer.rungInName ? "btn active" : "btn"}
+                      style={offer.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                      onClick={() => toggleRungIn(offer)}
+                    >
+                      {offer.rungInName ? "Angre" : "Slå inn"}
+                    </button>
                     {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
                     <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
                   </div>
