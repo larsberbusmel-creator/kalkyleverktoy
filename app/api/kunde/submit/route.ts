@@ -36,7 +36,7 @@ async function sendOrderNotification(customerName: string, date: string, lines: 
 
 export async function POST(req: Request) {
   try {
-    const { pin, date, lines, wantsDelivery } = await req.json();
+    const { pin, date, lines, wantsDelivery, note, deliveryTime } = await req.json();
     if (!pin || !date || !Array.isArray(lines) || lines.length === 0) {
       return NextResponse.json({ error: "Mangler felt" }, { status: 400 });
     }
@@ -83,6 +83,8 @@ export async function POST(req: Request) {
       lines: cleanLines,
       submittedAt: new Date().toISOString(),
       status: "pending",
+      note: note || undefined,
+      deliveryTime: deliveryTime || undefined,
     };
 
     // Reuses the same merge RPC the main app uses for safe concurrent list updates.
