@@ -377,6 +377,7 @@ type AppData = {
   menuCategories: string[];
   productCategories: string[];
   materialCategories: string[];
+  recipeCategories: string[];
   inventoryCounts?: Record<string, InventoryMonthData>;
   calendarNotes: CalendarNote[];
   rentalOffers?: RentalOffer[];
@@ -403,6 +404,7 @@ const defaultAllergens = ["Gluten", "Hvete", "Rug", "Spelt", "Bygg", "Egg", "Mel
 const defaultMaterialCategories = ["Mat", "Mel og frø", "Meieri", "Kjøtt", "Fisk", "Grønt", "Tørrvarer", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Frukt og grønt", "Krydder", "Deli", "Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
 const defaultMenuCategories = ["Catering", "Selskap", "Bryllup", "Konfirmasjon", "Firma"];
 const defaultProductCategories = ["Grunnoppskrift", "Brød", "Søtbakst", "Cateringmeny", "Påsmurt", "Egenprodusert", "Kjøkken, egenprodusert", "Bakeri, egenprodusert", "Selskapsmeny"];
+const defaultRecipeCategories = ["Grunnoppskrift"];
 const defaultRentalAddons: RentalAddon[] = [
   { id: "bar-oppsett", name: "Oppsett av bar", price: 5000 },
   { id: "toyservietter", name: "Tøyservietter", price: 35 },
@@ -555,6 +557,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   menuCategories: defaultMenuCategories,
   productCategories: defaultProductCategories,
   materialCategories: defaultMaterialCategories,
+  recipeCategories: defaultRecipeCategories,
   inventoryCounts: {},
   calendarNotes: [],
 
@@ -620,6 +623,7 @@ function migrateData(raw: Partial<AppData>): AppData {
     productLists: (raw as any).productLists || [],
     menuCategories: raw.menuCategories || defaultMenuCategories,
     productCategories: raw.productCategories || defaultProductCategories,
+    recipeCategories: raw.recipeCategories || Array.from(new Set([...defaultRecipeCategories, ...recipes.map((r) => r.category).filter(Boolean)])),
     materialCategories: (raw.materialCategories || defaultMaterialCategories).map((c: string) => {
   if (c === "Kjølevarer") return "Kjøkken, egenprodusert";
   if (c === "Frysevare") return "Bakeri, egenprodusert";
@@ -2126,6 +2130,9 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
   const [lineSearch, setLineSearch] = useState("");
   const [recipeSearch, setRecipeSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("Alle");
+  const [newRecipeCategory, setNewRecipeCategory] = useState("");
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newStep, setNewStep] = useState<{ action: string; inputs: RecipeStepInput[] }>({ action: "", inputs: [] });
   const [showSteps, setShowSteps] = useState(false);
 
@@ -2143,11 +2150,12 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
 
   const filteredRecipes = data.recipes
     .filter((r) => `${r.productNumber} ${r.name} ${r.category}`.toLowerCase().includes(recipeSearch.toLowerCase()))
+    .filter((r) => categoryFilter === "Alle" || r.category === categoryFilter)
     .sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "no-NO"));
 
   function startNewRecipe() {
     setMode("new");
-    setForm({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" });
+    setForm({ productNumber: "", name: "", category: data.recipeCategories[0] || "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" });
     setDraftLines([]);
     setDraftSteps([]);
     setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
@@ -2179,7 +2187,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
       id: mode === "edit" && selected ? selected.id : `${idFromName(form.name)}-${Date.now()}`,
       productNumber: form.productNumber,
       name: form.name.trim(),
-      category: form.category || "Grunnoppskrift",
+      category: form.category || data.recipeCategories[0] || "Grunnoppskrift",
       yieldAmount: Number(form.yieldAmount) || 1,
       yieldUnit: form.yieldUnit,
       lines: draftLines,
@@ -2334,7 +2342,11 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
         <div className="form-grid four">
           <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
           <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /></label>
-          <label>Kategori<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Kategori" /></label>
+          <label>Kategori
+            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              {Array.from(new Set([...data.recipeCategories, form.category].filter(Boolean))).map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </label>
         </div>
 
         {activeRecipe && (
@@ -2547,6 +2559,31 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
           <button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button>
         </div>
         <input value={recipeSearch} onChange={(e) => setRecipeSearch(e.target.value)} placeholder="Søk grunnoppskrift" />
+        <div className="chips">
+          {["Alle", ...data.recipeCategories].filter((v, i, arr) => arr.indexOf(v) === i).map((cat) => (
+            <button key={cat} className={categoryFilter === cat ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat)}>{cat}</button>
+          ))}
+        </div>
+        <div className="section-toggle" onClick={() => setShowCategoryManager(!showCategoryManager)}>
+          <h3>Kategorier for grunnoppskrifter</h3>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="section-toggle-count">{data.recipeCategories.length}</span>
+            {showCategoryManager ? "▲" : "▼"}
+          </span>
+        </div>
+        {showCategoryManager && (
+          <div className="soft-box">
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+              Disse kategoriene brukes kun for å sortere og filtrere grunnoppskrifter, og påvirker ikke kategoriene for produkter/menyer andre steder i appen.
+            </p>
+            <CategoryEditor
+              values={data.recipeCategories}
+              newValue={newRecipeCategory}
+              setNewValue={setNewRecipeCategory}
+              onSave={(next) => updateData({ recipeCategories: next })}
+            />
+          </div>
+        )}
         {filteredRecipes.map((r) => (
           <div key={r.id} className={selectedId === r.id ? "list active-list" : "list"}>
             <button className="plain" onClick={() => setSelectedId(r.id)}>
