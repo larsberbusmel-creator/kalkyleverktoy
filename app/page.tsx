@@ -276,6 +276,8 @@ type PendingPortalOrder = {
   lines: PendingPortalOrderLine[];
   submittedAt: string;
   status: "pending" | "approved" | "rejected";
+  note?: string;
+  deliveryTime?: string;
 };
 
 type PendingRecurringOrderRequest = {
@@ -302,6 +304,8 @@ type StorkjokkenPickupOrder = {
   date: string;
   createdAt: string;
   priceExVat: number;
+  note?: string;
+  deliveryTime?: string;
 };
 
 type ProductPriceLogEntry = {
@@ -5679,6 +5683,7 @@ function ProductionTab({
   const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>("smabakst");
   const [expandedCateringOrderId, setExpandedCateringOrderId] = useState<string | null>(null);
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
+  const [expandedHistoryCustomerId, setExpandedHistoryCustomerId] = useState<string | null>(null);
   const [specialPriceSearch, setSpecialPriceSearch] = useState("");
   const [expandedPickupCustomerId, setExpandedPickupCustomerId] = useState<string | null>(null);
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
@@ -5944,6 +5949,8 @@ function ProductionTab({
         date: pending.date,
         createdAt: new Date().toISOString(),
         priceExVat: priceForCustomer(l.productId, pending.customerId),
+        note: pending.note,
+        deliveryTime: pending.deliveryTime,
       }));
     updateData({
       storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), ...newPickups],
@@ -6586,8 +6593,12 @@ ${allergenWarningHtml}
         return `<tr><td>${qty}</td><td>${escapeHtml(product.name)}</td><td class="right">${currency(price)}</td><td class="right">${currency(sum)}</td></tr>`;
       }).join("");
       if (!rows) return "";
+      const customerPickups = (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customer.id && p.date === activeDate);
+      const notesHtml = customerPickups.filter((p) => p.note || p.deliveryTime).map((p) =>
+        `<p style="margin:2px 0">${p.deliveryTime ? `🚚 Ønsket kl. ${escapeHtml(p.deliveryTime)}. ` : ""}${p.note ? `💬 ${escapeHtml(p.note)}` : ""}</p>`
+      ).join("");
       return `<div class="page"><div class="top"><div><h1>Pakkseddel / kjøkkenordre</h1><p class="muted">${escapeHtml(customer.name)} · Storkjøkkenpris</p></div><div class="right"><b>${formatDateNo(activeDate)}</b></div></div>
-<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Kunde</h3><p style="margin:2px 0"><b>${escapeHtml(customer.name)}</b></p><p style="margin:2px 0">Org.nr: ${escapeHtml(customer.orgNumber || "-")}</p><p style="margin:2px 0">Telefon: ${escapeHtml(customer.phone || "-")}</p><p style="margin:2px 0">Levering: ${escapeHtml(customer.deliveryAddress || "-")}</p></div>
+<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px"><h3 style="margin:0 0 4px">Kunde</h3><p style="margin:2px 0"><b>${escapeHtml(customer.name)}</b></p><p style="margin:2px 0">Org.nr: ${escapeHtml(customer.orgNumber || "-")}</p><p style="margin:2px 0">Telefon: ${escapeHtml(customer.phone || "-")}</p><p style="margin:2px 0">Levering: ${escapeHtml(customer.deliveryAddress || "-")}</p>${notesHtml}</div>
 <h2>Ordrelinjer</h2>
 <table><thead><tr><th>Antall</th><th>Produkt</th><th class="right">Pris eks. mva</th><th class="right">Sum</th></tr></thead><tbody>${rows}</tbody></table>
 <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-top:8px">
@@ -7107,11 +7118,13 @@ ${orderPages}`;
                   const isLate = p.date <= addDays(today(), 1) && new Date().getHours() >= 12;
                   return (
                     <div key={p.id} className="soft-box" style={{ marginBottom: 10 }}>
-                      <div className="between">
+                     <div className="between">
                         <b>{cust?.name || "Ukjent kunde"} · levering {formatDateNo(p.date)}</b>
                         <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(p.submittedAt).toLocaleString("no-NO")}</span>
                       </div>
                       {isLate && <p style={{ color: "#dc2626", fontWeight: 700, fontSize: 13 }}>⚠ Sendt inn etter kl. 12-fristen for denne datoen.</p>}
+                      {(p as any).deliveryTime && <p style={{ fontSize: 13 }}>🚚 Ønsket utkjøring kl. {(p as any).deliveryTime}</p>}
+                      {(p as any).note && <p style={{ fontSize: 13, fontStyle: "italic", background: "#f8fafc", padding: "6px 10px", borderRadius: 6 }}>💬 {(p as any).note}</p>}
                       <table style={{ marginTop: 8 }}>
                         <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Antall</th></tr></thead>
                         <tbody>
@@ -7394,6 +7407,56 @@ ${orderPages}`;
                 ))}
               </div>
               )}
+
+              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "history" ? null : "history")}>
+                <h3 style={{ margin: 0 }}>Tidligere bestillinger per kunde</h3>
+                <span>{openBlock === "history" ? "▲" : "▼"}</span>
+              </div>
+              {openBlock === "history" && storkjokkenCustomers.map((customer) => {
+                const isOpen = expandedHistoryCustomerId === customer.id;
+                const byDate: Record<string, StorkjokkenPickupOrder[]> = {};
+                (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customer.id).forEach((p) => {
+                  if (!byDate[p.date]) byDate[p.date] = [];
+                  byDate[p.date].push(p);
+                });
+                const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+                return (
+                  <div key={customer.id} className="soft-box">
+                    <div className="between" style={{ cursor: "pointer" }} onClick={() => setExpandedHistoryCustomerId(isOpen ? null : customer.id)}>
+                      <h3>{customer.name}</h3>
+                      <span>{dates.length} dag{dates.length === 1 ? "" : "er"} med bestillinger {isOpen ? "▲" : "▼"}</span>
+                    </div>
+                    {isOpen && (
+                      dates.length === 0 ? (
+                        <p className="muted">Ingen tidligere bestillinger registrert.</p>
+                      ) : (
+                        dates.map((date) => {
+                          const lines = byDate[date];
+                          const noteInfo = lines.find((l) => l.note || l.deliveryTime);
+                          return (
+                            <div key={date} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8, marginTop: 8 }}>
+                              <b>{formatDateNo(date)}</b>
+                              <table style={{ marginTop: 4 }}>
+                                <tbody>
+                                  {lines.map((l) => (
+                                    <tr key={l.id}>
+                                      <td>{data.products.find((p) => p.id === l.productId)?.name || "Ukjent"}</td>
+                                      <td style={{ textAlign: "right" }}>{l.quantity} stk</td>
+                                      <td style={{ textAlign: "right" }}>{currency(l.priceExVat * l.quantity)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {noteInfo?.deliveryTime && <p style={{ fontSize: 13 }}>🚚 Ønsket utkjøring kl. {noteInfo.deliveryTime}</p>}
+                              {noteInfo?.note && <p style={{ fontSize: 13, fontStyle: "italic", background: "#f8fafc", padding: "6px 10px", borderRadius: 6 }}>💬 {noteInfo.note}</p>}
+                            </div>
+                          );
+                        })
+                      )
+                    )}
+                  </div>
+                );
+              })}
 
               <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "prices" ? null : "prices")}>
                 <h3 style={{ margin: 0 }}>Spesialpriser per kunde</h3>
