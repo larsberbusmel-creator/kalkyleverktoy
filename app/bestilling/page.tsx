@@ -50,10 +50,14 @@ export default function BestillingPortal() {
 
   const [orderDate, setOrderDate] = useState(tomorrowDate());
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [orderNote, setOrderNote] = useState("");
+  const [wantsDelivery, setWantsDelivery] = useState(false);
+  const [deliveryTime, setDeliveryTime] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState("");
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [delivery, setDelivery] = useState<Delivery>(null);
   const [activeRecurring, setActiveRecurring] = useState<any[]>([]);
   const [pendingRecurring, setPendingRecurring] = useState<any[]>([]);
   const [recWeekdays, setRecWeekdays] = useState<number[]>([]);
@@ -96,6 +100,7 @@ export default function BestillingPortal() {
       setDeadlines(json.deadlines);
       setVatRate(json.vatRate || 15);
       setFavorites(json.favoriteProductIds || []);
+      setDelivery(json.delivery || null);
       setActiveRecurring(json.activeRecurring || []);
       setPendingRecurring(json.pendingRecurring || []);
     } catch {
@@ -143,7 +148,7 @@ export default function BestillingPortal() {
       const res = await fetch("/api/kunde/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin, date: orderDate, lines }),
+        body: JSON.stringify({ pin, date: orderDate, lines, wantsDelivery, deliveryTime, note: orderNote }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -151,6 +156,9 @@ export default function BestillingPortal() {
       } else {
         setSubmitMsg("Bestillingen er sendt inn og venter på godkjenning.");
         setQuantities({});
+        setOrderNote("");
+        setWantsDelivery(false);
+        setDeliveryTime("");
         await refresh();
       }
     } catch {
@@ -246,6 +254,18 @@ tfoot td{padding:6px 8px;font-weight:700}
 <script>window.print()</script>
 </body></html>`);
     w.document.close();
+  }
+
+  async function openDeklarasjon(productId: string) {
+    const res = await fetch("/api/kunde/deklarasjon", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, productId }),
+    });
+    if (!res.ok) { alert("Kunne ikke hente deklarasjon."); return; }
+    const html = await res.text();
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); }
   }
 
 async function toggleFavorite(productId: string) {
@@ -437,6 +457,7 @@ async function toggleFavorite(productId: string) {
                           <div>{p.name}{p.unitsPerCase && p.unitsPerCase > 1 ? ` (eske à ${p.unitsPerCase} stk)` : ""}</div>
                           <div style={{ color: "#94a3b8", fontSize: 12 }}>{p.priceExVat.toFixed(2)} kr eks. mva{p.unitsPerCase && p.unitsPerCase > 1 ? " / eske" : ""}</div>
                         </div>
+                        <button onClick={() => openDeklarasjon(p.id)} style={{ background: "none", border: "1px solid #cbd5e1", borderRadius: 6, padding: "2px 6px", fontSize: 11, cursor: "pointer", marginRight: 6 }}>Deklarasjon</button>
                         <button onClick={() => toggleFavorite(p.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: favorites.includes(p.id) ? "#f59e0b" : "#cbd5e1" }}>★</button>
                         <input
                           type="number"
@@ -453,6 +474,34 @@ async function toggleFavorite(productId: string) {
               </div>
 
               {products.length === 0 && <p style={{ color: "#64748b" }}>Ingen produkter tilgjengelig ennå. Ta kontakt med Brødrene Berbusmel.</p>}
+
+              {delivery && (
+                <div style={{ marginTop: 16, padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                    <input type="checkbox" checked={wantsDelivery} onChange={(e) => setWantsDelivery(e.target.checked)} />
+                    Ønsker utkjøring ({delivery.priceExVat.toFixed(0)} kr eks. mva)
+                  </label>
+                  {wantsDelivery && (
+                    <label style={{ display: "block", marginTop: 8 }}>Ønsket leveringstidspunkt (valgfritt)
+                      <input
+                        type="time"
+                        value={deliveryTime}
+                        onChange={(e) => setDeliveryTime(e.target.value)}
+                        style={{ padding: 8, borderRadius: 8, border: "1px solid #cbd5e1", marginLeft: 8 }}
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              <label style={{ display: "block", marginTop: 12 }}>Kommentar til bestillingen (valgfritt)
+                <textarea
+                  value={orderNote}
+                  onChange={(e) => setOrderNote(e.target.value)}
+                  placeholder="F.eks. spesielle ønsker"
+                  style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", minHeight: 60, marginTop: 4 }}
+                />
+              </label>
 
               {submitMsg && <p style={{ marginTop: 12, marginBottom: 8, fontWeight: 700 }}>{submitMsg}</p>}
               <button
