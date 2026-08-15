@@ -7119,9 +7119,12 @@ ${orderPages}`;
                 </div>
               )}
 
-              <div className="between" style={{ cursor: "pointer" }} onClick={() => setOpenBlock(openBlock === "pending" ? null : "pending")}>
-                <h3 style={{ margin: 0 }}>Bestillinger til godkjenning ({(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length})</h3>
-                <span>{openBlock === "pending" ? "▲" : "▼"}</span>
+              <div className="section-toggle" onClick={() => setOpenBlock(openBlock === "pending" ? null : "pending")}>
+                <h3>Bestillinger til godkjenning</h3>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="section-toggle-count">{(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length}</span>
+                  {openBlock === "pending" ? "▲" : "▼"}
+                </span>
               </div>
               {openBlock === "pending" && ((data.pendingPortalOrders || []).filter((p) => p.status === "pending").length === 0 ? (
                 <p className="muted">Ingen ventende bestillinger.</p>
@@ -7158,9 +7161,12 @@ ${orderPages}`;
                 })
               ))}
 
-              <div className="between" style={{ cursor: "pointer", marginTop: 16 }} onClick={() => setOpenBlock(openBlock === "recurring" ? null : "recurring")}>
-                <h3 style={{ margin: 0 }}>Fastordre-forespørsler ({(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length})</h3>
-                <span>{openBlock === "recurring" ? "▲" : "▼"}</span>
+              <div className="section-toggle" style={{ marginTop: 16 }} onClick={() => setOpenBlock(openBlock === "recurring" ? null : "recurring")}>
+                <h3>Fastordre-forespørsler</h3>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="section-toggle-count">{(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length}</span>
+                  {openBlock === "recurring" ? "▲" : "▼"}
+                </span>
               </div>
               {openBlock === "recurring" && ((data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length === 0 ? (
                 <p className="muted">Ingen ventende fastordre-forespørsler.</p>
@@ -7206,9 +7212,12 @@ ${orderPages}`;
                 </div>
                 <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
               </div>
-              <div className="between" style={{ cursor: "pointer", marginTop: 8 }} onClick={() => setOpenBlock(openBlock === "list" ? null : "list")}>
-                <h3 style={{ margin: 0 }}>Kunder ({(data.storkjokkenCustomers || []).length})</h3>
-                <span>{openBlock === "list" ? "▲" : "▼"}</span>
+              <div className="section-toggle" style={{ marginTop: 8 }} onClick={() => setOpenBlock(openBlock === "list" ? null : "list")}>
+                <h3>Kunder</h3>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="section-toggle-count">{(data.storkjokkenCustomers || []).length}</span>
+                  {openBlock === "list" ? "▲" : "▼"}
+                </span>
               </div>
               {openBlock === "list" && (
               <table>
@@ -7370,8 +7379,8 @@ ${orderPages}`;
               </table>
               )}
 
-              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "deadlines" ? null : "deadlines")}>
-                <h3 style={{ margin: 0 }}>Bestillingsfrister</h3>
+              <div className="section-toggle" style={{ marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "deadlines" ? null : "deadlines")}>
+                <h3>Bestillingsfrister</h3>
                 <span>{openBlock === "deadlines" ? "▲" : "▼"}</span>
               </div>
               {openBlock === "deadlines" && (
@@ -7421,8 +7430,8 @@ ${orderPages}`;
               </div>
               )}
 
-              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "history" ? null : "history")}>
-                <h3 style={{ margin: 0 }}>Tidligere bestillinger per kunde</h3>
+              <div className="section-toggle" style={{ marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "history" ? null : "history")}>
+                <h3>Tidligere bestillinger per kunde</h3>
                 <span>{openBlock === "history" ? "▲" : "▼"}</span>
               </div>
               {openBlock === "history" && storkjokkenCustomers.map((customer) => {
@@ -7435,7 +7444,7 @@ ${orderPages}`;
                 const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
                 return (
                   <div key={customer.id} className="soft-box">
-                    <div className="between" style={{ cursor: "pointer" }} onClick={() => setExpandedHistoryCustomerId(isOpen ? null : customer.id)}>
+                    <div className="section-toggle" onClick={() => setExpandedHistoryCustomerId(isOpen ? null : customer.id)}>
                       <h3>{customer.name}</h3>
                       <span>{dates.length} dag{dates.length === 1 ? "" : "er"} med bestillinger {isOpen ? "▲" : "▼"}</span>
                     </div>
@@ -7471,8 +7480,8 @@ ${orderPages}`;
                 );
               })}
 
-              <div className="between" style={{ cursor: "pointer", marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "prices" ? null : "prices")}>
-                <h3 style={{ margin: 0 }}>Spesialpriser per kunde</h3>
+              <div className="section-toggle" style={{ marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "prices" ? null : "prices")}>
+                <h3>Spesialpriser per kunde</h3>
                 <span>{openBlock === "prices" ? "▲" : "▼"}</span>
               </div>
               {openBlock === "prices" && storkjokkenCustomers.map((customer) => {
@@ -7480,7 +7489,7 @@ ${orderPages}`;
                 const specialPrices = (data.storkjokkenSpecialPrices || []).filter((x) => x.customerId === customer.id);
                 return (
                   <div key={customer.id} className="soft-box">
-                    <div className="between" style={{ cursor: "pointer" }} onClick={() => { setExpandedCustomerId(isOpen ? null : customer.id); setSpecialPriceSearch(""); }}>
+                    <div className="section-toggle" onClick={() => { setExpandedCustomerId(isOpen ? null : customer.id); setSpecialPriceSearch(""); }}>
                       <h3>{customer.name}</h3>
                       <span>{specialPrices.length} spesialpris{specialPrices.length === 1 ? "" : "er"} {isOpen ? "▲" : "▼"}</span>
                     </div>
@@ -11149,9 +11158,12 @@ ${opts.produksjon ? productionPageHtml : ""}
       </div>
 
       <div className="card" style={{ marginTop: 18 }}>
-        <div className="between" style={{ cursor: "pointer" }} onClick={() => setShowArchive(!showArchive)}>
-          <h2 style={{ margin: 0 }}>Arkiv ({archivedOffers.length})</h2>
-          <span>{showArchive ? "▲" : "▼"}</span>
+        <div className="section-toggle" onClick={() => setShowArchive(!showArchive)}>
+          <h2>Arkiv</h2>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="section-toggle-count">{archivedOffers.length}</span>
+            {showArchive ? "▲" : "▼"}
+          </span>
         </div>
         {showArchive && (
           archivedOffers.length === 0 ? (
@@ -12106,6 +12118,10 @@ function GlobalStyles() {
     .settings-section { border:1px solid #e2e8f0; border-radius:14px; margin-bottom:10px; overflow:hidden; }
     .settings-toggle { width:100%; display:flex; justify-content:space-between; align-items:center; border:0; background:#f8fafc; padding:14px 16px; font-weight:800; cursor:pointer; }
     .settings-content { padding:16px; }
+    .section-toggle { display:flex; justify-content:space-between; align-items:center; gap:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:12px 16px; cursor:pointer; transition: background .15s ease, border-color .15s ease; }
+    .section-toggle:hover { background:#f1f5f9; border-color:#cbd5e1; }
+    .section-toggle h2, .section-toggle h3 { margin:0; }
+    .section-toggle-count { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; background:#0f172a; color:white; font-size:13px; font-weight:700; }
     .editable-row { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid #e2e8f0; }
     .full-width { width:100%; }
     .order-line-box { border:1px solid #e2e8f0; border-radius:14px; padding:12px; background:white; }
