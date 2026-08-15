@@ -10424,7 +10424,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                     style={rental.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
                     onClick={() => toggleRungIn(rental)}
                   >
-                    {rental.rungInName ? "Angre" : "Slå inn"}
+                    {rental.rungInName ? "Angre" : "Slått inn"}
                   </button>
                 )}
                 <button className="btn" onClick={cancelEdit}>Avbryt</button>
@@ -11231,7 +11231,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                   style={offer.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
                   onClick={() => toggleRungIn(offer)}
                 >
-                  {offer.rungInName ? "Angre" : "Slå inn"}
+                  {offer.rungInName ? "Angre" : "Slått inn"}
                 </button>
                 {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
                 <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
@@ -11273,7 +11273,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                       style={offer.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
                       onClick={() => toggleRungIn(offer)}
                     >
-                      {offer.rungInName ? "Angre" : "Slå inn"}
+                      {offer.rungInName ? "Angre" : "Slått inn"}
                     </button>
                     {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
                     <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
