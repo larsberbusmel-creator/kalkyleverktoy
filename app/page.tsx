@@ -4564,7 +4564,9 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [orderPage, setOrderPage] = useState(1);
   const [showTodayOnly, setShowTodayOnly] = useState(false);
-  const [hideOldOrders, setHideOldOrders] = useState(true);
+  const [hideOldOrders, setHideOldOrders] = useState(false);
+  const [weekView, setWeekView] = useState(true);
+  const [weekOffset, setWeekOffset] = useState(0);
   const [calendarView, setCalendarView] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(todayStr.slice(0, 7));
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(todayStr);
@@ -5196,9 +5198,39 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
     return d.toISOString().slice(0, 10);
   })();
 
+  function weekDateKey(d: Date) {
+    const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  function mondayOf(d: Date) {
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    date.setDate(date.getDate() + diff);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+  function isoWeekNumber(d: Date) {
+    const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  }
+  const weekBase = new Date();
+  weekBase.setDate(weekBase.getDate() + weekOffset * 7);
+  const weekMonday = mondayOf(weekBase);
+  const weekSunday = new Date(weekMonday);
+  weekSunday.setDate(weekMonday.getDate() + 6);
+  const weekStartKey = weekDateKey(weekMonday);
+  const weekEndKey = weekDateKey(weekSunday);
+  const weekNumber = isoWeekNumber(weekMonday);
+
   const filteredOrders = activeOrders
     .filter((o) => {
+      if (orderSearch.trim()) return true;
       if (showTodayOnly) return o.date === todayStr;
+      if (weekView) return o.date >= weekStartKey && o.date <= weekEndKey;
       if (hideOldOrders) return o.date >= threeDaysAgo;
       return true;
     })
@@ -5567,13 +5599,16 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
       </div>
 
       <div className="chips" style={{ marginBottom: 8 }}>
-        <button className={showTodayOnly ? "btn active" : "btn"} onClick={() => { setShowTodayOnly(!showTodayOnly); if (!showTodayOnly) setHideOldOrders(false); setOrderPage(1); }}>
+        <button className={weekView ? "btn active" : "btn"} onClick={() => { setWeekView(true); setShowTodayOnly(false); setHideOldOrders(false); setOrderPage(1); }}>
+          🗓 Uke
+        </button>
+        <button className={showTodayOnly ? "btn active" : "btn"} onClick={() => { setShowTodayOnly(!showTodayOnly); setWeekView(false); if (!showTodayOnly) setHideOldOrders(false); setOrderPage(1); }}>
           📅 I dag ({activeOrders.filter((o) => o.date === todayStr).length})
         </button>
-        <button className={hideOldOrders && !showTodayOnly ? "btn active" : "btn"} onClick={() => { setHideOldOrders(true); setShowTodayOnly(false); setOrderPage(1); }}>
+        <button className={hideOldOrders && !showTodayOnly && !weekView ? "btn active" : "btn"} onClick={() => { setHideOldOrders(true); setShowTodayOnly(false); setWeekView(false); setOrderPage(1); }}>
           Siste 3 dager+
         </button>
-        <button className={!hideOldOrders && !showTodayOnly ? "btn active" : "btn"} onClick={() => { setHideOldOrders(false); setShowTodayOnly(false); setOrderPage(1); }}>
+        <button className={!hideOldOrders && !showTodayOnly && !weekView ? "btn active" : "btn"} onClick={() => { setHideOldOrders(false); setShowTodayOnly(false); setWeekView(false); setOrderPage(1); }}>
           Alle ordre
         </button>
         <button className={calendarView ? "btn active" : "btn"} onClick={() => setCalendarView(!calendarView)}>
@@ -5584,10 +5619,28 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
         <button className="btn" onClick={() => toggleSort("orderNumber")}>Ordrenr{sortIcon("orderNumber")}</button>
       </div>
 
+      {weekView && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+          <button className="btn" onClick={() => { setWeekOffset(weekOffset - 1); setOrderPage(1); }}>← Forrige uke</button>
+          <b>Uke {weekNumber} ({formatDateNo(weekStartKey)}–{formatDateNo(weekEndKey)})</b>
+          <button className="btn" onClick={() => { setWeekOffset(weekOffset + 1); setOrderPage(1); }}>Neste uke →</button>
+          {weekOffset !== 0 && (
+            <button className="link" onClick={() => { setWeekOffset(0); setOrderPage(1); }}>Til denne uken</button>
+          )}
+        </div>
+      )}
+
       <p style={{ color: "#64748b", margin: "0 0 12px" }}>
-        {showTodayOnly ? `Viser ${filteredOrders.length} ordre for i dag` : hideOldOrders ? `${filteredOrders.length} ordre (siste 3 dager og fremover)` : `${activeOrders.length} aktive ordre totalt`}
-        {orderSearch && ` · ${filteredOrders.length} treff`}
-        {hideOldOrders && !showTodayOnly && (
+        {orderSearch.trim()
+          ? `${filteredOrders.length} treff blant alle ordre`
+          : showTodayOnly
+          ? `Viser ${filteredOrders.length} ordre for i dag`
+          : weekView
+          ? `${filteredOrders.length} ordre i uke ${weekNumber} (${formatDateNo(weekStartKey)}–${formatDateNo(weekEndKey)})`
+          : hideOldOrders
+          ? `${filteredOrders.length} ordre (siste 3 dager og fremover)`
+          : `${activeOrders.length} aktive ordre totalt`}
+        {hideOldOrders && !showTodayOnly && !weekView && (
           <button className="link" style={{ marginLeft: 8, fontSize: 13 }} onClick={() => { setHideOldOrders(false); setOrderPage(1); }}>Vis alle</button>
         )}
       </p>
