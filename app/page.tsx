@@ -112,6 +112,7 @@ type Product = {
   isDeliveryProduct?: boolean;
   menuCourses?: MenuCourse[];
   instructions?: string;
+  showWholegrainInDeclaration?: boolean;
 };
 
 type MenuCourseSelection = { courseId: string; productId: string; guestCount: number };
@@ -2649,6 +2650,10 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   );
 }
 
+function defaultShowWholegrainForCategory(category: string): boolean {
+  return category === "Brød" || category === "Bakeri, egenprodusert";
+}
+
 function hashCode(str: string) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -2678,7 +2683,8 @@ unitWeightKg: "1",
   unitsPerCase: "",
   isDeliveryProduct: false,
   instructions: "",
-});  
+  showWholegrainInDeclaration: defaultShowWholegrainForCategory("Søtbakst"),
+});
 const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
 const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
 const [line, setLine] = useState<{
@@ -2758,6 +2764,7 @@ unitWeightKg: Number(form.unitWeightKg) || 0,
   unitsPerCase: Number(form.unitsPerCase) || undefined,
   menuCourses: form.type === "selskapsmeny" ? draftMenuCourses : undefined,
   instructions: form.instructions || undefined,
+  showWholegrainInDeclaration: form.showWholegrainInDeclaration,
   };
 
   const activeProduct = mode === "view" ? selected : draftProduct;
@@ -2787,7 +2794,8 @@ unitWeightKg: "1",
   unitsPerCase: "",
   isDeliveryProduct: false,
   instructions: "",
-});    
+  showWholegrainInDeclaration: defaultShowWholegrainForCategory("Søtbakst"),
+});
 setDraftLines([]);
     setDraftPackaging([]);
     setDraftMenuCourses([]);
@@ -2809,6 +2817,7 @@ setForm((f) => {
   return {
     ...next,
     productNumber: mode === "new" ? getNextProductNumber(next.category || f.category) : f.productNumber,
+    showWholegrainInDeclaration: mode === "new" ? defaultShowWholegrainForCategory(next.category || f.category) : f.showWholegrainInDeclaration,
   };
 });  }
 
@@ -2919,6 +2928,7 @@ unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
       unitsPerCase: String(p.unitsPerCase || ""),
       isDeliveryProduct: !!p.isDeliveryProduct,
       instructions: p.instructions || "",
+      showWholegrainInDeclaration: p.showWholegrainInDeclaration !== false,
     });
     setDraftLines(p.lines.map((l) => ({ ...l })));
     setDraftPackaging(p.packaging.map((x) => ({ ...x })));
@@ -2984,6 +2994,7 @@ unitWeightKg: "1",
     unitsPerCase: String(copy.unitsPerCase || ""),
     isDeliveryProduct: !!copy.isDeliveryProduct,
     instructions: copy.instructions || "",
+    showWholegrainInDeclaration: copy.showWholegrainInDeclaration !== false,
   });
 
   setDraftLines(copy.lines.map((l) => ({ ...l })));
@@ -3467,7 +3478,7 @@ function printNutritionLabel(product: Product) {
   const ingredients = productIngredients(product).join(", ") || "-";
   const allergens = productAllergens(product).join(", ") || "Ingen registrert";
   const wholegrainPercent = calculateWholegrainPercent(product);
-const showWholegrain = product.category === "Brød" || product.subType === "brød";
+const showWholegrain = product.showWholegrainInDeclaration !== false;
 
   const w = window.open("", "_blank");
   if (!w) return;
@@ -3763,6 +3774,10 @@ th{background:#f3f4f6}
   <label className="check" style={{ marginTop: 8 }}>
     <input type="checkbox" checked={!!form.isDeliveryProduct} onChange={(e) => setForm({ ...form, isDeliveryProduct: e.target.checked })} />
     Dette er utkjøring/leveringsprodukt (legges automatisk til som valg i kundeportalen)
+  </label>
+  <label className="check" style={{ marginTop: 4 }}>
+    <input type="checkbox" checked={form.showWholegrainInDeclaration !== false} onChange={(e) => setForm({ ...form, showWholegrainInDeclaration: e.target.checked })} />
+    Vis grovhet i deklarasjon
   </label>
 
   {form.type === "pasmuurt" && (
