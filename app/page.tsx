@@ -8686,12 +8686,20 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         <Metric label="Sum varetelling" value={currency(total)} dark />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 8, margin: "12px 0" }}>
-        <div style={{ gridColumn: "1 / -1", fontWeight: 800, color: "#64748b", fontSize: 13 }}>Mat</div>
-        {matSubBuckets.map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
-        <div style={{ gridColumn: "1 / -1", fontWeight: 800, color: "#64748b", fontSize: 13, marginTop: 8 }}>Deli & Drikke</div>
-        {["Deli", ...drinkBuckets].map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
-      </div>
+      <details className="soft-box" style={{ padding: 0, marginBottom: 12 }}>
+        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Fordeling per kategori</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+        </summary>
+        <div style={{ padding: "0 16px 16px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 8, margin: "12px 0" }}>
+            <div style={{ gridColumn: "1 / -1", fontWeight: 800, color: "#64748b", fontSize: 13 }}>Mat</div>
+            {matSubBuckets.map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
+            <div style={{ gridColumn: "1 / -1", fontWeight: 800, color: "#64748b", fontSize: 13, marginTop: 8 }}>Deli & Drikke</div>
+            {["Deli", ...drinkBuckets].map((b) => <Metric key={b} label={b} value={currency(bucketValue(b))} />)}
+          </div>
+        </div>
+      </details>
 
       <div className="soft-box" style={{ marginBottom: 12 }}>
         <label style={{ fontWeight: 800, fontSize: 14 }}>
@@ -8801,28 +8809,34 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         </div>
       </details>
 
-      <div className="soft-box">
-        <div className="between">
-          <h3>Historikk siste 12 registrerte måneder</h3>
-          <button className={showInventoryStats ? "btn active" : "btn"} onClick={() => setShowInventoryStats(!showInventoryStats)}>{showInventoryStats ? "Skjul statistikk" : "Vis statistikk"}</button>
-        </div>
-        <table><thead><tr><th>Måned</th><th>Varebeholdning</th><th>Svinn</th></tr></thead><tbody>{inventoryHistory.map((h) => <tr key={h.monthKey}><td>{h.monthKey}</td><td>{currency(h.total)}</td><td>{currency(h.wasteTotal)}</td></tr>)}</tbody></table>
-      </div>
-
-      {showInventoryStats && (
-        <div className="soft-box">
-          <h3>Grafisk statistikk</h3>
-          <div className="inventory-chart">
-            {inventoryHistory.map((h) => (
-              <div key={h.monthKey} className="inventory-month">
-                <div className="between"><b>{h.monthKey}</b><b>{currency(h.total)}</b></div>
-                <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.max(4, (h.total / maxInventoryValue) * 100)}%` }} /></div>
-                <div className="inventory-breakdown">{statsBuckets.map((bucket) => <div key={bucket} className="breakdown-row"><span>{bucket}</span><span>{currency(valueForBucketInMonth(h.monthKey, bucket))}</span></div>)}</div>
-              </div>
-            ))}
+      <details className="soft-box" style={{ padding: 0 }}>
+        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Historikk siste 12 registrerte måneder</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+        </summary>
+        <div style={{ padding: "0 16px 16px" }}>
+          <div className="between">
+            <span />
+            <button className={showInventoryStats ? "btn active" : "btn"} onClick={() => setShowInventoryStats(!showInventoryStats)}>{showInventoryStats ? "Skjul statistikk" : "Vis statistikk"}</button>
           </div>
+          <table><thead><tr><th>Måned</th><th>Varebeholdning</th><th>Svinn</th></tr></thead><tbody>{inventoryHistory.map((h) => <tr key={h.monthKey}><td>{h.monthKey}</td><td>{currency(h.total)}</td><td>{currency(h.wasteTotal)}</td></tr>)}</tbody></table>
+
+          {showInventoryStats && (
+            <div style={{ marginTop: 12 }}>
+              <h3>Grafisk statistikk</h3>
+              <div className="inventory-chart">
+                {inventoryHistory.map((h) => (
+                  <div key={h.monthKey} className="inventory-month">
+                    <div className="between"><b>{h.monthKey}</b><b>{currency(h.total)}</b></div>
+                    <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.max(4, (h.total / maxInventoryValue) * 100)}%` }} /></div>
+                    <div className="inventory-breakdown">{statsBuckets.map((bucket) => <div key={bucket} className="breakdown-row"><span>{bucket}</span><span>{currency(valueForBucketInMonth(h.monthKey, bucket))}</span></div>)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </details>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
 <button className="btn" onClick={() => {
