@@ -94,12 +94,25 @@ export async function GET() {
     });
 
     const hasTime = !!o.time;
-    const dtstart = hasTime
-      ? `DTSTART:${toIcalDate(o.date, o.time)}`
-      : `DTSTART;VALUE=DATE:${toIcalDate(o.date, "")}`;
-    const dtend = hasTime
-      ? `DTEND:${addMinutes(o.date, o.time, 60)}`
-      : `DTEND;VALUE=DATE:${toIcalDate(o.date, "")}`;
+    const isMultiDay = !!o.endDate && o.endDate !== o.date;
+
+    let dtstart: string;
+    let dtend: string;
+    if (isMultiDay) {
+      // Flerdagers arrangement: heldagshendelse fra o.date t.o.m. o.endDate.
+      // iCal krever eksklusiv sluttdato, altså dagen ETTER o.endDate.
+      // Gjenbruker addMinutes (24t frem fra midnatt) for å finne den datoen
+      // uten å skrive ny dato-parsing-logikk.
+      const dayAfterEndDate = addMinutes(o.endDate, "00:00", 24 * 60).slice(0, 8);
+      dtstart = `DTSTART;VALUE=DATE:${toIcalDate(o.date, "")}`;
+      dtend = `DTEND;VALUE=DATE:${dayAfterEndDate}`;
+    } else if (hasTime) {
+      dtstart = `DTSTART:${toIcalDate(o.date, o.time)}`;
+      dtend = `DTEND:${addMinutes(o.date, o.time, 60)}`;
+    } else {
+      dtstart = `DTSTART;VALUE=DATE:${toIcalDate(o.date, "")}`;
+      dtend = `DTEND;VALUE=DATE:${toIcalDate(o.date, "")}`;
+    }
 
     // SUMMARY: type-prefiks + kundenavn + evt. bedrift i parentes
     const typePrefix = String(o.id).startsWith("rental-order-") ? "Leie av lokale // " : "Bakeriet // ";

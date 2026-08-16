@@ -131,6 +131,7 @@ type Order = {
   phone: string;
   deliveryAddress: string;
   date: string;
+  endDate?: string;
   time: string;
   paymentInfo?: string;
 note?: string;
@@ -172,6 +173,7 @@ type RentalOffer = {
   id?: string;
   customer: string;
   date?: string;
+  endDate?: string;
   phone?: string;
   email?: string;
   note?: string;
@@ -9644,6 +9646,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
 
   function saveOffer() {
     if (!rental.customer.trim()) return alert("Legg inn kundenavn.");
+    if (rental.endDate && rental.date && rental.endDate < rental.date) return alert("Til dato kan ikke være før fra-dato.");
     const offerId = rental.id || `rental-${Date.now()}`;
     const offer: RentalOffer = { ...rental, id: offerId };
     if (editingOfferId) {
@@ -9666,7 +9669,7 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         companyName: offer.customer,
         orgNumber: "", companyAddress: "", phone: offer.phone || "",
         deliveryAddress: rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue,
-        date: offer.date, time: "", note: offer.note || "", paymentInfo: "",
+        date: offer.date, endDate: offer.endDate, time: "", note: offer.note || "", paymentInfo: "",
         guests: rental.productLines.reduce((sum, l) => sum + l.guests, 0),
         productId: rental.productLines[0]?.productId || "",
         orderLines: rental.productLines.filter((l) => l.productId).map((l) => ({ productId: l.productId, quantity: l.guests })),
@@ -10771,6 +10774,28 @@ ${opts.produksjon ? productionPageHtml : ""}
   const archivedOffers = allMatchingOffers.filter((o) => o.date && o.date < sevenDaysAgo);
   const [showArchive, setShowArchive] = useState(false);
 
+  // Live dobbeltbooking-sjekk for internt lokale valgt i redigeringsskjemaet.
+  // Kun informativt - hindrer ikke lagring.
+  const rentalDoubleBookingConflicts: { venueName: string; customer: string; rangeLabel: string }[] =
+    rental.venueExternal || !rental.venue || !rental.date
+      ? []
+      : (((data as any).rentalOffers || []) as RentalOffer[])
+          .filter((o) => o.id !== rental.id)
+          .filter((o) => !o.venueExternal && o.venue === rental.venue && !!o.date)
+          .filter((o) => {
+            const otherStart = o.date!;
+            const otherEnd = o.endDate || o.date!;
+            const myStart = rental.date!;
+            const myEnd = rental.endDate || rental.date!;
+            return !(otherEnd < myStart || otherStart > myEnd);
+          })
+          .map((o) => {
+            const otherStart = o.date!;
+            const otherEnd = o.endDate || o.date!;
+            const rangeLabel = otherEnd !== otherStart ? `${formatDateNo(otherStart)} – ${formatDateNo(otherEnd)}` : formatDateNo(otherStart);
+            return { venueName: rental.venue, customer: o.customer, rangeLabel };
+          });
+
   return (
     <section>
       {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
@@ -10793,7 +10818,11 @@ ${opts.produksjon ? productionPageHtml : ""}
             <div key={offer.id} className="editable-row">
               <div>
                 <b>{offer.customer}</b>
-                {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
+                {offer.date && (
+                  <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>
+                    📅 {offer.endDate && offer.endDate !== offer.date ? `${formatDateNo(offer.date)} – ${formatDateNo(offer.endDate)}` : formatDateNo(offer.date)}
+                  </span>
+                )}
                 <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -10911,10 +10940,19 @@ ${opts.produksjon ? productionPageHtml : ""}
 
             {rentalSubTab === "forside" && (
               <>
-                <div className="form-grid two">
+                <div className="form-grid three">
                   <label>Kunde<input value={rental.customer} disabled={readOnly} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
                   <label>Dato for arrangement<input type="date" value={rental.date || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
+                  <label>Til dato (valgfritt - la stå tomt for enkeltdags-arrangement)<input type="date" value={rental.endDate || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, endDate: e.target.value })} /></label>
                 </div>
+
+                {rentalDoubleBookingConflicts.length > 0 && (
+                  <div className="warning">
+                    {rentalDoubleBookingConflicts.map((c, i) => (
+                      <div key={i}>⚠ {c.venueName} er allerede booket {c.rangeLabel} av {c.customer}. Du kan fortsatt lagre, men sjekk at dette er riktig.</div>
+                    ))}
+                  </div>
+                )}
 
                 <div className="form-grid two">
                   <label>Telefon<input value={rental.phone || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, phone: e.target.value })} placeholder="Telefonnummer" /></label>
@@ -11731,7 +11769,11 @@ ${opts.produksjon ? productionPageHtml : ""}
               <div>
                 <b>{offer.customer}</b>
                 {isEditing && <span style={{ marginLeft: 8, fontSize: 12, background: "#fbbf24", color: "white", borderRadius: 6, padding: "2px 8px" }}>Redigeres nå</span>}
-                {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
+                {offer.date && (
+                  <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>
+                    📅 {offer.endDate && offer.endDate !== offer.date ? `${formatDateNo(offer.date)} – ${formatDateNo(offer.endDate)}` : formatDateNo(offer.date)}
+                  </span>
+                )}
                 <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
                 <br />
                 <small style={{ color: "#64748b" }}>Total: {currency(offerTotal)}</small>
@@ -11777,7 +11819,11 @@ ${opts.produksjon ? productionPageHtml : ""}
                 <div key={offer.id} className="editable-row" style={{ marginTop: 12 }}>
                   <div>
                     <b>{offer.customer}</b>
-                    {offer.date && <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>📅 {formatDateNo(offer.date)}</span>}
+                    {offer.date && (
+                  <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>
+                    📅 {offer.endDate && offer.endDate !== offer.date ? `${formatDateNo(offer.date)} – ${formatDateNo(offer.endDate)}` : formatDateNo(offer.date)}
+                  </span>
+                )}
                     <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
