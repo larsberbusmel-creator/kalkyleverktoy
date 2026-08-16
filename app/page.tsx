@@ -12314,20 +12314,53 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
             )}
           </div>
 
-          {form.role === "user" && (
-            <table style={{ marginTop: 12 }}>
-              <thead><tr><th>Fane</th><th>Se</th><th>Redigere</th></tr></thead>
-              <tbody>
-                {allTabConfig.map((t) => (
-                  <tr key={t.key}>
-                    <td>{t.icon} {t.label}</td>
-                    <td><input type="checkbox" checked={!!form.permissions[t.key]?.view} onChange={() => togglePermission(t.key, "view")} /></td>
-                    <td><input type="checkbox" checked={!!form.permissions[t.key]?.edit} onChange={() => togglePermission(t.key, "edit")} /></td>
+          {form.role === "user" && (() => {
+            const allViewChecked = allTabConfig.every((t) => form.permissions[t.key]?.view);
+            const allEditChecked = allTabConfig.every((t) => form.permissions[t.key]?.edit);
+            function toggleAllPermissions(field: "view" | "edit") {
+              const shouldEnable = field === "view" ? !allViewChecked : !allEditChecked;
+              const nextPermissions: typeof form.permissions = {};
+              allTabConfig.forEach((t) => {
+                const current = form.permissions[t.key] || { view: false, edit: false };
+                if (field === "view") {
+                  nextPermissions[t.key] = { view: shouldEnable, edit: shouldEnable ? current.edit : false };
+                } else {
+                  nextPermissions[t.key] = { view: shouldEnable ? true : current.view, edit: shouldEnable };
+                }
+              });
+              setForm({ ...form, permissions: nextPermissions });
+            }
+            return (
+              <table style={{ marginTop: 12 }}>
+                <thead>
+                  <tr>
+                    <th>Fane</th>
+                    <th>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, cursor: "pointer" }}>
+                        <input type="checkbox" checked={allViewChecked} onChange={() => toggleAllPermissions("view")} />
+                        Se <span style={{ color: "#94a3b8" }}>(alle)</span>
+                      </label>
+                    </th>
+                    <th>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, cursor: "pointer" }}>
+                        <input type="checkbox" checked={allEditChecked} onChange={() => toggleAllPermissions("edit")} />
+                        Redigere <span style={{ color: "#94a3b8" }}>(alle)</span>
+                      </label>
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody>
+                  {allTabConfig.map((t) => (
+                    <tr key={t.key}>
+                      <td>{t.icon} {t.label}</td>
+                      <td><input type="checkbox" checked={!!form.permissions[t.key]?.view} onChange={() => togglePermission(t.key, "view")} /></td>
+                      <td><input type="checkbox" checked={!!form.permissions[t.key]?.edit} onChange={() => togglePermission(t.key, "edit")} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })()}
 
           <button className="btn active" style={{ marginTop: 12 }} onClick={saveEntry}>Lagre</button>
         </div>
