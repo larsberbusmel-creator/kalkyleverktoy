@@ -1369,7 +1369,7 @@ return (
         display: none;
       }
 
-     @media (max-width: 768px) {
+     @media (max-width: 1180px) {
   .sidebar { display: none; }
   
   /* Flytt topbar ut av flex-containeren visuelt */
