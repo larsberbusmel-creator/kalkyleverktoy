@@ -1285,8 +1285,8 @@ return (
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} />}
-        {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} />}
-        {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} />}
+        {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} />}
+        {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
@@ -2184,7 +2184,7 @@ function defaultRetailMargin(category: string) {
   </section>;
 }
 
-function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[] }) {
+function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean }) {
   const [selectedId, setSelectedId] = useState(data.recipes[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
@@ -2394,10 +2394,11 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   if (mode !== "view") {
     return (
       <section className="card product-editor-page">
+        {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
         <div className="between">
           <h1>{mode === "edit" ? "Rediger grunnoppskrift" : "Ny grunnoppskrift"}</h1>
           <div>
-            <button className="btn active" onClick={saveRecipe}>
+            <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveRecipe}>
               {mode === "edit" ? "Lagre endringer" : "Lagre grunnoppskrift"}
             </button>
             <button className="btn" onClick={cancelEdit}>Avbryt</button>
@@ -2405,10 +2406,10 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
         </div>
 
         <div className="form-grid four">
-          <label>Produktnr<input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
-          <label>Navn<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /></label>
+          <label>Produktnr<input value={form.productNumber} disabled={readOnly} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" /></label>
+          <label>Navn<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" /></label>
           <label>Kategori
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+            <select value={form.category} disabled={readOnly} onChange={(e) => setForm({ ...form, category: e.target.value })}>
               {Array.from(new Set([...data.recipeCategories, form.category].filter(Boolean))).map((c) => <option key={c}>{c}</option>)}
             </select>
           </label>
@@ -2429,6 +2430,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
           <div className="form-grid five">
             <select
               value={line.itemType}
+              disabled={readOnly}
               onChange={(e) => {
                 setLine({ ...line, itemType: e.target.value as RecipeLine["itemType"], itemId: "" });
                 setLineSearch("");
@@ -2441,6 +2443,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             <div className="search-picker">
               <input
                 value={lineSearch || lineItemName(line.itemType, line.itemId)}
+                disabled={readOnly}
                 onChange={(e) => {
                   setLineSearch(e.target.value);
                   setLine({ ...line, itemId: "" });
@@ -2470,6 +2473,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             <input
               type="number"
               value={line.amount}
+              disabled={readOnly}
               onChange={(e) => setLine({ ...line, amount: e.target.value })}
               placeholder="Mengde"
             />
@@ -2477,17 +2481,19 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             <input
               type="number"
               value={line.wastePercent}
+              disabled={readOnly}
               onChange={(e) => setLine({ ...line, wastePercent: e.target.value })}
               placeholder="Svinn %"
             />
 
             <input
               value={line.groupLabel}
+              disabled={readOnly}
               onChange={(e) => setLine({ ...line, groupLabel: e.target.value })}
               placeholder="Gruppe (valgfritt)"
             />
 
-            <button className="btn" onClick={addLine}>Legg til</button>
+            <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addLine}>Legg til</button>
           </div>
 
           <table>
@@ -2509,6 +2515,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                     <td colSpan={6} style={{ padding: "6px 10px" }}>
                       <input
                         value={l.groupLabel}
+                        disabled={readOnly}
                         onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
                         style={{ fontWeight: 700, fontSize: 14, border: "none", background: "transparent", width: "100%", outline: "none" }}
                         placeholder="Gruppenavn"
@@ -2520,6 +2527,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                   <td>
                     <select
                       value={l.itemType}
+                      disabled={readOnly}
                       onChange={(e) => updateDraftLine(i, { itemType: e.target.value as RecipeLine["itemType"], itemId: "" })}
                     >
                       <option value="material">Råvare</option>
@@ -2527,7 +2535,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                     </select>
                   </td>
                   <td>
-                    <select value={l.itemId} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
+                    <select value={l.itemId} disabled={readOnly} onChange={(e) => updateDraftLine(i, { itemId: e.target.value })}>
                       <option value="">Velg</option>
                       {l.itemType === "material"
                         ? data.materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)
@@ -2538,6 +2546,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                     <input
                       type="number"
                       value={l.amount}
+                      disabled={readOnly}
                       onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })}
                     />
                   </td>
@@ -2545,19 +2554,20 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                     <input
                       type="number"
                       value={l.wastePercent || ""}
+                      disabled={readOnly}
                       onChange={(e) => updateDraftLine(i, { wastePercent: Number(e.target.value) || 0 })}
                       placeholder="%"
                     />
                   </td>
                   <td>{currency(lineCost(l))}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>
+                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>
                       Slett
                     </button>
                     {isGroupFirstLine(draftLines, i) && (
                       <>
-                        <button className="btn" style={{ marginLeft: 6, fontSize: 15, padding: "4px 10px" }} disabled={i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
-                        <button className="btn" style={{ marginLeft: 4, fontSize: 15, padding: "4px 10px" }} disabled={i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
+                        <button className="btn" style={{ marginLeft: 6, fontSize: 15, padding: "4px 10px" }} disabled={readOnly || i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
+                        <button className="btn" style={{ marginLeft: 4, fontSize: 15, padding: "4px 10px" }} disabled={readOnly || i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
                       </>
                     )}
                   </td>
@@ -2576,21 +2586,22 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
           <div className="form-grid two">
             <input
               value={newStep.action}
+              disabled={readOnly}
               onChange={(e) => setNewStep({ ...newStep, action: e.target.value })}
               placeholder="Handling, f.eks. bland, smelt, vend inn, stek"
             />
-            <button className="btn" onClick={addStep}>Legg til steg</button>
+            <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addStep}>Legg til steg</button>
           </div>
           <div className="chips" style={{ margin: "8px 0" }}>
             {groupOptions.map((g) => (
               <label key={`g-${g}`} className="check">
-                <input type="checkbox" checked={newStep.inputs.some((i) => i.kind === "group" && i.ref === g)} onChange={() => toggleStepInput("group", g)} />
+                <input type="checkbox" disabled={readOnly} checked={newStep.inputs.some((i) => i.kind === "group" && i.ref === g)} onChange={() => toggleStepInput("group", g)} />
                 {g}
               </label>
             ))}
             {draftSteps.map((s, i) => (
               <label key={`s-${s.id}`} className="check">
-                <input type="checkbox" checked={newStep.inputs.some((i2) => i2.kind === "step" && i2.ref === s.id)} onChange={() => toggleStepInput("step", s.id)} />
+                <input type="checkbox" disabled={readOnly} checked={newStep.inputs.some((i2) => i2.kind === "step" && i2.ref === s.id)} onChange={() => toggleStepInput("step", s.id)} />
                 Steg {i + 1}: {s.action}
               </label>
             ))}
@@ -2605,7 +2616,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                   <td>{i + 1}</td>
                   <td>{s.action}</td>
                   <td>{stepLabel(s, draftSteps)}</td>
-                  <td><button className="link danger" onClick={() => removeStep(s.id)}>Slett</button></td>
+                  <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStep(s.id)}>Slett</button></td>
                 </tr>
               ))}
             </tbody>
@@ -2620,8 +2631,9 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   return (
     <section className="grid two">
       <div className="card">
+        {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
         <div className="between" style={{ justifyContent: "flex-end" }}>
-          <button className="btn active" onClick={startNewRecipe}>Ny grunnoppskrift</button>
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={startNewRecipe}>Ny grunnoppskrift</button>
         </div>
         <div className="chips">
           {data.recipeCategories.map((cat) => (
@@ -2646,6 +2658,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
               newValue={newRecipeCategory}
               setNewValue={setNewRecipeCategory}
               onSave={(next) => updateData({ recipeCategories: next })}
+              disabled={readOnly}
             />
           </div>
         )}
@@ -2658,12 +2671,12 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                 <div style={{ color: "#b45309", fontSize: 12 }}>
                   ⚠ Utbytte stemmer ikke: linjene summerer til {num(recipeTotalAmount(r), 3)} {r.yieldUnit}, men utbytte er satt til {r.yieldAmount} {r.yieldUnit}
                   {" "}
-                  <button className="link" onClick={() => updateListRpc("recipes", { [r.id]: { ...r, yieldAmount: recipeTotalAmount(r) } })}>Fiks automatisk</button>
+                  <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => updateListRpc("recipes", { [r.id]: { ...r, yieldAmount: recipeTotalAmount(r) } })}>Fiks automatisk</button>
                 </div>
               )}
             </button>
-            <button className="link" onClick={() => editRecipe(r)}>Rediger</button>
-            <button className="link danger" onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button>
+            <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => editRecipe(r)}>Rediger</button>
+            <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { if (confirm("Slette grunnoppskrift?")) updateData({ recipes: data.recipes.filter((x) => x.id !== r.id) }); }}>Slett</button>
           </div>
         ))}
       </div>
@@ -2676,7 +2689,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                 <p>{selected.category} · totalvekt {num(recipeTotalAmount(selected), 3)} {selected.yieldUnit}</p>
               </div>
               <div>
-                <button className="btn" onClick={() => editRecipe(selected)}>Rediger</button>
+                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => editRecipe(selected)}>Rediger</button>
                 <button className="btn" onClick={() => printRecipe(selected)}>Print</button>
               </div>
             </div>
@@ -2723,7 +2736,7 @@ function hashCode(str: string) {
   return hash;
 }
 
-function ProductsTab({ data, updateData, updateListRpc, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number }) {
+function ProductsTab({ data, updateData, updateListRpc, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number; readOnly: boolean }) {
   const [selectedId, setSelectedId] = useState(data.products[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
 const [form, setForm] = useState({
@@ -3745,25 +3758,26 @@ th{background:#f3f4f6}
   if (mode !== "view") {
     return (
       <section className="card product-editor-page">
+        {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
         <div className="between">
           <h1>{mode === "edit" ? "Rediger produkt" : "Nytt produkt"}</h1>
           <div>
-            <button className="btn active" onClick={saveProduct}>{mode === "edit" ? "Lagre endringer" : "Lagre produkt"}</button>
+            <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveProduct}>{mode === "edit" ? "Lagre endringer" : "Lagre produkt"}</button>
             <button className="btn" onClick={() => setMode("view")}>Avbryt</button>
           </div>
         </div>
 
         <div className="form-grid four">
   <label>Produktnr
-    <input value={form.productNumber} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" />
+    <input value={form.productNumber} disabled={readOnly} onChange={(e) => setForm({ ...form, productNumber: e.target.value })} placeholder="Produktnr" />
   </label>
 
   <label>Navn
-    <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Produktnavn" />
+    <input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Produktnavn" />
   </label>
 
   <label>Type
-    <select value={form.type} onChange={(e) => blankFor(e.target.value as ProductType)}>
+    <select value={form.type} disabled={readOnly} onChange={(e) => blankFor(e.target.value as ProductType)}>
       <option value="grunnoppskrift">Grunnoppskrift</option>
       <option value="bakst">Bakst</option>
       <option value="cateringmeny">Cateringmeny</option>
@@ -3776,6 +3790,7 @@ th{background:#f3f4f6}
   <label>Kategori
     <select
       value={form.category}
+      disabled={readOnly}
       onChange={(e) => {
         const category = e.target.value;
         setForm({
@@ -3807,13 +3822,14 @@ th{background:#f3f4f6}
       type="number"
       className="highlight-input"
       value={form.unitWeightKg}
+      disabled={readOnly}
       onChange={(e) => setForm({ ...form, unitWeightKg: e.target.value })}
       placeholder="F.eks. 0.45"
     />
   </label>
 
   <label>Enhet
-    <select value={form.yieldUnit} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}>
+    <select value={form.yieldUnit} disabled={readOnly} onChange={(e) => setForm({ ...form, yieldUnit: e.target.value as YieldUnit })}>
       <option value="stk">stk</option>
       <option value="porsjoner">porsjoner</option>
       <option value="kg">kg</option>
@@ -3826,17 +3842,18 @@ th{background:#f3f4f6}
       <input
         type="number"
         value={form.unitsPerCase}
+        disabled={readOnly}
         onChange={(e) => setForm({ ...form, unitsPerCase: e.target.value })}
         placeholder="F.eks. 12"
       />
     </label>
   )}
   <label className="check" style={{ marginTop: 8 }}>
-    <input type="checkbox" checked={!!form.isDeliveryProduct} onChange={(e) => setForm({ ...form, isDeliveryProduct: e.target.checked })} />
+    <input type="checkbox" disabled={readOnly} checked={!!form.isDeliveryProduct} onChange={(e) => setForm({ ...form, isDeliveryProduct: e.target.checked })} />
     Dette er utkjøring/leveringsprodukt (legges automatisk til som valg i kundeportalen)
   </label>
   <label className="check" style={{ marginTop: 4 }}>
-    <input type="checkbox" checked={form.showWholegrainInDeclaration !== false} onChange={(e) => setForm({ ...form, showWholegrainInDeclaration: e.target.checked })} />
+    <input type="checkbox" disabled={readOnly} checked={form.showWholegrainInDeclaration !== false} onChange={(e) => setForm({ ...form, showWholegrainInDeclaration: e.target.checked })} />
     Vis grovhet i deklarasjon
   </label>
 
@@ -3845,6 +3862,7 @@ th{background:#f3f4f6}
       <input
         type="number"
         value={form.portionsPerWhole}
+        disabled={readOnly}
         onChange={(e) => setForm({ ...form, portionsPerWhole: e.target.value })}
         placeholder="f.eks. 12"
       />
@@ -3852,15 +3870,15 @@ th{background:#f3f4f6}
   )}
 
   <label>Valgt kundepris inkl. mva
-    <input type="number" value={form.customerPrice} onChange={(e) => setForm({ ...form, customerPrice: e.target.value })} />
+    <input type="number" value={form.customerPrice} disabled={readOnly} onChange={(e) => setForm({ ...form, customerPrice: e.target.value })} />
   </label>
 
   <label>Storkjøkkenpris eks. mva
-    <input type="number" value={form.storkjokkenPriceExVat} onChange={(e) => setForm({ ...form, storkjokkenPriceExVat: e.target.value })} placeholder="Valgfritt" />
+    <input type="number" value={form.storkjokkenPriceExVat} disabled={readOnly} onChange={(e) => setForm({ ...form, storkjokkenPriceExVat: e.target.value })} placeholder="Valgfritt" />
   </label>
 
   <label>Målmargin %
-    <input type="number" value={form.targetMargin} onChange={(e) => setForm({ ...form, targetMargin: e.target.value })} />
+    <input type="number" value={form.targetMargin} disabled={readOnly} onChange={(e) => setForm({ ...form, targetMargin: e.target.value })} />
   </label>
 </div>
 
@@ -3882,6 +3900,7 @@ th{background:#f3f4f6}
           <label>Instruksjoner (fremgangsmåte/notater for kjøkken/bakeri)
             <textarea
               value={form.instructions || ""}
+              disabled={readOnly}
               onChange={(e) => setForm({ ...form, instructions: e.target.value })}
               placeholder="F.eks. 'Bløtlegges dagen før', 'Elt 5+7 minutter', 'Hvile 30 min'..."
               rows={4}
@@ -3915,14 +3934,14 @@ th{background:#f3f4f6}
         <div className="soft-box">
           <h2>Ingredienser / innhold</h2>
           <div className="form-grid five">
-            <select value={line.itemType} onChange={(e) => { setLine({ ...line, itemType: e.target.value as ProductLine["itemType"], itemId: "" }); setLineSearch(""); }}>
+            <select value={line.itemType} disabled={readOnly} onChange={(e) => { setLine({ ...line, itemType: e.target.value as ProductLine["itemType"], itemId: "" }); setLineSearch(""); }}>
               <option value="material">Råvare</option>
               <option value="recipe">Grunnoppskrift</option>
               <option value="product">Produkt</option>
             </select>
 
             <div className="search-picker">
-              <input value={lineSearch || lineItemName(line.itemType, line.itemId)} onChange={(e) => { setLineSearch(e.target.value); setLine({ ...line, itemId: "" }); }} placeholder="Søk og velg" />
+              <input value={lineSearch || lineItemName(line.itemType, line.itemId)} disabled={readOnly} onChange={(e) => { setLineSearch(e.target.value); setLine({ ...line, itemId: "" }); }} placeholder="Søk og velg" />
               {lineSearch && (
                 <div className="search-dropdown inline">
                   {lineOptions(line.itemType, lineSearch).map((item) => (
@@ -3934,14 +3953,15 @@ th{background:#f3f4f6}
               )}
             </div>
 
-            <input type="number" value={line.amount} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" />
+            <input type="number" value={line.amount} disabled={readOnly} onChange={(e) => setLine({ ...line, amount: e.target.value })} placeholder="Mengde" />
             <input
   type="number"
   value={line.wastePercent}
+  disabled={readOnly}
   onChange={(e) => setLine({ ...line, wastePercent: e.target.value })}
   placeholder="Svinn %"
 />
-           <select value={line.unit} onChange={(e) => setLine({ ...line, unit: e.target.value as ProductLine["unit"] })}>
+           <select value={line.unit} disabled={readOnly} onChange={(e) => setLine({ ...line, unit: e.target.value as ProductLine["unit"] })}>
               <option value="kg">kg</option>
               <option value="liter">liter</option>
               <option value="stk">stk</option>
@@ -3949,10 +3969,11 @@ th{background:#f3f4f6}
             </select>
             <input
               value={line.groupLabel}
+              disabled={readOnly}
               onChange={(e) => setLine({ ...line, groupLabel: e.target.value })}
               placeholder="Gruppe i produksjon (valgfritt), f.eks. Albondigas"
             />
-            <button className="btn" onClick={addLine}>Legg til</button>
+            <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addLine}>Legg til</button>
           </div>
           <p style={{ color: "#64748b", fontSize: 13, marginTop: -6 }}>
             Bruk samme gruppenavn på flere linjer (f.eks. "Albondigas") for å samle dem under en egen overskrift i produksjonsgrunnlaget. Stå tomt for vanlig flat liste.
@@ -3978,6 +3999,7 @@ th{background:#f3f4f6}
                     <td colSpan={7} style={{ padding: "6px 10px" }}>
                       <input
                         value={l.groupLabel}
+                        disabled={readOnly}
                         onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
                         style={{ fontWeight: 700, fontSize: 14, border: "none", background: "transparent", width: "100%", outline: "none" }}
                         placeholder="Gruppenavn"
@@ -3987,7 +4009,7 @@ th{background:#f3f4f6}
                 )}
                 <tr style={{ background: l.groupLabel ? (Math.abs(hashCode(l.groupLabel)) % 2 === 0 ? "#f8fafc" : "#eef2ff") : "white", borderTop: isGroupFirstLine(draftLines, i) && i > 0 && !l.groupLabel ? "3px solid #94a3b8" : undefined }}>
                   <td>
-                    <select value={l.itemType} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}>
+                    <select value={l.itemType} disabled={readOnly} onChange={(e) => updateDraftLine(i, { itemType: e.target.value as ProductLine["itemType"], itemId: "" })}>
                       <option value="material">Råvare</option>
                       <option value="recipe">Grunnoppskrift</option>
                       <option value="product">Produkt</option>
@@ -3997,6 +4019,7 @@ th{background:#f3f4f6}
                     <div className="search-picker">
                       <input
                         value={editLineSearch[i] ?? lineItemName(l.itemType, l.itemId)}
+                        disabled={readOnly}
                         onChange={(e) => setEditLineSearch({ ...editLineSearch, [i]: e.target.value })}
                         onFocus={() => setEditLineSearch({ ...editLineSearch, [i]: "" })}
                         placeholder="Søk og velg"
@@ -4023,25 +4046,26 @@ th{background:#f3f4f6}
                       )}
                     </div>
                   </td>
-                  <td><input type="number" value={l.amount} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
+                  <td><input type="number" value={l.amount} disabled={readOnly} onChange={(e) => updateDraftLine(i, { amount: Number(e.target.value) || 0 })} /></td>
                   <td>
   <input
     type="number"
     value={(l as any).wastePercent || ""}
+    disabled={readOnly}
     onChange={(e) =>
       updateDraftLine(i, { wastePercent: Number(e.target.value) || 0 })
     }
     placeholder="%"
   />
 </td>
-                  <td><select value={l.unit} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
+                  <td><select value={l.unit} disabled={readOnly} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
                   <td>{currency(lineCost(l))}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    <button className="link danger" onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
+                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
                     {isGroupFirstLine(draftLines, i) && (
                       <>
-                        <button className="btn" style={{ marginLeft: 6, fontSize: 15, padding: "4px 10px" }} disabled={i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
-                        <button className="btn" style={{ marginLeft: 4, fontSize: 15, padding: "4px 10px" }} disabled={i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
+                        <button className="btn" style={{ marginLeft: 6, fontSize: 15, padding: "4px 10px" }} disabled={readOnly || i === 0} onClick={() => moveGroup(i, -1)} title="Flytt gruppe opp">↑</button>
+                        <button className="btn" style={{ marginLeft: 4, fontSize: 15, padding: "4px 10px" }} disabled={readOnly || i === draftLines.length - 1} onClick={() => moveGroup(i, 1)} title="Flytt gruppe ned">↓</button>
                       </>
                     )}
                   </td>
@@ -4056,12 +4080,12 @@ th{background:#f3f4f6}
           <div className="soft-box">
             <h2>Emballasje</h2>
             <div className="form-grid three">
-              <select value={packLine.packagingId} onChange={(e) => setPackLine({ ...packLine, packagingId: e.target.value })}>
+              <select value={packLine.packagingId} disabled={readOnly} onChange={(e) => setPackLine({ ...packLine, packagingId: e.target.value })}>
                 <option value="">Velg emballasje</option>
                 {data.packaging.map((p) => <option key={p.id} value={p.id}>{p.name} · {currency(p.price)}</option>)}
               </select>
-              <input type="number" value={packLine.quantity} onChange={(e) => setPackLine({ ...packLine, quantity: e.target.value })} placeholder="Antall" />
-              <button className="btn" onClick={addPackaging}>Legg til</button>
+              <input type="number" value={packLine.quantity} disabled={readOnly} onChange={(e) => setPackLine({ ...packLine, quantity: e.target.value })} placeholder="Antall" />
+              <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addPackaging}>Legg til</button>
             </div>
 
             <table>
@@ -4070,10 +4094,10 @@ th{background:#f3f4f6}
                   const pack = data.packaging.find((x) => x.id === p.packagingId);
                   return (
                     <tr key={i}>
-                      <td><select value={p.packagingId} onChange={(e) => updateDraftPackaging(i, { packagingId: e.target.value })}>{data.packaging.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
-                      <td><input type="number" value={p.quantity} onChange={(e) => updateDraftPackaging(i, { quantity: Number(e.target.value) || 0 })} /></td>
+                      <td><select value={p.packagingId} disabled={readOnly} onChange={(e) => updateDraftPackaging(i, { packagingId: e.target.value })}>{data.packaging.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
+                      <td><input type="number" value={p.quantity} disabled={readOnly} onChange={(e) => updateDraftPackaging(i, { quantity: Number(e.target.value) || 0 })} /></td>
                       <td>{currency((pack?.price || 0) * p.quantity)}</td>
-                      <td><button className="link danger" onClick={() => setDraftPackaging((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td>
+                      <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setDraftPackaging((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button></td>
                     </tr>
                   );
                 })}
@@ -4097,8 +4121,8 @@ th{background:#f3f4f6}
               </p>
 
               <div className="form-grid three">
-                <input value={newCourseName} onChange={(e) => setNewCourseName(e.target.value)} placeholder="Ny rettkategori, f.eks. Forrett" />
-                <button className="btn active" onClick={addMenuCourse}>Legg til rettkategori</button>
+                <input value={newCourseName} disabled={readOnly} onChange={(e) => setNewCourseName(e.target.value)} placeholder="Ny rettkategori, f.eks. Forrett" />
+                <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addMenuCourse}>Legg til rettkategori</button>
                 <div />
               </div>
 
@@ -4106,12 +4130,13 @@ th{background:#f3f4f6}
                 <div key={course.id} className="soft-box" style={{ background: "white" }}>
                   <div className="between">
                     <h3>{course.name}</h3>
-                    <button className="link danger" onClick={() => removeMenuCourse(course.id)}>Slett kategori</button>
+                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeMenuCourse(course.id)}>Slett kategori</button>
                   </div>
 
                   <div className="search-picker">
                     <input
                       value={courseOptionSearch[course.id] || ""}
+                      disabled={readOnly}
                       onChange={(e) => setCourseOptionSearch((prev) => ({ ...prev, [course.id]: e.target.value }))}
                       placeholder="Søk opp produkt å legge til som alternativ"
                     />
@@ -4140,7 +4165,7 @@ th{background:#f3f4f6}
                           <tr key={opt.id}>
                             <td>{p?.name || "Ukjent produkt"}</td>
                             <td>{currency(p ? productUnitCost(p) : 0)}</td>
-                            <td><button className="link danger" onClick={() => removeCourseOption(course.id, opt.id)}>Slett</button></td>
+                            <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeCourseOption(course.id, opt.id)}>Slett</button></td>
                           </tr>
                         );
                       })}
@@ -4173,17 +4198,18 @@ th{background:#f3f4f6}
   return (
   <section>
     <div className="card">
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
       <div className="between" style={{ justifyContent: "flex-end" }}>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={() => setShowProductListEditor(true)}>
+          <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setShowProductListEditor(true)}>
             Lag produktliste
           </button>
 
-          <button className="btn" onClick={() => setShowPriceEditor(!showPriceEditor)}>
+          <button className="btn" disabled={readOnly && !showPriceEditor} title={readOnly && !showPriceEditor ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setShowPriceEditor(!showPriceEditor)}>
             {showPriceEditor ? "Lukk prisredigering" : "Rediger flere priser"}
           </button>
 
-          <button className="btn active" onClick={startNewProduct}>
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={startNewProduct}>
             Nytt produkt
           </button>
         </div>
@@ -4223,7 +4249,7 @@ th{background:#f3f4f6}
         <div className="soft-box">
           <div className="form-grid three">
             <label>Planlagt dato (valgfritt – stå tom for å endre med en gang)
-              <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} min={today()} />
+              <input type="date" value={scheduledDate} disabled={readOnly} onChange={(e) => setScheduledDate(e.target.value)} min={today()} />
             </label>
           </div>
           <table>
@@ -4252,18 +4278,18 @@ th{background:#f3f4f6}
                     <td>{currency(p.customerPrice)}</td>
                     <td>{p.storkjokkenPriceExVat ? currency(p.storkjokkenPriceExVat) : "-"}</td>
                     <td>
-                      <input type="number" value={draft.customerPrice || ""} onChange={(e) => setPriceDraft(p.id, "customerPrice", e.target.value)} placeholder={String(p.customerPrice)} />
+                      <input type="number" value={draft.customerPrice || ""} disabled={readOnly} onChange={(e) => setPriceDraft(p.id, "customerPrice", e.target.value)} placeholder={String(p.customerPrice)} />
                       <div style={{ color: "#94a3b8", fontSize: 11 }}>Varekost nå: {num(nowPct, 1)}% → Oppdatert: {num(updatedPct, 1)}%</div>
                     </td>
                     <td>
-                      <input type="number" value={draft.storkjokkenPriceExVat || ""} onChange={(e) => setPriceDraft(p.id, "storkjokkenPriceExVat", e.target.value)} placeholder={p.storkjokkenPriceExVat ? String(p.storkjokkenPriceExVat) : ""} />
+                      <input type="number" value={draft.storkjokkenPriceExVat || ""} disabled={readOnly} onChange={(e) => setPriceDraft(p.id, "storkjokkenPriceExVat", e.target.value)} placeholder={p.storkjokkenPriceExVat ? String(p.storkjokkenPriceExVat) : ""} />
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          <button className="btn active" style={{ marginTop: 10 }} onClick={saveBulkPriceChanges}>
+          <button className="btn active" style={{ marginTop: 10 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveBulkPriceChanges}>
             {scheduledDate && scheduledDate > today() ? `Planlegg endring til ${formatDateNo(scheduledDate)}` : "Lagre endringer nå"}
           </button>
         </div>
@@ -4303,19 +4329,21 @@ th{background:#f3f4f6}
 <button className="btn" onClick={() => printNutritionLabel(p)}>
   Deklarasjon
 </button>
-<button className="btn" onClick={() => editProduct(p)}>
+<button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => editProduct(p)}>
   Rediger
 </button>
-<button className="btn" onClick={() => copyProduct(p)}>Kopier</button>
+<button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => copyProduct(p)}>Kopier</button>
 <button className="btn" onClick={() => printProduct(p)}>
   Print
 </button>
 <button
   className="btn"
+  disabled={readOnly}
+  title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
   style={{
-    background: "#dc2626",
-    color: "white",
-    borderColor: "#dc2626",
+    background: readOnly ? undefined : "#dc2626",
+    color: readOnly ? undefined : "white",
+    borderColor: readOnly ? undefined : "#dc2626",
   }}
   onClick={() => {
     if (!confirm(`Sikker på at du vil slette "${p.name}"?`)) {
@@ -4361,8 +4389,8 @@ th{background:#f3f4f6}
             <p>{wideProduct.type} · {wideProduct.category} · gir {num(wideProduct.yieldAmount)} {wideProduct.yieldUnit}</p>
           </div>
           <div>
-            <button className="btn" onClick={() => editProduct(wideProduct)}>Rediger</button>
-            <button className="btn" onClick={() => copyProduct(wideProduct)}>
+            <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => editProduct(wideProduct)}>Rediger</button>
+            <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => copyProduct(wideProduct)}>
   Kopier
 </button>
             <button className="btn" onClick={() => printProduct(wideProduct)}>Print</button>
@@ -4451,6 +4479,7 @@ th{background:#f3f4f6}
               Type liste
               <select
                 value={listMode}
+                disabled={readOnly}
                 onChange={(e) => {
                   const kind = e.target.value as ProductListKind;
                   setListMode(kind);
@@ -4471,13 +4500,13 @@ th{background:#f3f4f6}
 
             <label>
               Navn på liste
-              <input value={listName} onChange={(e) => setListName(e.target.value)} />
+              <input value={listName} disabled={readOnly} onChange={(e) => setListName(e.target.value)} />
             </label>
 
-            <button className="btn active" onClick={createProductList}>Lagre liste</button>
+            <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={createProductList}>Lagre liste</button>
           </div>
 
-          <button className="btn" onClick={() => setListSelectedIds(filtered.map((p) => p.id))}>
+          <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setListSelectedIds(filtered.map((p) => p.id))}>
             Velg alle filtrerte produkter
           </button>
 
@@ -4486,6 +4515,7 @@ th{background:#f3f4f6}
             <textarea
               className="textarea"
               value={listIntroText}
+              disabled={readOnly}
               onChange={(e) => setListIntroText(e.target.value)}
               placeholder="F.eks. gyldig fra dato, bestillingsinfo osv."
             />
@@ -4496,6 +4526,7 @@ th{background:#f3f4f6}
               <label key={p.id} className="check product-list-check">
                 <input
                   type="checkbox"
+                  disabled={readOnly}
                   checked={listSelectedIds.includes(p.id)}
                   onChange={() => toggleListProduct(p.id)}
                 />
@@ -4527,6 +4558,8 @@ th{background:#f3f4f6}
               <button className="btn" onClick={() => printProductList(list)}>Print</button>
               <button
                 className="btn danger"
+                disabled={readOnly}
+                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                 onClick={() =>
                   updateData({
                     productLists: (data.productLists || []).filter((x) => x.id !== list.id),
@@ -12586,7 +12619,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
   );
 });
 
-function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void }) {
+function CategoryEditor({ values, newValue, setNewValue, onSave, disabled }: { values: string[]; newValue: string; setNewValue: (v: string) => void; onSave: (next: string[]) => void; disabled?: boolean }) {
   const [localValues, setLocalValues] = useState(values);
 
   return (
@@ -12596,10 +12629,11 @@ function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: str
           <div key={i} className="editable-row">
             <input
               value={v}
+              disabled={disabled}
               onChange={(e) => setLocalValues(localValues.map((x, ix) => ix === i ? e.target.value : x))}
               onBlur={() => onSave(localValues)}
             />
-            <button className="link danger" onClick={() => {
+            <button className="link danger" disabled={disabled} title={disabled ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
               const next = localValues.filter((_, ix) => ix !== i);
               setLocalValues(next);
               onSave(next);
@@ -12608,8 +12642,8 @@ function CategoryEditor({ values, newValue, setNewValue, onSave }: { values: str
         ))}
       </div>
       <div className="form-grid three">
-        <input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="Ny kategori" />
-        <button className="btn active" onClick={() => {
+        <input value={newValue} disabled={disabled} onChange={(e) => setNewValue(e.target.value)} placeholder="Ny kategori" />
+        <button className="btn active" disabled={disabled} title={disabled ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
           if (!newValue.trim()) return;
           const next = [...localValues, newValue.trim()];
           setLocalValues(next);
@@ -12671,6 +12705,8 @@ function GlobalStyles() {
   background: #fca5a5;
   }
     .btn.active { background: #0f172a; color: white; border-color: #0f172a; }
+    .btn:disabled, .btn:disabled:hover { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; opacity: .7; cursor: not-allowed; }
+    input:disabled, select:disabled, textarea:disabled { background: #f8fafc; color: #94a3b8; cursor: not-allowed; }
     .list { display: block; width: 100%; text-align: left; border: 1px solid #e2e8f0; background: white; border-radius: 12px; padding: 12px; margin: 8px 0; cursor: pointer; }
     .active-list { background: #0f172a; color: white; }
     .metric-row { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin: 12px 0; }
