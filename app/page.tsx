@@ -1291,14 +1291,14 @@ return (
       <div className="main-content">
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
-        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} />}
+        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} />}
-        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} />}
-        {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
-        {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
-        {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} readOnly={!canEdit("orders")} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} readOnly={!canEdit("production")} />}
+        {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
+        {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} />}
+        {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
 
@@ -1803,7 +1803,7 @@ const bg = isToday ? "#dcfce7"
   );
 }
 
-function MaterialsTab({ data, updateData, updateMaterialsRpc, updateListRpc }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateMaterialsRpc: (patch: Record<string, any>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void }) {
+function MaterialsTab({ data, updateData, updateMaterialsRpc, updateListRpc, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateMaterialsRpc: (patch: Record<string, any>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; readOnly: boolean }) {
   const blank = {
     id: "",
     name: "",
@@ -2000,16 +2000,17 @@ function defaultRetailMargin(category: string) {
 }
 
   return <section className="card">
-    <div className="between" style={{ justifyContent: "flex-end" }}><button className="btn active" onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>
+    {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
+    <div className="between" style={{ justifyContent: "flex-end" }}><button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>
 
     {showForm && <div className="soft-box">
       <div className="form-grid">
-        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" />
-        <label>Leverandør<input value={form.supplier || ""} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label>
-        <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select>
-        <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select>
-        <label>Pakningsstørrelse<input type="number" value={form.packageSize} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label>
-        <label>Pakningspris eks. mva<input type="number" value={form.packagePrice} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label>
+        <input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" />
+        <label>Leverandør<input value={form.supplier || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label>
+        <select value={form.category} disabled={readOnly} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select>
+        <select value={form.unit} disabled={readOnly} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select>
+        <label>Pakningsstørrelse<input type="number" value={form.packageSize} disabled={readOnly} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label>
+        <label>Pakningspris eks. mva<input type="number" value={form.packagePrice} disabled={readOnly} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label>
         <Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} />
       </div>
 
@@ -2037,7 +2038,7 @@ function defaultRetailMargin(category: string) {
         const finalMargin = marginPercentFrom(retailExVat, costExVat);
         const finalFoodCost = foodCostPercentFrom(retailExVat, costExVat);
 
-        return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="0" value={form.deliMargin || String(defaultRetailMargin(form.category))} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label>{isMineralvann ? (<><Metric label="Anbefalt pris inkl. 15% mva (med seg)" value={currency(suggested15)} dark /><Metric label="Anbefalt pris inkl. 25% mva (i lokalet)" value={currency(suggested25)} dark /></>) : (<Metric label={`Anbefalt utsalgspris inkl. mva${isAlcohol ? " (25%)" : ""}`} value={currency(suggestedIncVat)} dark />)}<label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label>{isMineralvann ? (<div style={{ display: "flex", gap: 8 }}><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested15) })}>Bruk 15%-pris</button><button className="btn" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggested25) })}>Bruk 25%-pris</button></div>) : (<button className="btn active" type="button" onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button>)}</div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label={`Valgt pris eks. mva${isMineralvann ? " (ved 15%)" : ""}`} value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /><Metric label="Varenr (til nettbutikk)" value={(editingId && data.materials.find((x) => x.id === editingId)?.productNumber) || "Genereres ved lagring"} /></div></div>;
+        return <div className="soft-box" style={{ gridColumn: "1 / -1" }}><h3>Deli / videresalg</h3><div className="form-grid four"><label>Ønsket fortjeneste %<input type="number" min="0" value={form.deliMargin || String(defaultRetailMargin(form.category))} disabled={readOnly} onChange={(e) => setForm({ ...form, deliMargin: e.target.value })} /></label>{isMineralvann ? (<><Metric label="Anbefalt pris inkl. 15% mva (med seg)" value={currency(suggested15)} dark /><Metric label="Anbefalt pris inkl. 25% mva (i lokalet)" value={currency(suggested25)} dark /></>) : (<Metric label={`Anbefalt utsalgspris inkl. mva${isAlcohol ? " (25%)" : ""}`} value={currency(suggestedIncVat)} dark />)}<label>Valgt utsalgspris inkl. mva<input type="number" value={form.retailPrice} disabled={readOnly} onChange={(e) => setForm({ ...form, retailPrice: e.target.value })} /></label>{isMineralvann ? (<div style={{ display: "flex", gap: 8 }}><button className="btn" type="button" disabled={readOnly} onClick={() => setForm({ ...form, retailPrice: String(suggested15) })}>Bruk 15%-pris</button><button className="btn" type="button" disabled={readOnly} onClick={() => setForm({ ...form, retailPrice: String(suggested25) })}>Bruk 25%-pris</button></div>) : (<button className="btn active" type="button" disabled={readOnly} onClick={() => setForm({ ...form, retailPrice: String(suggestedIncVat) })}>Bruk anbefalt pris</button>)}</div><div className="metric-row"><Metric label="Innkjøpspris eks. mva / enhet" value={currency(costExVat)} /><Metric label={`Valgt pris eks. mva${isMineralvann ? " (ved 15%)" : ""}`} value={currency(retailExVat)} /><Metric label="Varekost" value={`${num(finalFoodCost, 1)} %`} /><Metric label="Fortjeneste" value={`${num(finalMargin, 1)} %`} tone={marginTone(finalMargin)} /><Metric label="Varenr (til nettbutikk)" value={(editingId && data.materials.find((x) => x.id === editingId)?.productNumber) || "Genereres ved lagring"} /></div></div>;
       })()}
 
       <label>
@@ -2045,6 +2046,7 @@ function defaultRetailMargin(category: string) {
 
   <input
     value={form.ingredients}
+    disabled={readOnly}
     onChange={(e) => setForm({ ...form, ingredients: e.target.value })}
     placeholder="F.eks. fløte, salt / vann, soyabønner, sukker"
   />
@@ -2055,6 +2057,7 @@ function defaultRetailMargin(category: string) {
       Brødskala-type
       <select
         value={form.breadScaleType}
+        disabled={readOnly}
         onChange={(e) => setForm({ ...form, breadScaleType: e.target.value as Material["breadScaleType"] })}
       >
         <option value="none">Ikke med i grovhet</option>
@@ -2072,6 +2075,7 @@ function defaultRetailMargin(category: string) {
       <input
         type="number"
         value={form.breadScaleFlourPercent}
+        disabled={readOnly}
         onChange={(e) => setForm({ ...form, breadScaleFlourPercent: e.target.value })}
         placeholder="100 for mel, 50 for surdeig"
       />
@@ -2080,11 +2084,11 @@ function defaultRetailMargin(category: string) {
 )}
 
       <h3>Allergier</h3>
-      <div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div>
+      <div className="chips">{defaultAllergens.map((a) => { const arr = form.allergens.split(",").map((x) => x.trim()).filter(Boolean); const active = arr.includes(a); return <button key={a} type="button" className={active ? "btn active" : "btn"} disabled={readOnly} onClick={() => setForm({ ...form, allergens: (active ? arr.filter((x) => x !== a) : [...arr, a]).join(", ") })}>{a}</button>; })}</div>
       <h3>Næring per 100g/ml</h3>
-      <div className="form-grid five">{[["kj", "kJ"], ["kcal", "Kcal"], ["fat", "Fett"], ["saturatedFat", "Mettet fett"], ["protein", "Protein"], ["carbs", "Karbo"], ["sugars", "Sukkerarter"], ["addedSugar", "Tilsatt sukker"], ["fiber", "Kostfiber"], ["salt", "Salt"]].map(([k, label]) => <label key={k}>{label}<input type="number" value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>)}</div>
-      <label className="check"><input type="checkbox" checked={form.isWholegrain} onChange={(e) => setForm({ ...form, isWholegrain: e.target.checked })} /> Fullkorn/grov råvare</label>
-      <button className="btn active" onClick={save}>Lagre</button><button className="btn" onClick={() => { reset(); setShowForm(false); }}>Avbryt</button>
+      <div className="form-grid five">{[["kj", "kJ"], ["kcal", "Kcal"], ["fat", "Fett"], ["saturatedFat", "Mettet fett"], ["protein", "Protein"], ["carbs", "Karbo"], ["sugars", "Sukkerarter"], ["addedSugar", "Tilsatt sukker"], ["fiber", "Kostfiber"], ["salt", "Salt"]].map(([k, label]) => <label key={k}>{label}<input type="number" value={(form as any)[k]} disabled={readOnly} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>)}</div>
+      <label className="check"><input type="checkbox" checked={form.isWholegrain} disabled={readOnly} onChange={(e) => setForm({ ...form, isWholegrain: e.target.checked })} /> Fullkorn/grov råvare</label>
+      <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={save}>Lagre</button><button className="btn" onClick={() => { reset(); setShowForm(false); }}>Avbryt</button>
     </div>}
 
     <input value={search} onChange={(e) => { setSearch(e.target.value); setMaterialPage(1); }} placeholder="Søk råvare / leverandør" />
@@ -2165,11 +2169,11 @@ function defaultRetailMargin(category: string) {
     </>
   )}
 </td>
-          <td><input className="inline-cell-input" value={m.supplier || ""} onChange={(e) => updateMaterialInline(m.id, { supplier: e.target.value })} placeholder="Leverandør" /></td>
-          <td><select className="inline-cell-input" value={m.category} onChange={(e) => updateMaterialInline(m.id, { category: e.target.value, isForResale: e.target.value === "Deli" })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select></td>
-          <td><div className="inline-packaging-grid"><input className="inline-cell-input" type="number" value={m.packageSize} onChange={(e) => { const packageSize = Number(e.target.value) || 1; updateMaterialInline(m.id, { packageSize, packagePrice: m.pricePerUnit * packageSize }, true); }} /><select className="inline-cell-input" value={m.unit} onChange={(e) => updateMaterialInline(m.id, { unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select></div></td>
-          <td><input className="inline-cell-input" type="number" value={m.pricePerUnit} onChange={(e) => { const pricePerUnit = Number(e.target.value) || 0; updateMaterialInline(m.id, { pricePerUnit, packagePrice: pricePerUnit * (m.packageSize || 1) }, true); }} /></td>
-          <td><input className="inline-cell-input" type="number" value={m.retailPrice || ""} onChange={(e) => updateMaterialInline(m.id, { retailPrice: Number(e.target.value) || undefined })} placeholder="-" /></td>
+          <td><input className="inline-cell-input" value={m.supplier || ""} disabled={readOnly} onChange={(e) => updateMaterialInline(m.id, { supplier: e.target.value })} placeholder="Leverandør" /></td>
+          <td><select className="inline-cell-input" value={m.category} disabled={readOnly} onChange={(e) => updateMaterialInline(m.id, { category: e.target.value, isForResale: e.target.value === "Deli" })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select></td>
+          <td><div className="inline-packaging-grid"><input className="inline-cell-input" type="number" value={m.packageSize} disabled={readOnly} onChange={(e) => { const packageSize = Number(e.target.value) || 1; updateMaterialInline(m.id, { packageSize, packagePrice: m.pricePerUnit * packageSize }, true); }} /><select className="inline-cell-input" value={m.unit} disabled={readOnly} onChange={(e) => updateMaterialInline(m.id, { unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select></div></td>
+          <td><input className="inline-cell-input" type="number" value={m.pricePerUnit} disabled={readOnly} onChange={(e) => { const pricePerUnit = Number(e.target.value) || 0; updateMaterialInline(m.id, { pricePerUnit, packagePrice: pricePerUnit * (m.packageSize || 1) }, true); }} /></td>
+          <td><input className="inline-cell-input" type="number" value={m.retailPrice || ""} disabled={readOnly} onChange={(e) => updateMaterialInline(m.id, { retailPrice: Number(e.target.value) || undefined })} placeholder="-" /></td>
 <td>
   {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].includes(m.category) && m.retailPrice
     ? `${num(
@@ -2182,7 +2186,7 @@ function defaultRetailMargin(category: string) {
     : "-"}
 </td>      
 <td>{(m.allergens || []).join(", ") || "-"}</td>
-          <td><button className="btn" onClick={() => { edit(m); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Rediger</button><button style={{ marginLeft: 8 }} className="btn danger" onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td>
+          <td><button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { edit(m); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Rediger</button><button style={{ marginLeft: 8 }} className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { if (confirm("Slette råvaren?")) updateData({ materials: data.materials.filter((x) => x.id !== m.id) }); }}>Slett</button></td>
           <td>{m.priceUpdatedAt ? formatDateNo(m.priceUpdatedAt.slice(0, 10)) : "-"}</td>
         </tr>;
       })}</tbody>
@@ -4626,7 +4630,7 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, readOnly }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -4634,6 +4638,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   recipeAllergens: (r: Recipe) => string[];
   setTab: (t: Tab) => void;
   setRentalOfferToOpen: (id: string | null) => void;
+  readOnly: boolean;
 }) {
   const emptyOrder = (): Order => ({
     id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
@@ -5420,6 +5425,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
   const calSelectedOrders = calDayOrders(calendarSelectedDate);
   return (
     <section className="card">
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
       <div className="between" style={{ justifyContent: "flex-end" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
@@ -5438,7 +5444,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           }}>
             📅 Kopier kalender-URL
           </button>
-          <button className="btn active" onClick={() => { setShowNewOrder(!showNewOrder); setShowWebshopImport(false); }}>
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { setShowNewOrder(!showNewOrder); setShowWebshopImport(false); }}>
             {showNewOrder ? "Skjul skjema" : "Ny ordre"}
           </button>
         </div>
@@ -5451,9 +5457,9 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
             Lim inn e-posttekst fra Postmark/webshop. Systemet matcher på produktnummer (f.eks. CA000004).
             URL-lenker og støytekst fjernes automatisk.
           </p>
-          <textarea className="textarea" value={webshopRawText} onChange={(e) => setWebshopRawText(e.target.value)} placeholder="Lim inn e-posttekst her..." style={{ minHeight: 200 }} />
+          <textarea className="textarea" value={webshopRawText} disabled={readOnly} onChange={(e) => setWebshopRawText(e.target.value)} placeholder="Lim inn e-posttekst her..." style={{ minHeight: 200 }} />
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-            <button className="btn active" onClick={parseWebshopOrder}>Les ordre</button>
+            <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={parseWebshopOrder}>Les ordre</button>
             <button className="btn" onClick={() => { setWebshopRawText(""); setWebshopPreview(null); setWebshopUnmatched([]); }}>Tøm</button>
           </div>
           {webshopPreview && (
@@ -5484,7 +5490,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                   <ul>{webshopUnmatched.map((line, i) => <li key={i}>{line}</li>)}</ul>
                 </div>
               )}
-              <button className="btn active" onClick={createWebshopOrder}>
+              <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={createWebshopOrder}>
                 {data.orders.find((o) => o.orderNumber === webshopPreview.orderNumber && !o.deletedAt) ? "Oppdater eksisterende ordre" : "Opprett ordre"}
               </button>
             </div>
@@ -5496,51 +5502,51 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
         <div className="soft-box full-width">
           <h3>{editingOrderId ? "Rediger ordre" : "Ny ordre"}</h3>
           <div className="form-grid four">
-            <label>Ordrenr<input value={form.orderNumber || ""} onChange={(e) => setForm({ ...form, orderNumber: e.target.value })} placeholder="F.eks. 686488" /></label>
+            <label>Ordrenr<input value={form.orderNumber || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, orderNumber: e.target.value })} placeholder="F.eks. 686488" /></label>
             <label>Ordretype
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as Order["type"], customerType: e.target.value === "storkjokken" ? "storkjokken" : form.customerType })}>
+              <select value={form.type} disabled={readOnly} onChange={(e) => setForm({ ...form, type: e.target.value as Order["type"], customerType: e.target.value === "storkjokken" ? "storkjokken" : form.customerType })}>
                 <option value="catering">Catering</option><option value="bakeri">Bakeri</option>
                 <option value="pasmuurt">Påsmurt</option><option value="egenprodusert">Egenprodusert</option>
                 <option value="storkjokken">Storkjøkken</option>
               </select>
             </label>
             <label>Kundetype
-              <select value={form.customerType} onChange={(e) => setForm({ ...form, customerType: e.target.value as Order["customerType"] })}>
+              <select value={form.customerType} disabled={readOnly} onChange={(e) => setForm({ ...form, customerType: e.target.value as Order["customerType"] })}>
                 <option value="privat">Privat</option><option value="bedrift">Bedrift</option><option value="storkjokken">Storkjøkken</option>
               </select>
             </label>
-            <label>Dato<input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-            <label>Tid<input value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} onBlur={(e) => setForm({ ...form, time: formatTimeInput(e.target.value) })} placeholder="f.eks. 1015" /></label>
+            <label>Dato<input type="date" value={form.date} disabled={readOnly} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
+            <label>Tid<input value={form.time} disabled={readOnly} onChange={(e) => setForm({ ...form, time: e.target.value })} onBlur={(e) => setForm({ ...form, time: formatTimeInput(e.target.value) })} placeholder="f.eks. 1015" /></label>
           </div>
           {form.customerType === "bedrift" || form.customerType === "storkjokken" ? (
             <div className="form-grid four">
-              <label>Bedriftsnavn<input value={form.companyName || ""} onChange={(e) => setForm({ ...form, companyName: e.target.value })} /></label>
-              <label>Orgnr<input value={form.orgNumber || ""} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} /></label>
-              <label>Bedriftsadresse<input value={form.companyAddress || ""} onChange={(e) => setForm({ ...form, companyAddress: e.target.value })} /></label>
-              <label>Kontaktperson<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} /></label>
+              <label>Bedriftsnavn<input value={form.companyName || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, companyName: e.target.value })} /></label>
+              <label>Orgnr<input value={form.orgNumber || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} /></label>
+              <label>Bedriftsadresse<input value={form.companyAddress || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, companyAddress: e.target.value })} /></label>
+              <label>Kontaktperson<input value={form.customer} disabled={readOnly} onChange={(e) => setForm({ ...form, customer: e.target.value })} /></label>
             </div>
           ) : (
             <div className="form-grid four">
-              <label>Kundenavn<input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kunde" /></label>
+              <label>Kundenavn<input value={form.customer} disabled={readOnly} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kunde" /></label>
             </div>
           )}
           <div className="form-grid four">
-            <label>Telefon<input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
-            <label>Leveringsadresse<input value={form.deliveryAddress} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} /></label>
-            <label>Betalingsinfo<input value={form.paymentInfo || ""} onChange={(e) => setForm({ ...form, paymentInfo: e.target.value })} placeholder="F.eks. Betalt på nett" /></label>
+            <label>Telefon<input value={form.phone} disabled={readOnly} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+            <label>Leveringsadresse<input value={form.deliveryAddress} disabled={readOnly} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} /></label>
+            <label>Betalingsinfo<input value={form.paymentInfo || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, paymentInfo: e.target.value })} placeholder="F.eks. Betalt på nett" /></label>
             <label style={{ gridColumn: "1 / -1" }}>Notat
-              <textarea className="textarea" value={form.note || ""} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Fritekst, beskjed, info osv." />
+              <textarea className="textarea" value={form.note || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Fritekst, beskjed, info osv." />
             </label>
-            <label>Antall gjester<input type="number" value={form.guests} onChange={(e) => setForm({ ...form, guests: Number(e.target.value) || 0 })} /></label>
-            <label>Rabatt %<input type="number" value={form.discountPercent || 0} onChange={(e) => setForm({ ...form, discountPercent: Number(e.target.value) || 0 })} /></label>
+            <label>Antall gjester<input type="number" value={form.guests} disabled={readOnly} onChange={(e) => setForm({ ...form, guests: Number(e.target.value) || 0 })} /></label>
+            <label>Rabatt %<input type="number" value={form.discountPercent || 0} disabled={readOnly} onChange={(e) => setForm({ ...form, discountPercent: Number(e.target.value) || 0 })} /></label>
           </div>
           {form.type === "storkjokken" && (
             <div className="soft-box">
               <h3>Fast ordre / gjentagelse</h3>
-              <label className="check"><input type="checkbox" checked={!!form.isRecurring} onChange={(e) => setForm({ ...form, isRecurring: e.target.checked })} /> Dette er en fast/gjentagende ordre</label>
+              <label className="check"><input type="checkbox" checked={!!form.isRecurring} disabled={readOnly} onChange={(e) => setForm({ ...form, isRecurring: e.target.checked })} /> Dette er en fast/gjentagende ordre</label>
               {form.isRecurring && <>
-                <div className="chips">{["Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag", "Søndag"].map((day) => { const active = (form.recurringDays || []).includes(day); return <button key={day} type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, recurringDays: active ? (form.recurringDays || []).filter((d) => d !== day) : [...(form.recurringDays || []), day] })}>{day}</button>; })}</div>
-                <input value={form.recurringNote || ""} onChange={(e) => setForm({ ...form, recurringNote: e.target.value })} placeholder="Notat, f.eks. gjelder skoleåret" />
+                <div className="chips">{["Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag", "Søndag"].map((day) => { const active = (form.recurringDays || []).includes(day); return <button key={day} type="button" className={active ? "btn active" : "btn"} disabled={readOnly} onClick={() => setForm({ ...form, recurringDays: active ? (form.recurringDays || []).filter((d) => d !== day) : [...(form.recurringDays || []), day] })}>{day}</button>; })}</div>
+                <input value={form.recurringNote || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, recurringNote: e.target.value })} placeholder="Notat, f.eks. gjelder skoleåret" />
               </>}
             </div>
           )}
@@ -5549,6 +5555,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
             <div className="search-picker">
               <input
                 value={addProductSearch || (data.products.find((p) => p.id === lineToAdd.productId)?.name || "")}
+                disabled={readOnly}
                 onChange={(e) => {
                   setAddProductSearch(e.target.value);
                   setLineToAdd({ ...lineToAdd, productId: "" });
@@ -5579,8 +5586,8 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                 </div>
               )}
             </div>
-            <input type="number" value={lineToAdd.quantity} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
-            <button className="btn" onClick={addOrderLine}>Legg til</button>
+            <input type="number" value={lineToAdd.quantity} disabled={readOnly} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
+            <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addOrderLine}>Legg til</button>
           </div>
 
           {(() => {
@@ -5604,23 +5611,23 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                       </div>
                       {rows.map((row, i) => (
                         <div key={i} className="form-grid three" style={{ alignItems: "end" }}>
-                          <select value={row.productId} onChange={(e) => updateMenuSelectionRow(course.id, i, { productId: e.target.value })}>
+                          <select value={row.productId} disabled={readOnly} onChange={(e) => updateMenuSelectionRow(course.id, i, { productId: e.target.value })}>
                             <option value="">Velg alternativ</option>
                             {course.options.map((opt) => {
                               const p = data.products.find((x) => x.id === opt.productId);
                               return <option key={opt.id} value={opt.productId}>{p?.name || "Ukjent"}</option>;
                             })}
                           </select>
-                          <input type="number" value={row.guestCount || ""} onChange={(e) => updateMenuSelectionRow(course.id, i, { guestCount: Number(e.target.value) || 0 })} placeholder="Antall gjester" />
-                          <button className="link danger" onClick={() => removeMenuSelectionRow(course.id, i)}>Slett valg</button>
+                          <input type="number" value={row.guestCount || ""} disabled={readOnly} onChange={(e) => updateMenuSelectionRow(course.id, i, { guestCount: Number(e.target.value) || 0 })} placeholder="Antall gjester" />
+                          <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeMenuSelectionRow(course.id, i)}>Slett valg</button>
                         </div>
                       ))}
-                      <button className="btn" onClick={() => addMenuSelectionRow(course.id)}>+ Legg til alternativ valg</button>
+                      <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addMenuSelectionRow(course.id)}>+ Legg til alternativ valg</button>
                       {mismatch && <div className="warning" style={{ marginTop: 8 }}>Summen av fordelte gjester ({totalGuests}) stemmer ikke med totalt antall ({lineToAdd.quantity}) for denne menylinjen.</div>}
                     </div>
                   );
                 })}
-                <button className="btn active" onClick={addOrderLine} style={{ marginTop: 8 }}>Legg til denne menylinjen i ordren</button>
+                <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addOrderLine} style={{ marginTop: 8 }}>Legg til denne menylinjen i ordren</button>
               </div>
             );
           })()}
@@ -5632,7 +5639,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
               <div key={i} className="pill" style={{ display: "block", marginBottom: 6 }}>
                 <div>
                   {line.quantity} × {product?.name}
-                  <button style={{ marginLeft: 8 }} className="link danger" onClick={() => removeOrderLine(i)}>×</button>
+                  <button style={{ marginLeft: 8 }} className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeOrderLine(i)}>×</button>
                   {product && <button className="btn" style={{ marginLeft: 8 }} onClick={() => printProductPopup(product)}>Se oppskrift</button>}
                 </div>
                 {line.menuSelections && line.menuSelections.length > 0 && (
@@ -5653,12 +5660,12 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           })}
           <h3>Dietter / hensyn</h3>
           <div className="form-grid four">
-            <label>Vegetar<input type="number" value={form.dietVegetarian || "0"} onChange={(e) => setForm({ ...form, dietVegetarian: e.target.value })} /></label>
-            <label>Vegan<input type="number" value={form.dietVegan || "0"} onChange={(e) => setForm({ ...form, dietVegan: e.target.value })} /></label>
-            <label>Gravid<input type="number" value={form.dietPregnant || "0"} onChange={(e) => setForm({ ...form, dietPregnant: e.target.value })} /></label>
-            <label>Andre hensyn<input value={form.dietOther || ""} onChange={(e) => setForm({ ...form, dietOther: e.target.value })} placeholder="Fritekst" /></label>
+            <label>Vegetar<input type="number" value={form.dietVegetarian || "0"} disabled={readOnly} onChange={(e) => setForm({ ...form, dietVegetarian: e.target.value })} /></label>
+            <label>Vegan<input type="number" value={form.dietVegan || "0"} disabled={readOnly} onChange={(e) => setForm({ ...form, dietVegan: e.target.value })} /></label>
+            <label>Gravid<input type="number" value={form.dietPregnant || "0"} disabled={readOnly} onChange={(e) => setForm({ ...form, dietPregnant: e.target.value })} /></label>
+            <label>Andre hensyn<input value={form.dietOther || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, dietOther: e.target.value })} placeholder="Fritekst" /></label>
           </div>
-          <div className="section-toggle" onClick={() => setForm({ ...form, packingListEnabled: !form.packingListEnabled })}>
+          <div className="section-toggle" style={readOnly ? { opacity: 0.6, cursor: "not-allowed" } : undefined} onClick={() => { if (!readOnly) setForm({ ...form, packingListEnabled: !form.packingListEnabled }); }}>
             <h3>Lag pakkeliste for denne ordren</h3>
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="section-toggle-count">{(form.selectedPackingListTemplateIds || []).length + (form.extraPackingListItems || []).length}</span>
@@ -5675,6 +5682,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                       key={t.id}
                       type="button"
                       className={active ? "btn active" : "btn"}
+                      disabled={readOnly}
                       onClick={() => {
                         const ids = active
                           ? (form.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
@@ -5702,12 +5710,12 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
               {(form.extraPackingListItems || []).map((label, i) => (
                 <div key={i} className="editable-row">
                   <span>☐ {label}</span>
-                  <button className="link danger" onClick={() => removeExtraOrderPackingListItem(i)}>Slett</button>
+                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeExtraOrderPackingListItem(i)}>Slett</button>
                 </div>
               ))}
               <div className="form-grid two" style={{ marginTop: 8 }}>
-                <input placeholder="F.eks. Ekstra servietter" value={newExtraOrderPackingItem} onChange={(e) => setNewExtraOrderPackingItem(e.target.value)} />
-                <button className="btn active" onClick={addExtraOrderPackingListItem}>Legg til</button>
+                <input placeholder="F.eks. Ekstra servietter" value={newExtraOrderPackingItem} disabled={readOnly} onChange={(e) => setNewExtraOrderPackingItem(e.target.value)} />
+                <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addExtraOrderPackingListItem}>Legg til</button>
               </div>
             </div>
           )}
@@ -5715,7 +5723,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           <div className="chips">
             {defaultAllergens.map((a) => {
               const active = (form.allergens[a] || 0) > 0;
-              return <div key={a}><button type="button" className={active ? "btn active" : "btn"} onClick={() => setForm({ ...form, allergens: { ...form.allergens, [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={form.allergens[a]} onChange={(e) => setForm({ ...form, allergens: { ...form.allergens, [a]: Number(e.target.value) } })} />}</div>;
+              return <div key={a}><button type="button" className={active ? "btn active" : "btn"} disabled={readOnly} onClick={() => setForm({ ...form, allergens: { ...form.allergens, [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={form.allergens[a]} disabled={readOnly} onChange={(e) => setForm({ ...form, allergens: { ...form.allergens, [a]: Number(e.target.value) } })} />}</div>;
             })}
           </div>
           {orderAllergenWarnings(form).length > 0 && <div className="warning"><b>Varsel:</b> Ordren inneholder produkter med {orderAllergenWarnings(form).join(", ")}.</div>}
@@ -5726,7 +5734,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
             <Metric label="Sum inkl. mva" value={currency(orderTotalIncVat(form))} dark />
             <Metric label="Sum eks. mva" value={currency(exVatFromIncVat(orderTotalIncVat(form), data.settings.foodVat))} />
           </div>
-          <button className="btn active" onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>
           {editingOrderId && <button className="btn" style={{ marginLeft: 8 }} onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt redigering</button>}
         </div>
       )}
@@ -5776,7 +5784,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button className="btn" onClick={() => { setCalendarView(false); setTimeout(() => setExpandedOrderId(o.id), 100); }}>Vis</button>
-                    <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
+                    <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => editOrder(o)}>Rediger</button>
                   </div>
                 </div>
               );
@@ -5859,7 +5867,9 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                     )}
                     <button
                       className={o.rungInName ? "btn active" : "btn"}
-                      style={{ padding: "2px 8px", fontSize: 12, ...(o.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : {}) }}
+                      style={{ padding: "2px 8px", fontSize: 12, ...(o.rungInName && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : {}) }}
+                      disabled={readOnly}
+                      title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                       onClick={() => toggleOrderRungIn(o)}
                     >
                       {o.rungInName ? "Angre" : "Slått inn"}
@@ -5930,9 +5940,9 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                  <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
+                  <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => editOrder(o)}>Rediger</button>
                   <button className="btn active" onClick={() => printOrder(o, printFlags)}>Print</button>
-                  <button className="btn danger" onClick={() => softDeleteOrder(o.id)}>Flytt til papirkurv</button>
+                  <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => softDeleteOrder(o.id)}>Flytt til papirkurv</button>
                 </div>
               </div>
             )}
@@ -5950,7 +5960,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
         <div className="soft-box" style={{ marginTop: 24 }}>
           <div className="between">
             <h3>🗑 Papirkurv – {deletedOrders.length} ordre</h3>
-            {deletedOrders.length > 0 && <button className="btn danger" onClick={emptyTrash}>Tøm papirkurv</button>}
+            {deletedOrders.length > 0 && <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={emptyTrash}>Tøm papirkurv</button>}
           </div>
           <p style={{ color: "#64748b" }}>Ordre i papirkurven kan gjenopprettes eller slettes permanent.</p>
           {deletedOrders.length === 0 && <p>Papirkurven er tom.</p>}
@@ -5965,8 +5975,8 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                   <br /><small style={{ color: "#64748b" }}>Slettet: {o.deletedAt ? formatDateNo(o.deletedAt.slice(0, 10)) : "-"}</small>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" onClick={() => restoreOrder(o.id)}>Gjenopprett</button>
-                  <button className="btn danger" onClick={() => permanentDeleteOrder(o.id)}>Slett permanent</button>
+                  <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => restoreOrder(o.id)}>Gjenopprett</button>
+                  <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => permanentDeleteOrder(o.id)}>Slett permanent</button>
                 </div>
               </div>
             );
@@ -5988,10 +5998,12 @@ function ProductionTab({
   data,
   updateData,
   productAllergens,
+  readOnly,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productAllergens: (p: Product) => string[];
+  readOnly: boolean;
 }) {
   const productionCategories: { id: ProductionCategory; name: string }[] = [
     { id: "smabakst", name: "Småbakst" },
@@ -7205,6 +7217,7 @@ ${orderPages}`;
 
   return (
     <section>
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
       {/* Topplinje med dato og hovedvalg */}
       <div className="card">
         <div className="between">
@@ -7246,7 +7259,7 @@ ${orderPages}`;
                 <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
                 <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
                 <button className="btn" onClick={() => setPanel("stats")}>Salgsstatistikk</button>
-                <button className="btn" onClick={copyProductionWeekToNext}>Kopiér denne uken → neste uke</button>
+                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={copyProductionWeekToNext}>Kopiér denne uken → neste uke</button>
               </div>
               <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
             </div>
@@ -7290,7 +7303,7 @@ ${orderPages}`;
                     <h3>Dagens produksjonsgrid</h3>
                     <p style={{ color: "#64748b" }}>Fyll inn antall per kunde/kanal.</p>
                   </div>
-                  <button className="btn" onClick={applyRecurringOrdersForDay}>Legg til fastordre for denne dagen</button>
+                  <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={applyRecurringOrdersForDay}>Legg til fastordre for denne dagen</button>
                 </div>
 
                 <div className="chips">
@@ -7338,7 +7351,7 @@ ${orderPages}`;
                             <td style={{ textAlign: "center", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                             {columns.map((col) => (
                               <td key={col.id}>
-                                <input type="number" value={qtyRow[col.id] || ""} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                                <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
                               </td>
                             ))}
                         
@@ -7368,7 +7381,7 @@ ${orderPages}`;
                                   <td style={{ textAlign: "center", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                                   {columns.map((col) => (
                                     <td key={col.id}>
-                                      <input type="number" value={qtyRow[col.id] || ""} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                                      <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
                                     </td>
                                   ))}
                                 </tr>
@@ -7388,12 +7401,13 @@ ${orderPages}`;
             <div className="card">
               <h3>Produktmal for produksjonsgrid</h3>
               <div className="form-grid three">
-                <select value={newTemplateCategory} onChange={(e) => setNewTemplateCategory(e.target.value as ProductionCategory)}>
+                <select value={newTemplateCategory} disabled={readOnly} onChange={(e) => setNewTemplateCategory(e.target.value as ProductionCategory)}>
                   {productionCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
                 </select>
                 <div className="search-picker">
                   <input
                     value={newTemplateProductId ? (data.products.find((p) => p.id === newTemplateProductId)?.name || "") : templateProductSearch}
+                    disabled={readOnly}
                     onChange={(e) => { setTemplateProductSearch(e.target.value); setNewTemplateProductId(""); }}
                     placeholder="Søk produkt"
                   />
@@ -7408,7 +7422,7 @@ ${orderPages}`;
                     </div>
                   )}
                 </div>
-                <button className="btn active" onClick={addTemplateLine}>Legg til i mal</button>
+                <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addTemplateLine}>Legg til i mal</button>
               </div>
               <div className="grid two">
                 {productionCategories.map((cat) => (
@@ -7420,7 +7434,7 @@ ${orderPages}`;
                       return (
                         <div key={line.id} className="editable-row">
                           <div><b>{product.name}</b><br /><small>{product.productNumber || "-"}</small></div>
-                          <button className="link danger" onClick={() => removeTemplateLine(line.id)}>Fjern</button>
+                          <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeTemplateLine(line.id)}>Fjern</button>
                         </div>
                       );
                     })}
@@ -7438,12 +7452,12 @@ ${orderPages}`;
                 <div style={{ background: "#fef2f2", border: "1px solid #dc2626", borderRadius: 8, padding: 12, marginBottom: 16 }}>
                   <div className="between">
                     <b style={{ color: "#991b1b" }}>⚠ {data.cancelledOrderNotifications.length} avbestilling{data.cancelledOrderNotifications.length === 1 ? "" : "er"} fra kundeportalen</b>
-                    <button className="link" onClick={dismissAllCancelNotifications}>Merk alle som lest</button>
+                    <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={dismissAllCancelNotifications}>Merk alle som lest</button>
                   </div>
                   {data.cancelledOrderNotifications.map((n) => (
                     <div key={n.id} className="between" style={{ marginTop: 6, fontSize: 13 }}>
                       <span><b>{n.type === "edited" ? "Redigert" : "Avbestilt"}:</b> {n.customerName} · {formatDateNo(n.date)}: {n.lines.map((l) => `${l.quantity}× ${l.productName}`).join(", ")}</span>
-                      <button className="link" onClick={() => dismissCancelNotification(n.id)}>Lest</button>
+                      <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => dismissCancelNotification(n.id)}>Lest</button>
                     </div>
                   ))}
                 </div>
@@ -7483,8 +7497,8 @@ ${orderPages}`;
                         </tbody>
                       </table>
                       <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                        <button className="btn active" onClick={() => approvePendingPortalOrder(p.id)}>Godkjenn</button>
-                        <button className="btn" onClick={() => rejectPendingPortalOrder(p.id)}>Avslå</button>
+                        <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => approvePendingPortalOrder(p.id)}>Godkjenn</button>
+                        <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => rejectPendingPortalOrder(p.id)}>Avslå</button>
                       </div>
                     </div>
                   );
@@ -7523,8 +7537,8 @@ ${orderPages}`;
                         </tbody>
                       </table>
                       <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                        <button className="btn active" onClick={() => approveRecurringRequest(r.id)}>Godkjenn</button>
-                        <button className="btn" onClick={() => rejectRecurringRequest(r.id)}>Avslå</button>
+                        <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => approveRecurringRequest(r.id)}>Godkjenn</button>
+                        <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => rejectRecurringRequest(r.id)}>Avslå</button>
                       </div>
                     </div>
                   );
@@ -7534,13 +7548,13 @@ ${orderPages}`;
               <div className="soft-box" style={{ marginTop: 16 }}>
                 <h3>Ny kunde</h3>
                 <div className="form-grid five">
-                  <input value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} placeholder="Kundenavn" />
-                  <input value={newCustomer.orgNumber} onChange={(e) => setNewCustomer({ ...newCustomer, orgNumber: e.target.value })} placeholder="Org.nr" />
-                  <input value={newCustomer.address} onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })} placeholder="Fakturaadresse" />
-                  <input value={newCustomer.deliveryAddress} onChange={(e) => setNewCustomer({ ...newCustomer, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
-                  <input value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="Telefon" />
+                  <input value={newCustomer.name} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} placeholder="Kundenavn" />
+                  <input value={newCustomer.orgNumber} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, orgNumber: e.target.value })} placeholder="Org.nr" />
+                  <input value={newCustomer.address} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })} placeholder="Fakturaadresse" />
+                  <input value={newCustomer.deliveryAddress} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
+                  <input value={newCustomer.phone} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="Telefon" />
                 </div>
-                <button className="btn active" onClick={addCustomer}>Legg til kunde</button>
+                <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomer}>Legg til kunde</button>
               </div>
               <div className="section-toggle" style={{ marginTop: 8 }} onClick={() => setOpenBlock(openBlock === "list" ? null : "list")}>
                 <h3>Kunder</h3>
@@ -7562,19 +7576,19 @@ ${orderPages}`;
                       <React.Fragment key={customer.id}>
                         <tr style={!isActiveCustomer ? { opacity: 0.5 } : undefined}>
                           <td style={{ whiteSpace: "nowrap" }}>
-                            <button className="link" disabled={i === 0} onClick={() => moveCustomer(customer.id, -1)}>↑</button>
-                            <button className="link" disabled={i === (data.storkjokkenCustomers || []).length - 1} onClick={() => moveCustomer(customer.id, 1)}>↓</button>
+                            <button className="link" disabled={readOnly || i === 0} onClick={() => moveCustomer(customer.id, -1)}>↑</button>
+                            <button className="link" disabled={readOnly || i === (data.storkjokkenCustomers || []).length - 1} onClick={() => moveCustomer(customer.id, 1)}>↓</button>
                           </td>
                           <td><b>{customer.name}</b>{customer.pin && <span style={{ color: "#64748b", fontSize: 12 }}> · PIN {customer.pin}</span>}{!isActiveCustomer && <span style={{ color: "#94a3b8" }}> (arkivert)</span>}</td>
                           <td style={{ whiteSpace: "nowrap" }}>
                             {isActiveCustomer ? (
                               <>
-                                <button className="btn" onClick={() => { setExpandedPickupCustomerId(isPickupOpen ? null : customer.id); setEditingCustomerId(null); setPickupProductSearch(""); setPickupProductId(""); setPickupQty("1"); }}>Henteordre</button>
-                                <button className="btn" onClick={() => { if (isEditOpen) { cancelEditCustomer(); } else { startEditCustomer(customer); setExpandedPickupCustomerId(null); } }}>Rediger</button>
+                                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { setExpandedPickupCustomerId(isPickupOpen ? null : customer.id); setEditingCustomerId(null); setPickupProductSearch(""); setPickupProductId(""); setPickupQty("1"); }}>Henteordre</button>
+                                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { if (isEditOpen) { cancelEditCustomer(); } else { startEditCustomer(customer); setExpandedPickupCustomerId(null); } }}>Rediger</button>
                                 <button className="btn" onClick={() => { setPanel("stats"); setStatsCustomerId(customer.id); }}>Salgsstatistikk</button>
                               </>
                             ) : (
-                              <button className="btn" onClick={() => restoreCustomer(customer.id)}>Gjenopprett</button>
+                              <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => restoreCustomer(customer.id)}>Gjenopprett</button>
                             )}
                           </td>
                         </tr>
@@ -7584,27 +7598,27 @@ ${orderPages}`;
                               <div className="soft-box">
                                 <h4 style={{ marginTop: 0 }}>Rediger – {customer.name}</h4>
                                 <div className="form-grid five">
-                                  <input value={customerDraft.name || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, name: e.target.value })} placeholder="Kundenavn" />
-                                  <input value={customerDraft.orgNumber || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, orgNumber: e.target.value })} placeholder="Org.nr" />
-                                  <input value={customerDraft.address || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, address: e.target.value })} placeholder="Fakturaadresse" />
-                                  <input value={customerDraft.deliveryAddress || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
-                                  <input value={customerDraft.phone || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
+                                  <input value={customerDraft.name || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, name: e.target.value })} placeholder="Kundenavn" />
+                                  <input value={customerDraft.orgNumber || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, orgNumber: e.target.value })} placeholder="Org.nr" />
+                                  <input value={customerDraft.address || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, address: e.target.value })} placeholder="Fakturaadresse" />
+                                  <input value={customerDraft.deliveryAddress || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
+                                  <input value={customerDraft.phone || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
                                 </div>
                                 <div style={{ marginTop: 8, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
                                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                    <input type="checkbox" checked={!!customerDraft.internal} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
+                                    <input type="checkbox" checked={!!customerDraft.internal} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, internal: e.target.checked })} />
                                     Intern
                                   </label>
                                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                    <input type="checkbox" checked={!!customerDraft.deliveryAvailable} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAvailable: e.target.checked })} />
+                                    <input type="checkbox" checked={!!customerDraft.deliveryAvailable} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAvailable: e.target.checked })} />
                                     Har tilgang til utkjøring
                                   </label>
                                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                                     PIN-kode (portal)
-                                    <input style={{ width: 100 }} value={customerDraft.pin || ""} onChange={(e) => setCustomerDraft({ ...customerDraft, pin: e.target.value.replace(/[^0-9]/g, "") })} placeholder="f.eks. 4821" maxLength={6} />
+                                    <input style={{ width: 100 }} value={customerDraft.pin || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, pin: e.target.value.replace(/[^0-9]/g, "") })} placeholder="f.eks. 4821" maxLength={6} />
                                   </label>
                                   {!customerDraft.pin && (
-                                    <button type="button" className="link" onClick={() => setCustomerDraft({ ...customerDraft, pin: generateUniquePin() })}>Generer PIN</button>
+                                    <button type="button" className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setCustomerDraft({ ...customerDraft, pin: generateUniquePin() })}>Generer PIN</button>
                                   )}
                                 </div>
 
@@ -7627,13 +7641,13 @@ ${orderPages}`;
                                     return (
                                       <div key={category} style={{ marginBottom: 8, border: "1px solid #e2e8f0", borderRadius: 8, padding: 8 }}>
                                         <label className="check" style={{ fontWeight: 700 }}>
-                                          <input type="checkbox" checked={allSelected} onChange={() => toggleAllowedCategory(category, ids)} />
+                                          <input type="checkbox" checked={allSelected} disabled={readOnly} onChange={() => toggleAllowedCategory(category, ids)} />
                                           {category}
                                         </label>
                                         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 4, paddingLeft: 20 }}>
                                           {prods.map((p) => (
                                             <label key={p.id} className="check" style={{ fontSize: 13 }}>
-                                              <input type="checkbox" checked={current.includes(p.id)} onChange={() => toggleAllowedProduct(p.id)} />
+                                              <input type="checkbox" checked={current.includes(p.id)} disabled={readOnly} onChange={() => toggleAllowedProduct(p.id)} />
                                               {p.name}
                                             </label>
                                           ))}
@@ -7643,10 +7657,10 @@ ${orderPages}`;
                                   })}
                                 </div>
                                 <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "space-between" }}>
-                                  <button className="link danger" onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
+                                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => archiveCustomer(customer.id)}>Slett kunde</button>
                                   <div style={{ display: "flex", gap: 8 }}>
                                     <button className="btn" onClick={cancelEditCustomer}>Avbryt</button>
-                                    <button className="btn active" onClick={saveEditCustomer}>Lagre</button>
+                                    <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveEditCustomer}>Lagre</button>
                                   </div>
                                 </div>
                               </div>
@@ -7662,6 +7676,7 @@ ${orderPages}`;
                                   <div className="search-picker" style={{ maxWidth: 320, position: "relative" }}>
                                     <input
                                       value={pickupProductId ? (data.products.find((p) => p.id === pickupProductId)?.name || "") : pickupProductSearch}
+                                      disabled={readOnly}
                                       onChange={(e) => { setPickupProductSearch(e.target.value); setPickupProductId(""); }}
                                       placeholder="Søk produkt, f.eks. Fransk Landbrød"
                                     />
@@ -7675,9 +7690,11 @@ ${orderPages}`;
                                       </div>
                                     )}
                                   </div>
-                                  <input type="number" value={pickupQty} onChange={(e) => setPickupQty(e.target.value)} style={{ maxWidth: 90 }} placeholder="Antall" />
+                                  <input type="number" value={pickupQty} disabled={readOnly} onChange={(e) => setPickupQty(e.target.value)} style={{ maxWidth: 90 }} placeholder="Antall" />
                                   <button
                                     className="btn active"
+                                    disabled={readOnly}
+                                    title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                                     onClick={() => { if (pickupProductId && Number(pickupQty) > 0) { addPickupOrder(customer.id, pickupProductId, Number(pickupQty)); setPickupProductId(""); setPickupQty("1"); } }}
                                   >
                                     Lagre henteordre
@@ -7692,7 +7709,7 @@ ${orderPages}`;
                                           <td>{formatDateNo(p.date)}</td>
                                           <td>{data.products.find((prod) => prod.id === p.productId)?.name || "Ukjent"}</td>
                                           <td>{p.quantity}</td>
-                                          <td><button className="link danger" onClick={() => deletePickupOrder(p.id)}>Slett</button></td>
+                                          <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deletePickupOrder(p.id)}>Slett</button></td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -7726,12 +7743,12 @@ ${orderPages}`;
                       <div key={d.n} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8 }}>
                         <b style={{ fontSize: 13 }}>{d.label}</b>
                         <label className="check" style={{ display: "block", marginTop: 4 }}>
-                          <input type="checkbox" checked={!!wd.closed} onChange={(e) => updateWeekdayDeadline(d.n, { closed: e.target.checked })} />
+                          <input type="checkbox" checked={!!wd.closed} disabled={readOnly} onChange={(e) => updateWeekdayDeadline(d.n, { closed: e.target.checked })} />
                           Stengt
                         </label>
                         {!wd.closed && (
                           <label style={{ display: "block", marginTop: 4 }}>Frist kl.
-                            <input type="time" value={wd.cutoffTime || "12:00"} onChange={(e) => updateWeekdayDeadline(d.n, { cutoffTime: e.target.value })} />
+                            <input type="time" value={wd.cutoffTime || "12:00"} disabled={readOnly} onChange={(e) => updateWeekdayDeadline(d.n, { cutoffTime: e.target.value })} />
                           </label>
                         )}
                       </div>
@@ -7741,20 +7758,20 @@ ${orderPages}`;
 
                 <b style={{ fontSize: 13, marginTop: 16, display: "block" }}>Avvik / røde dager</b>
                 <div className="form-grid four" style={{ marginTop: 8 }}>
-                  <label>Dato<input type="date" value={newException.date} onChange={(e) => setNewException({ ...newException, date: e.target.value })} /></label>
+                  <label>Dato<input type="date" value={newException.date} disabled={readOnly} onChange={(e) => setNewException({ ...newException, date: e.target.value })} /></label>
                   <label className="check" style={{ alignSelf: "end" }}>
-                    <input type="checkbox" checked={newException.closed} onChange={(e) => setNewException({ ...newException, closed: e.target.checked })} />
+                    <input type="checkbox" checked={newException.closed} disabled={readOnly} onChange={(e) => setNewException({ ...newException, closed: e.target.checked })} />
                     Stengt denne dagen
                   </label>
                   {!newException.closed && (
-                    <label>Frist kl.<input type="time" value={newException.cutoffTime} onChange={(e) => setNewException({ ...newException, cutoffTime: e.target.value })} /></label>
+                    <label>Frist kl.<input type="time" value={newException.cutoffTime} disabled={readOnly} onChange={(e) => setNewException({ ...newException, cutoffTime: e.target.value })} /></label>
                   )}
-                  <button className="btn active" style={{ alignSelf: "end" }} onClick={addExceptionDeadline}>Legg til avvik</button>
+                  <button className="btn active" style={{ alignSelf: "end" }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addExceptionDeadline}>Legg til avvik</button>
                 </div>
                 {Object.entries((data.portalDeadlines || { weekday: {}, exceptions: {} }).exceptions || {}).sort().map(([date, d]) => (
                   <div key={date} className="editable-row">
                     <span>{formatDateNo(date)} – {d.closed ? "Stengt" : `Frist kl. ${d.cutoffTime}`}</span>
-                    <button className="link danger" onClick={() => removeExceptionDeadline(date)}>Slett</button>
+                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeExceptionDeadline(date)}>Slett</button>
                   </div>
                 ))}
               </div>
@@ -7835,8 +7852,8 @@ ${orderPages}`;
                                 <tr key={product.id}>
                                   <td>{product.name}</td>
                                   <td>{currency(product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat))}</td>
-                                  <td><input type="number" value={special.priceExVat} onChange={(e) => setSpecialPrice(customer.id, product.id, Number(e.target.value) || 0)} /></td>
-                                  <td><button className="link danger" onClick={() => setSpecialPrice(customer.id, product.id, 0)}>Fjern</button></td>
+                                  <td><input type="number" value={special.priceExVat} disabled={readOnly} onChange={(e) => setSpecialPrice(customer.id, product.id, Number(e.target.value) || 0)} /></td>
+                                  <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setSpecialPrice(customer.id, product.id, 0)}>Fjern</button></td>
                                 </tr>
                               );
                             })}
@@ -7847,6 +7864,7 @@ ${orderPages}`;
                         <div className="search-picker" style={{ marginTop: 10, maxWidth: 320 }}>
                           <input
                             value={specialPriceSearch}
+                            disabled={readOnly}
                             onChange={(e) => setSpecialPriceSearch(e.target.value)}
                             placeholder="Søk produkt for å legge til spesialpris"
                           />
@@ -7882,7 +7900,7 @@ ${orderPages}`;
             <div className="card">
               <div className="between">
                 <h3>Fastordre</h3>
-                <button className="btn active" onClick={startNewRecurring}>Ny fastordre</button>
+                <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={startNewRecurring}>Ny fastordre</button>
               </div>
               <p style={{ color: "#64748b" }}>Aktive fastordre fylles automatisk inn på riktig ukedag i "Dagens produksjon" — juster gjerne mengden direkte der hvis en kunde bestiller mer eller mindre en gitt uke, det påvirker ikke selve fastordren.</p>
 
@@ -7893,6 +7911,7 @@ ${orderPages}`;
                   <div className="search-picker" style={{ maxWidth: 320 }}>
                     <input
                       value={recurringDraft.customerId ? (storkjokkenCustomers.find((c) => c.id === recurringDraft.customerId)?.name || "") : recurringCustomerSearch}
+                      disabled={readOnly}
                       onChange={(e) => { setRecurringCustomerSearch(e.target.value); setRecurringDraft({ ...recurringDraft, customerId: "" }); }}
                       placeholder="Søk kunde"
                     />
@@ -7909,13 +7928,13 @@ ${orderPages}`;
                   <div className="chips" style={{ margin: "8px 0" }}>
                     {[1, 2, 3, 4, 5, 6, 7].map((d) => (
                       <label key={d} className="check">
-                        <input type="checkbox" checked={recurringDraft.weekdays.includes(d)} onChange={() => toggleRecurringWeekday(d)} />
+                        <input type="checkbox" checked={recurringDraft.weekdays.includes(d)} disabled={readOnly} onChange={() => toggleRecurringWeekday(d)} />
                         {["Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag", "Søndag"][d - 1]}
                       </label>
                     ))}
                   </div>
                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <input type="checkbox" checked={recurringDraft.active} onChange={(e) => setRecurringDraft({ ...recurringDraft, active: e.target.checked })} />
+                    <input type="checkbox" checked={recurringDraft.active} disabled={readOnly} onChange={(e) => setRecurringDraft({ ...recurringDraft, active: e.target.checked })} />
                     Aktiv
                   </label>
 
@@ -7936,10 +7955,10 @@ ${orderPages}`;
                             <td>{product?.name || "Ukjent"}</td>
                             {recurringDraft.weekdays.map((d) => (
                               <td key={d}>
-                                <input type="number" value={l.quantityByDay[d] ?? 0} onChange={(e) => updateRecurringLineQty(i, d, Number(e.target.value) || 0)} style={{ width: 64 }} />
+                                <input type="number" value={l.quantityByDay[d] ?? 0} disabled={readOnly} onChange={(e) => updateRecurringLineQty(i, d, Number(e.target.value) || 0)} style={{ width: 64 }} />
                               </td>
                             ))}
-                            <td><button className="link danger" onClick={() => removeRecurringLine(i)}>Slett</button></td>
+                            <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeRecurringLine(i)}>Slett</button></td>
                           </tr>
                         );
                       })}
@@ -7950,6 +7969,7 @@ ${orderPages}`;
                     <div className="search-picker" style={{ maxWidth: 280 }}>
                       <input
                         value={recurringLineProductId ? (data.products.find((p) => p.id === recurringLineProductId)?.name || "") : recurringLineProductSearch}
+                        disabled={readOnly}
                         onChange={(e) => { setRecurringLineProductSearch(e.target.value); setRecurringLineProductId(""); }}
                         placeholder="Søk produkt"
                       />
@@ -7963,13 +7983,13 @@ ${orderPages}`;
                         </div>
                       )}
                     </div>
-                    <input type="number" value={recurringLineQty} onChange={(e) => setRecurringLineQty(e.target.value)} style={{ maxWidth: 90 }} placeholder="Antall" />
-                    <button className="btn" onClick={addRecurringLine}>Legg til linje</button>
+                    <input type="number" value={recurringLineQty} disabled={readOnly} onChange={(e) => setRecurringLineQty(e.target.value)} style={{ maxWidth: 90 }} placeholder="Antall" />
+                    <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addRecurringLine}>Legg til linje</button>
                   </div>
 
                   <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
                     <button className="btn" onClick={cancelEditRecurring}>Avbryt</button>
-                    <button className="btn active" onClick={saveRecurringDraft}>Lagre fastordre</button>
+                    <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveRecurringDraft}>Lagre fastordre</button>
                   </div>
                 </div>
               )}
@@ -7981,8 +8001,8 @@ ${orderPages}`;
                     <div key={order.id} className="editable-row">
                       <div><b>{customer?.name || "Ukjent kunde"}</b><br /><small>Dager: {order.weekdays.map((d) => ["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"][d - 1]).join(", ")} · Linjer: {order.lines.length}</small></div>
                       <span>{order.active ? "Aktiv" : "Inaktiv"}</span>
-                      <button className="btn" onClick={() => startEditRecurring(order)}>Rediger</button>
-                      <button className="link danger" onClick={() => deleteRecurringOrder(order.id)}>Slett</button>
+                      <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => startEditRecurring(order)}>Rediger</button>
+                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteRecurringOrder(order.id)}>Slett</button>
                     </div>
                   );
                 })
@@ -8104,6 +8124,8 @@ ${orderPages}`;
               <div><h3>Godkjenning av dag</h3><p style={{ color: "#64748b" }}>Dagen må godkjennes før den kan tas med i fakturagrunnlaget.</p></div>
               <button
                 className={activeDay.approved ? "btn active" : "btn"}
+                disabled={readOnly}
+                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                 onClick={() => {
                   flushPendingQuantities();
                   const dayToSave = { ...activeDay, quantities: localQuantities };
@@ -8217,7 +8239,7 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
   );
 }
 
-function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number; updateInventoryRpc: (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void }) {
+function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number; updateInventoryRpc: (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void; readOnly: boolean }) {
   const currentYm = new Date().toISOString().slice(0, 7);
   const [inventoryMonth, setInventoryMonth] = useState(currentYm);
   const [inventorySearch, setInventorySearch] = useState("");
@@ -8797,7 +8819,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <label style={{ fontSize: 13 }}>Kasser
                       <input
-                        type="number" inputMode="decimal" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked || readOnly}
                         value={lv.packages}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], packages: e.target.value } }))}
                         onBlur={(e) => {
@@ -8811,7 +8833,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                     </label>
                     <label style={{ fontSize: 13 }}>Løs ({m.unit})
                       <input
-                        type="number" inputMode="decimal" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked || readOnly}
                         value={lv.loose}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], loose: e.target.value } }))}
                         onBlur={(e) => {
@@ -8830,7 +8852,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
             <div style={{ marginTop: 14 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn</div>
               <input
-                type="number" inputMode="decimal" disabled={isLocked}
+                type="number" inputMode="decimal" disabled={isLocked || readOnly}
                 value={localWaste}
                 onChange={(e) => setLocalWaste(e.target.value)}
                 onBlur={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)}
@@ -8897,7 +8919,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <label style={{ fontSize: 13 }}>Esker
                       <input
-                        type="number" inputMode="decimal" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked || readOnly}
                         value={lv.cases}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], cases: e.target.value } }))}
                         onBlur={(e) => {
@@ -8911,7 +8933,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                     </label>
                     <label style={{ fontSize: 13 }}>Løs stk
                       <input
-                        type="number" inputMode="decimal" disabled={isLocked}
+                        type="number" inputMode="decimal" disabled={isLocked || readOnly}
                         value={lv.loose}
                         onChange={(e) => setLocalValues((prev) => ({ ...prev, [loc]: { ...prev[loc], loose: e.target.value } }))}
                         onBlur={(e) => {
@@ -8930,7 +8952,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
             <div style={{ marginTop: 14 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: "#92400e", marginBottom: 8, padding: "4px 10px", background: "#fffbeb", borderRadius: 8, display: "inline-block" }}>⚠️ Svinn stk</div>
               <input
-                type="number" inputMode="decimal" disabled={isLocked}
+                type="number" inputMode="decimal" disabled={isLocked || readOnly}
                 value={localWaste}
                 onChange={(e) => setLocalWaste(e.target.value)}
                 onBlur={(e) => updateProductWaste(p, Number(e.target.value) || 0)}
@@ -8947,6 +8969,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
 
   return (
     <section className="card">
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: isRealtimeConnected ? "#166534" : "#991b1b" }}>
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: isRealtimeConnected ? "#16a34a" : "#dc2626" }} />
@@ -8979,7 +9002,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
         <label style={{ fontWeight: 800, fontSize: 14 }}>
           Igjen ved dagsslutt, måned (råvarekost kr)
           <input
-            type="number" disabled={isLocked}
+            type="number" disabled={isLocked || readOnly}
             value={kassasvinn || ""}
             onChange={(e) => updateKassasvinn(Number(e.target.value) || 0)}
             placeholder="0"
@@ -9019,13 +9042,13 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
 
           <div className="form-grid three">
             <label>Mat-salg netto eks. mva (ekskl. deli)
-              <input type="number" value={profitability.matSalesNetto || ""} onChange={(e) => updateProfitability({ matSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
+              <input type="number" value={profitability.matSalesNetto || ""} disabled={readOnly} onChange={(e) => updateProfitability({ matSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
             </label>
             <label>Deli-salg netto eks. mva
-              <input type="number" value={profitability.deliSalesNetto || ""} onChange={(e) => updateProfitability({ deliSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
+              <input type="number" value={profitability.deliSalesNetto || ""} disabled={readOnly} onChange={(e) => updateProfitability({ deliSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
             </label>
             <label>Varekjøp mat totalt (fra regnskap, mat+deli samlet)
-              <input type="number" value={profitability.varekjopMatTotalt || ""} onChange={(e) => updateProfitability({ varekjopMatTotalt: Number(e.target.value) || 0 })} placeholder="F.eks. 600000" />
+              <input type="number" value={profitability.varekjopMatTotalt || ""} disabled={readOnly} onChange={(e) => updateProfitability({ varekjopMatTotalt: Number(e.target.value) || 0 })} placeholder="F.eks. 600000" />
             </label>
           </div>
 
@@ -9113,7 +9136,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
       </details>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
-<button className="btn" onClick={() => {
+<button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
           if (!isLocked) {
             // Lås måned: frys alle gjeldende priser (live → snapshot) for både råvarer og egenproduserte produkter
             const frozenItems: Record<string, any> = { ...counts };
@@ -9273,7 +9296,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                       <tr key={p.id}>
                         <td><b>{p.name}</b><br /><small style={{ color: "#64748b" }}>{p.productNumber || "-"}</small></td>
                         <td>{currency(unitCost)}</td><td>{Number(p.unitsPerCase || 1)} stk</td>
-{locations.map((loc) => { const lc = getProductCount(p.id, loc); return (<><td key={`${p.id}-${loc}-e`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} defaultValue={lc.cases || ""} key={`${p.id}-${loc}-e-${lc.cases}`} onBlur={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${p.id}-${loc}-l`}><input type="number" disabled={isLocked} defaultValue={lc.loose || ""} key={`${p.id}-${loc}-l-${lc.loose}`} onBlur={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} defaultValue={wasteAmt || ""} key={`${p.id}-waste-${wasteAmt}`} onBlur={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>
+{locations.map((loc) => { const lc = getProductCount(p.id, loc); return (<><td key={`${p.id}-${loc}-e`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked || readOnly} defaultValue={lc.cases || ""} key={`${p.id}-${loc}-e-${lc.cases}`} onBlur={(e) => updateProductCount(p, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${p.id}-${loc}-l`}><input type="number" disabled={isLocked || readOnly} defaultValue={lc.loose || ""} key={`${p.id}-${loc}-l-${lc.loose}`} onBlur={(e) => updateProductCount(p, loc, lc.cases, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked || readOnly} defaultValue={wasteAmt || ""} key={`${p.id}-waste-${wasteAmt}`} onBlur={(e) => updateProductWaste(p, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>
                         <td><b>{currency(value)}</b></td>
                       </tr>
                     ); })}
@@ -9301,8 +9324,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
                     {materials.map((m) => { const value = materialInventoryValue(m); const wasteAmt = getMaterialWaste(m.id); const prevTotal = getPrevMaterialTotal(m.id); return (
                       <tr key={m.id}>
 <td><b>{m.name}</b></td><td>{currency(m.packagePrice)}</td><td>{m.packageSize} {m.unit}</td>
-                        {locations.map((loc) => { const lc = getLocationCount(m.id, loc); return (<><td key={`${m.id}-${loc}-p`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked} defaultValue={lc.packages || ""} key={`${m.id}-${loc}-p-${lc.packages}`} onBlur={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${m.id}-${loc}-l`}><input type="number" disabled={isLocked} defaultValue={lc.loose || ""} key={`${m.id}-${loc}-l-${lc.loose}`} onBlur={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}
-<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked} defaultValue={wasteAmt || ""} key={`${m.id}-waste-${wasteAmt}`} onBlur={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>                        <td><b>{currency(value)}</b></td>
+                        {locations.map((loc) => { const lc = getLocationCount(m.id, loc); return (<><td key={`${m.id}-${loc}-p`} style={{ borderLeft: "2px solid #cbd5e1" }}><input type="number" disabled={isLocked || readOnly} defaultValue={lc.packages || ""} key={`${m.id}-${loc}-p-${lc.packages}`} onBlur={(e) => updateLocationCount(m.id, loc, Number(e.target.value) || 0, lc.loose)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td><td key={`${m.id}-${loc}-l`}><input type="number" disabled={isLocked || readOnly} defaultValue={lc.loose || ""} key={`${m.id}-${loc}-l-${lc.loose}`} onBlur={(e) => updateLocationCount(m.id, loc, lc.packages, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td></>); })}
+<td style={{ borderLeft: "2px solid #f59e0b", background: "#fffbeb" }}><input type="number" disabled={isLocked || readOnly} defaultValue={wasteAmt || ""} key={`${m.id}-waste-${wasteAmt}`} onBlur={(e) => updateMaterialWaste(m.id, Number(e.target.value) || 0)} style={showAllLocations ? { width: 60, minWidth: 0, textAlign: "center" } : { minWidth: 70, textAlign: "center" }} /></td>                        <td style={{ borderLeft: "2px solid #94a3b8", background: "#f1f5f9", textAlign: "center", color: "#64748b" }}>{prevTotal || "-"}</td>                        <td><b>{currency(value)}</b></td>
                       </tr>
                     ); })}
                   </tbody>
@@ -9332,7 +9355,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc }:
     </section>
   );
 }
-function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[] }) {
+function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -9363,6 +9386,7 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
 
   useEffect(() => {
     if (!showNewOffer) return;
+    if (readOnly) return;
     if (!rental.customer.trim()) return;
     if (!rental.id) {
       setRental((r) => ({ ...r, id: `rental-${Date.now()}` }));
@@ -10334,9 +10358,10 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
 
   function onTablePointerDown(e: React.PointerEvent, tableId: string) {
     e.stopPropagation();
+    if (!tableId.startsWith("chair-")) setPlannerSelectedTableId(tableId);
+    if (readOnly) return;
     (e.target as Element).setPointerCapture(e.pointerId);
     setDragTableId(tableId);
-    if (!tableId.startsWith("chair-")) setPlannerSelectedTableId(tableId);
   }
 
   function onSvgPointerMove(e: React.PointerEvent, scale: number) {
@@ -10701,13 +10726,14 @@ ${opts.produksjon ? productionPageHtml : ""}
 
   return (
     <section>
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
       <div className="card">
         <div className="between" style={{ justifyContent: "flex-end" }}>
           <div style={{ display: "flex", gap: 8 }}>
             <button className={showTrash ? "btn active" : "btn"} onClick={() => setShowTrash(!showTrash)}>
               🗑 Papirkurv {deletedOffers.length > 0 && `(${deletedOffers.length})`}
             </button>
-            <button className="btn active" onClick={() => { cancelEdit(); setShowNewOffer(true); }}>Nytt tilbud</button>
+            <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { cancelEdit(); setShowNewOffer(true); }}>Nytt tilbud</button>
           </div>
         </div>
       </div>
@@ -10724,8 +10750,8 @@ ${opts.produksjon ? productionPageHtml : ""}
                 <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn" onClick={() => restoreOffer(offer.id!)}>Gjenopprett</button>
-                <button className="btn danger" onClick={() => permanentDeleteOffer(offer.id!)}>Slett permanent</button>
+                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => restoreOffer(offer.id!)}>Gjenopprett</button>
+                <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => permanentDeleteOffer(offer.id!)}>Slett permanent</button>
               </div>
             </div>
           ))}
@@ -10747,7 +10773,9 @@ ${opts.produksjon ? productionPageHtml : ""}
                 {editingOfferId && (
                   <button
                     className={rental.rungInName ? "btn active" : "btn"}
-                    style={rental.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                    style={rental.rungInName && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                    disabled={readOnly}
+                    title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                     onClick={() => toggleRungIn(rental)}
                   >
                     {rental.rungInName ? "Angre" : "Slått inn"}
@@ -10787,19 +10815,19 @@ ${opts.produksjon ? productionPageHtml : ""}
             {rentalSubTab === "forside" && (
               <>
                 <div className="form-grid two">
-                  <label>Kunde<input value={rental.customer} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
-                  <label>Dato for arrangement<input type="date" value={rental.date || ""} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
+                  <label>Kunde<input value={rental.customer} disabled={readOnly} onChange={(e) => setRental({ ...rental, customer: e.target.value })} placeholder="Kundenavn" /></label>
+                  <label>Dato for arrangement<input type="date" value={rental.date || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, date: e.target.value })} /></label>
                 </div>
 
                 <div className="form-grid two">
-                  <label>Telefon<input value={rental.phone || ""} onChange={(e) => setRental({ ...rental, phone: e.target.value })} placeholder="Telefonnummer" /></label>
-                  <label>E-post<input type="email" value={rental.email || ""} onChange={(e) => setRental({ ...rental, email: e.target.value })} placeholder="E-postadresse" /></label>
+                  <label>Telefon<input value={rental.phone || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, phone: e.target.value })} placeholder="Telefonnummer" /></label>
+                  <label>E-post<input type="email" value={rental.email || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, email: e.target.value })} placeholder="E-postadresse" /></label>
                 </div>
 
-                <label>Antall gjester<input type="number" value={rental.guestCount || 0} onChange={(e) => setRental({ ...rental, guestCount: Number(e.target.value) || 0 })} /></label>
+                <label>Antall gjester<input type="number" value={rental.guestCount || 0} disabled={readOnly} onChange={(e) => setRental({ ...rental, guestCount: Number(e.target.value) || 0 })} /></label>
 
                 <label>Lokale
-                  <select value={rental.venueExternal ? "__extern__" : rental.venue} onChange={(e) => {
+                  <select value={rental.venueExternal ? "__extern__" : rental.venue} disabled={readOnly} onChange={(e) => {
                     if (e.target.value === "__extern__") {
                       setRental({ ...rental, venueExternal: true, venue: "", venuePrice: 0 });
                     } else {
@@ -10814,18 +10842,18 @@ ${opts.produksjon ? productionPageHtml : ""}
 
                 {rental.venueExternal ? (
                   <div className="form-grid two">
-                    <label>Navn på eksternt lokale<input value={rental.venueExternalName || ""} onChange={(e) => setRental({ ...rental, venueExternalName: e.target.value })} placeholder="F.eks. Svømmehallen" /></label>
-                    <label>Pris (0 hvis kunden leier selv)<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) || 0 })} /></label>
+                    <label>Navn på eksternt lokale<input value={rental.venueExternalName || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, venueExternalName: e.target.value })} placeholder="F.eks. Svømmehallen" /></label>
+                    <label>Pris (0 hvis kunden leier selv)<input type="number" value={rental.venuePrice} disabled={readOnly} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) || 0 })} /></label>
                   </div>
                 ) : (
-                  <label>Lokaleleie<input type="number" value={rental.venuePrice} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label>
+                  <label>Lokaleleie<input type="number" value={rental.venuePrice} disabled={readOnly} onChange={(e) => setRental({ ...rental, venuePrice: Number(e.target.value) })} /></label>
                 )}
 
                 <h3>Servitører</h3>
                 <div className="form-grid three">
-                  <label>Antall servitører<input type="number" value={rental.waiters} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label>
-                  <label>Timer før midnatt<input type="number" value={rental.waiterHours} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
-                  <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
+                  <label>Antall servitører<input type="number" value={rental.waiters} disabled={readOnly} onChange={(e) => setRental({ ...rental, waiters: Number(e.target.value) })} /></label>
+                  <label>Timer før midnatt<input type="number" value={rental.waiterHours} disabled={readOnly} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
+                  <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} disabled={readOnly} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
                 </div>
 
                 <div style={{ marginTop: 12 }}>
@@ -10833,6 +10861,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                   <textarea
                     className="textarea"
                     value={rental.note || ""}
+                    disabled={readOnly}
                     onChange={(e) => setRental({ ...rental, note: e.target.value })}
                     placeholder="Spesielle ønsker, praktisk info osv."
                   />
@@ -10844,7 +10873,7 @@ ${opts.produksjon ? productionPageHtml : ""}
               <>
                 <h3>Produkter/menyer</h3>
                 <div className="soft-box">
-                  <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk produkt eller meny..." style={{ marginBottom: 8 }} />
+                  <input value={productSearch} disabled={readOnly} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk produkt eller meny..." style={{ marginBottom: 8 }} />
                   {productSearch && (
                     <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "auto", maxHeight: 280, marginBottom: 10 }}>
                       {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
@@ -10863,8 +10892,8 @@ ${opts.produksjon ? productionPageHtml : ""}
                       <div key={i} style={{ marginBottom: 12 }}>
                         <div className="form-grid three" style={{ alignItems: "end" }}>
                           <label>Produkt<input value={p?.name || ""} readOnly style={{ background: "#f8fafc" }} /></label>
-                          <label>Antall gjester/porsjoner<input type="number" value={l.guests} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
-                          <button className="link danger" onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
+                          <label>Antall gjester/porsjoner<input type="number" value={l.guests} disabled={readOnly} onChange={(e) => setRental({ ...rental, productLines: rental.productLines.map((x, ix) => ix === i ? { ...x, guests: Number(e.target.value) } : x) })} /></label>
+                          <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setRental({ ...rental, productLines: rental.productLines.filter((_, ix) => ix !== i) })}>Slett</button>
                         </div>
                         {isMenu && (
                           <div className="soft-box" style={{ marginTop: 8 }}>
@@ -10883,18 +10912,18 @@ ${opts.produksjon ? productionPageHtml : ""}
                                   </div>
                                   {rows.map((row, si) => (
                                     <div key={si} className="form-grid three" style={{ alignItems: "end", marginTop: 4 }}>
-                                      <select value={row.productId} onChange={(e) => updateRentalMenuSelection(i, course.id, si, { productId: e.target.value })}>
+                                      <select value={row.productId} disabled={readOnly} onChange={(e) => updateRentalMenuSelection(i, course.id, si, { productId: e.target.value })}>
                                         <option value="">Velg alternativ</option>
                                         {course.options.map((opt) => {
                                           const optProd = data.products.find((x) => x.id === opt.productId);
                                           return <option key={opt.id} value={opt.productId}>{optProd?.name || "Ukjent"}</option>;
                                         })}
                                       </select>
-                                      <input type="number" value={row.guestCount || ""} onChange={(e) => updateRentalMenuSelection(i, course.id, si, { guestCount: Number(e.target.value) || 0 })} placeholder="Antall gjester" />
-                                      <button className="link danger" onClick={() => removeRentalMenuSelectionRow(i, course.id, si)}>Slett valg</button>
+                                      <input type="number" value={row.guestCount || ""} disabled={readOnly} onChange={(e) => updateRentalMenuSelection(i, course.id, si, { guestCount: Number(e.target.value) || 0 })} placeholder="Antall gjester" />
+                                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeRentalMenuSelectionRow(i, course.id, si)}>Slett valg</button>
                                     </div>
                                   ))}
-                                  <button className="btn" style={{ marginTop: 4 }} onClick={() => addRentalMenuSelectionRow(i, course.id)}>+ Legg til alternativ valg</button>
+                                  <button className="btn" style={{ marginTop: 4 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addRentalMenuSelectionRow(i, course.id)}>+ Legg til alternativ valg</button>
                                   {mismatch && <div className="warning" style={{ marginTop: 6 }}>Summen ({totalGuests}) stemmer ikke med antall gjester ({l.guests}) for denne linjen.</div>}
                                 </div>
                               );
@@ -10908,16 +10937,16 @@ ${opts.produksjon ? productionPageHtml : ""}
 
                 <h3 style={{ marginTop: 16 }}>Dietter / hensyn</h3>
                 <div className="form-grid four">
-                  <label>Vegetar<input type="number" value={rental.dietVegetarian || "0"} onChange={(e) => setRental({ ...rental, dietVegetarian: e.target.value })} /></label>
-                  <label>Vegan<input type="number" value={rental.dietVegan || "0"} onChange={(e) => setRental({ ...rental, dietVegan: e.target.value })} /></label>
-                  <label>Gravid<input type="number" value={rental.dietPregnant || "0"} onChange={(e) => setRental({ ...rental, dietPregnant: e.target.value })} /></label>
-                  <label>Andre hensyn<input value={rental.dietOther || ""} onChange={(e) => setRental({ ...rental, dietOther: e.target.value })} placeholder="Fritekst" /></label>
+                  <label>Vegetar<input type="number" value={rental.dietVegetarian || "0"} disabled={readOnly} onChange={(e) => setRental({ ...rental, dietVegetarian: e.target.value })} /></label>
+                  <label>Vegan<input type="number" value={rental.dietVegan || "0"} disabled={readOnly} onChange={(e) => setRental({ ...rental, dietVegan: e.target.value })} /></label>
+                  <label>Gravid<input type="number" value={rental.dietPregnant || "0"} disabled={readOnly} onChange={(e) => setRental({ ...rental, dietPregnant: e.target.value })} /></label>
+                  <label>Andre hensyn<input value={rental.dietOther || ""} disabled={readOnly} onChange={(e) => setRental({ ...rental, dietOther: e.target.value })} placeholder="Fritekst" /></label>
                 </div>
                 <h3>Allergier</h3>
                 <div className="chips">
                   {defaultAllergens.map((a) => {
                     const active = ((rental.allergens || {})[a] || 0) > 0;
-                    return <div key={a}><button type="button" className={active ? "btn active" : "btn"} onClick={() => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={(rental.allergens || {})[a]} onChange={(e) => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: Number(e.target.value) } })} />}</div>;
+                    return <div key={a}><button type="button" className={active ? "btn active" : "btn"} disabled={readOnly} onClick={() => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: active ? 0 : 1 } })}>{a}</button>{active && <input style={{ marginTop: 4, width: 60 }} type="number" value={(rental.allergens || {})[a]} disabled={readOnly} onChange={(e) => setRental({ ...rental, allergens: { ...(rental.allergens || {}), [a]: Number(e.target.value) } })} />}</div>;
                   })}
                 </div>
               </>
@@ -10934,17 +10963,17 @@ ${opts.produksjon ? productionPageHtml : ""}
                     return (
                       <div key={addon.id} className="editable-row">
                         <label className="check">
-                          <input type="checkbox" checked={selected} onChange={() => toggleAddon(addon)} />
+                          <input type="checkbox" checked={selected} disabled={readOnly} onChange={() => toggleAddon(addon)} />
                           {addon.name} · {currency(addon.price)}{usesQty ? " per stk/person" : " (fast beløp)"}
                         </label>
                         {selected && usesQty && (
                           <label>Antall
-                            <input type="number" value={line?.quantity || 1} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} />
+                            <input type="number" value={line?.quantity || 1} disabled={readOnly} onChange={(e) => updateAddonQuantity(addon.name, Number(e.target.value) || 0)} />
                           </label>
                         )}
                         {selected && !usesQty && (
                           <label>Beløp
-                            <input type="number" value={line?.amount || 0} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} />
+                            <input type="number" value={line?.amount || 0} disabled={readOnly} onChange={(e) => updateAddonAmount(addon.name, Number(e.target.value) || 0)} />
                           </label>
                         )}
                         {selected && usesQty && <b>{currency(line?.amount || 0)}</b>}
@@ -10958,23 +10987,23 @@ ${opts.produksjon ? productionPageHtml : ""}
             {rentalSubTab === "kjoreplan" && (
               <>
                 <label className="check" style={{ marginBottom: 12 }}>
-                  <input type="checkbox" checked={!!rental.runSheetEnabled} onChange={(e) => setRental({ ...rental, runSheetEnabled: e.target.checked })} />
+                  <input type="checkbox" checked={!!rental.runSheetEnabled} disabled={readOnly} onChange={(e) => setRental({ ...rental, runSheetEnabled: e.target.checked })} />
                   Lag kjøreplan
                 </label>
                 {rental.runSheetEnabled && (
                   <>
                     <div className="form-grid four">
                       <label>Oppgave
-                        <input value={runSheetForm.task} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
+                        <input value={runSheetForm.task} disabled={readOnly} onChange={(e) => setRunSheetForm({ ...runSheetForm, task: e.target.value })} placeholder="F.eks. Vielse starter" />
                       </label>
                       <label>Ansvar (valgfritt)
-                        <input value={runSheetForm.responsible} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
+                        <input value={runSheetForm.responsible} disabled={readOnly} onChange={(e) => setRunSheetForm({ ...runSheetForm, responsible: e.target.value })} placeholder="F.eks. Servitør" />
                       </label>
                       <label>Tidspunkt (valgfritt)
-                        <input value={runSheetForm.time} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
+                        <input value={runSheetForm.time} disabled={readOnly} onChange={(e) => setRunSheetForm({ ...runSheetForm, time: e.target.value })} placeholder="F.eks. 14:00" />
                       </label>
                       <label>Gruppe
-                        <select value={runSheetForm.groupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
+                        <select value={runSheetForm.groupLabel} disabled={readOnly} onChange={(e) => setRunSheetForm({ ...runSheetForm, groupLabel: e.target.value })}>
                           <option value="">(Ingen gruppe)</option>
                           {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
                           <option value="__new__">+ Ny gruppe...</option>
@@ -10983,10 +11012,10 @@ ${opts.produksjon ? productionPageHtml : ""}
                     </div>
                     {runSheetForm.groupLabel === "__new__" && (
                       <label>Navn på ny gruppe
-                        <input value={runSheetForm.newGroupLabel} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
+                        <input value={runSheetForm.newGroupLabel} disabled={readOnly} onChange={(e) => setRunSheetForm({ ...runSheetForm, newGroupLabel: e.target.value })} placeholder="F.eks. Vielse" />
                       </label>
                     )}
-                    <button className="btn active" style={{ marginTop: 8 }} onClick={addRunSheetItem}>Legg til punkt</button>
+                    <button className="btn active" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addRunSheetItem}>Legg til punkt</button>
 
                     {runSheetItems.length > 0 && (
                       <table style={{ marginTop: 16 }}>
@@ -11002,19 +11031,19 @@ ${opts.produksjon ? productionPageHtml : ""}
                                   </tr>
                                 )}
                                 <tr>
-                                  <td><input value={item.task} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
-                                  <td><input value={item.responsible || ""} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
-                                  <td><input value={item.time || ""} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} onBlur={sortRunSheetNow} placeholder="-" /></td>
+                                  <td><input value={item.task} disabled={readOnly} onChange={(e) => updateRunSheetItem(item.id, { task: e.target.value })} /></td>
+                                  <td><input value={item.responsible || ""} disabled={readOnly} onChange={(e) => updateRunSheetItem(item.id, { responsible: e.target.value })} placeholder="-" /></td>
+                                  <td><input value={item.time || ""} disabled={readOnly} onChange={(e) => updateRunSheetItem(item.id, { time: e.target.value })} onBlur={sortRunSheetNow} placeholder="-" /></td>
                                   <td>
-                                    <select value={item.groupLabel || ""} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
+                                    <select value={item.groupLabel || ""} disabled={readOnly} onChange={(e) => updateRunSheetItem(item.id, { groupLabel: e.target.value || undefined })}>
                                       <option value="">(Ingen gruppe)</option>
                                       {runSheetGroups().map((g) => <option key={g} value={g}>{g}</option>)}
                                     </select>
                                   </td>
                                   <td style={{ whiteSpace: "nowrap" }}>
-                                    <button className="link" onClick={() => moveRunSheetItem(i, -1)}>↑</button>
-                                    <button className="link" onClick={() => moveRunSheetItem(i, 1)}>↓</button>
-                                    <button className="link danger" onClick={() => removeRunSheetItem(item.id)}>Slett</button>
+                                    <button className="link" disabled={readOnly} onClick={() => moveRunSheetItem(i, -1)}>↑</button>
+                                    <button className="link" disabled={readOnly} onClick={() => moveRunSheetItem(i, 1)}>↓</button>
+                                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeRunSheetItem(item.id)}>Slett</button>
                                   </td>
                                 </tr>
                               </React.Fragment>
@@ -11031,9 +11060,9 @@ ${opts.produksjon ? productionPageHtml : ""}
             {rentalSubTab === "pakkeliste" && (
               <>
                 <div className="form-grid two">
-                  <label>Antall retter<input type="number" value={rental.courseCount || 1} onChange={(e) => setRental({ ...rental, courseCount: Number(e.target.value) || 1 })} /></label>
+                  <label>Antall retter<input type="number" value={rental.courseCount || 1} disabled={readOnly} onChange={(e) => setRental({ ...rental, courseCount: Number(e.target.value) || 1 })} /></label>
                   <label>Type servering
-                    <select value={rental.mealType || "flere_retter"} onChange={(e) => setRental({ ...rental, mealType: e.target.value as "buffet" | "flere_retter" })}>
+                    <select value={rental.mealType || "flere_retter"} disabled={readOnly} onChange={(e) => setRental({ ...rental, mealType: e.target.value as "buffet" | "flere_retter" })}>
                       <option value="flere_retter">Flere retter</option>
                       <option value="buffet">Buffet</option>
                     </select>
@@ -11041,17 +11070,17 @@ ${opts.produksjon ? productionPageHtml : ""}
                 </div>
                 <h3 style={{ marginTop: 16 }}>Egne artikler</h3>
                 <div className="form-grid three">
-                  <input placeholder="Navn (f.eks. Ekstra stoler)" value={customPackingForm.name} onChange={(e) => setCustomPackingForm({ ...customPackingForm, name: e.target.value })} />
-                  <input placeholder="Enhet (stk, kg...)" value={customPackingForm.unit} onChange={(e) => setCustomPackingForm({ ...customPackingForm, unit: e.target.value })} />
-                  <input type="number" placeholder="Antall" value={customPackingForm.qty} onChange={(e) => setCustomPackingForm({ ...customPackingForm, qty: e.target.value })} />
+                  <input placeholder="Navn (f.eks. Ekstra stoler)" value={customPackingForm.name} disabled={readOnly} onChange={(e) => setCustomPackingForm({ ...customPackingForm, name: e.target.value })} />
+                  <input placeholder="Enhet (stk, kg...)" value={customPackingForm.unit} disabled={readOnly} onChange={(e) => setCustomPackingForm({ ...customPackingForm, unit: e.target.value })} />
+                  <input type="number" placeholder="Antall" value={customPackingForm.qty} disabled={readOnly} onChange={(e) => setCustomPackingForm({ ...customPackingForm, qty: e.target.value })} />
                 </div>
-                <button className="btn active" style={{ marginTop: 8 }} onClick={addCustomPackingItem}>Legg til artikkel</button>
+                <button className="btn active" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomPackingItem}>Legg til artikkel</button>
                 {(rental.customPackingItems || []).length > 0 && (
                   <div style={{ marginTop: 8 }}>
                     {(rental.customPackingItems || []).map((c) => (
                       <div key={c.id} className="editable-row">
                         <span>{c.name} · {c.qty} {c.unit}</span>
-                        <button className="link danger" onClick={() => removeCustomPackingItem(c.id)}>Slett</button>
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeCustomPackingItem(c.id)}>Slett</button>
                       </div>
                     ))}
                   </div>
@@ -11074,6 +11103,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                             key={t.id}
                             type="button"
                             className={active ? "btn active" : "btn"}
+                            disabled={readOnly}
                             onClick={() => {
                               const ids = active
                                 ? (rental.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
@@ -11101,12 +11131,12 @@ ${opts.produksjon ? productionPageHtml : ""}
                     {(rental.extraPackingListItems || []).map((label, i) => (
                       <div key={i} className="editable-row">
                         <span>☐ {label}</span>
-                        <button className="link danger" onClick={() => removeExtraPackingListItem(i)}>Slett</button>
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeExtraPackingListItem(i)}>Slett</button>
                       </div>
                     ))}
                     <div className="form-grid two" style={{ marginTop: 8 }}>
-                      <input placeholder="F.eks. Ekstra kull" value={newExtraPackingItem} onChange={(e) => setNewExtraPackingItem(e.target.value)} />
-                      <button className="btn active" onClick={addExtraPackingListItem}>Legg til</button>
+                      <input placeholder="F.eks. Ekstra kull" value={newExtraPackingItem} disabled={readOnly} onChange={(e) => setNewExtraPackingItem(e.target.value)} />
+                      <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addExtraPackingListItem}>Legg til</button>
                     </div>
                   </div>
                 )}
@@ -11166,7 +11196,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                         <b style={{ fontSize: 13 }}>Rom som skal planlegges:</b>
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
                           {availableRooms.map((r) => (
-                            <button key={r.id} type="button" className={selectedRoomIds.includes(r.id) ? "btn active" : "btn"} onClick={() => toggleRoomSelected(r.id)}>{r.name}</button>
+                            <button key={r.id} type="button" className={selectedRoomIds.includes(r.id) ? "btn active" : "btn"} disabled={readOnly} onClick={() => toggleRoomSelected(r.id)}>{r.name}</button>
                           ))}
                         </div>
                       </div>
@@ -11183,7 +11213,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                           )}
 
                           <div className="form-grid four" style={{ marginTop: 8 }}>
-                            <label>Antall gjester<input type="number" value={plannerGuestCount} onChange={(e) => setRental({ ...rental, guestCount: Number(e.target.value) || 0 })} /></label>
+                            <label>Antall gjester<input type="number" value={plannerGuestCount} disabled={readOnly} onChange={(e) => setRental({ ...rental, guestCount: Number(e.target.value) || 0 })} /></label>
                             <label>Margin til vegg (cm)<input type="number" value={plannerMargin} onChange={(e) => setPlannerMargin(Number(e.target.value) || 0)} /></label>
                             <label>Gangareal mellom bord (cm)<input type="number" value={plannerSpacing} onChange={(e) => setPlannerSpacing(Number(e.target.value) || 0)} /></label>
                             <label>Bordtype
@@ -11192,9 +11222,9 @@ ${opts.produksjon ? productionPageHtml : ""}
                                 {(data.tableTypes || []).filter((t) => t.category === "gjestebord").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                               </select>
                             </label>
-                            <button className="btn active" style={{ alignSelf: "end" }} onClick={runSuggestion}>Foreslå bordoppsett</button>
+                            <button className="btn active" style={{ alignSelf: "end" }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={runSuggestion}>Foreslå bordoppsett</button>
                             <label>Legg til enkeltbord
-                              <select value="" onChange={(e) => { if (e.target.value) addManualTable(e.target.value); }}>
+                              <select value="" disabled={readOnly} onChange={(e) => { if (e.target.value) addManualTable(e.target.value); }}>
                                 <option value="">Velg type...</option>
                                 {(data.tableTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name} ({t.category})</option>)}
                               </select>
@@ -11214,9 +11244,9 @@ ${opts.produksjon ? productionPageHtml : ""}
                           </p>
 
                           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                            <button className="btn" onClick={saveAsLayoutTemplate}>Lagre som standardoppsett</button>
+                            <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveAsLayoutTemplate}>Lagre som standardoppsett</button>
                             <label style={{ margin: 0 }}>Last inn standardoppsett
-                              <select value="" onChange={(e) => { if (e.target.value) loadLayoutTemplate(e.target.value); }}>
+                              <select value="" disabled={readOnly} onChange={(e) => { if (e.target.value) loadLayoutTemplate(e.target.value); }}>
                                 <option value="">Velg oppsett...</option>
                                 {(data.roomLayoutTemplates || []).filter((tpl) => tpl.roomId === activeRoomId).map((tpl) => (
                                   <option key={tpl.id} value={tpl.id}>{tpl.name} ({tpl.tables.length} bord)</option>
@@ -11229,7 +11259,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                               {(data.roomLayoutTemplates || []).filter((tpl) => tpl.roomId === activeRoomId).map((tpl) => (
                                 <div key={tpl.id} className="editable-row">
                                   <span>{tpl.name} · {tpl.tables.length} bord, {tpl.chairs.length} løse stoler</span>
-                                  <button className="link danger" onClick={() => deleteLayoutTemplate(tpl.id)}>Slett</button>
+                                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteLayoutTemplate(tpl.id)}>Slett</button>
                                 </div>
                               ))}
                             </div>
@@ -11348,9 +11378,9 @@ ${opts.produksjon ? productionPageHtml : ""}
                                         {block.groupId && (
                                           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: "#f1f5f9", padding: "4px 8px", borderRadius: 6, marginBottom: 4 }}>
                                             <b style={{ fontSize: 13 }}>Langbord (#{firstIdx}–#{lastIdx})</b>
-                                            <button className="link" onClick={() => rotateLongTableGroup(block.groupId!)}>Roter langbord</button>
-                                            <button className="link" onClick={() => reverseGroupOrder(block.groupId!)}>Snu rekkefølge</button>
-                                            <button className="link" onClick={() => ungroupAllInGroup(block.groupId!)}>Løs opp langbord</button>
+                                            <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => rotateLongTableGroup(block.groupId!)}>Roter langbord</button>
+                                            <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => reverseGroupOrder(block.groupId!)}>Snu rekkefølge</button>
+                                            <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => ungroupAllInGroup(block.groupId!)}>Løs opp langbord</button>
                                           </div>
                                         )}
                                         {block.members.map((t) => {
@@ -11369,26 +11399,26 @@ ${opts.produksjon ? productionPageHtml : ""}
                                                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                                                     {tt?.joinable && (
                                                       <label className="check">
-                                                        <input type="checkbox" checked={groupSelection.includes(t.id)} onChange={() => toggleGroupSelection(t.id)} />
+                                                        <input type="checkbox" checked={groupSelection.includes(t.id)} disabled={readOnly} onChange={() => toggleGroupSelection(t.id)} />
                                                         Velg for langbord
                                                       </label>
                                                     )}
                                                     {t.groupId && (
                                                       <>
-                                                        <button className="link" onClick={() => moveTableNumberInGroup(t.id, -1)}>▲ nr</button>
-                                                        <button className="link" onClick={() => moveTableNumberInGroup(t.id, 1)}>▼ nr</button>
+                                                        <button className="link" disabled={readOnly} onClick={() => moveTableNumberInGroup(t.id, -1)}>▲ nr</button>
+                                                        <button className="link" disabled={readOnly} onClick={() => moveTableNumberInGroup(t.id, 1)}>▼ nr</button>
                                                       </>
                                                     )}
-                                                    {!t.groupId && <button className="link" onClick={() => rotateTable(t.id)}>Roter</button>}
-                                                    <button className="link danger" onClick={() => deleteTable(t.id)}>Slett</button>
+                                                    {!t.groupId && <button className="link" disabled={readOnly} onClick={() => rotateTable(t.id)}>Roter</button>}
+                                                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteTable(t.id)}>Slett</button>
                                                   </div>
                                                   {seatCount > 0 && (
                                                     <div style={{ marginTop: 8 }}>
                                                       <b style={{ fontSize: 12 }}>Gjester ved bordet:</b>
                                                       {Array.from({ length: seatCount }).map((_, si) => (
                                                         <div key={si} className="form-grid two" style={{ marginTop: 4 }}>
-                                                          <input placeholder={`Navn, stol ${si + 1}`} value={t.seatInfo?.[si]?.name || ""} onChange={(e) => updateSeatInfo(t.id, si, { name: e.target.value })} />
-                                                          <select value={t.seatInfo?.[si]?.allergies || ""} onChange={(e) => updateSeatInfo(t.id, si, { allergies: e.target.value })}>
+                                                          <input placeholder={`Navn, stol ${si + 1}`} value={t.seatInfo?.[si]?.name || ""} disabled={readOnly} onChange={(e) => updateSeatInfo(t.id, si, { name: e.target.value })} />
+                                                          <select value={t.seatInfo?.[si]?.allergies || ""} disabled={readOnly} onChange={(e) => updateSeatInfo(t.id, si, { allergies: e.target.value })}>
                                                             <option value="">Ingen allergi</option>
                                                             {Object.entries(rental.allergens || {}).filter(([, count]) => Number(count) > 0).map(([a]) => (
                                                               <option key={a} value={a}>{a}</option>
@@ -11401,12 +11431,12 @@ ${opts.produksjon ? productionPageHtml : ""}
                                                   <div style={{ marginTop: 8 }}>
                                                     {!t.groupId && (
                                                       <label>Retning (grader)
-                                                        <input type="number" value={t.rotation} onChange={(e) => setTableRotation(t.id, Number(e.target.value) || 0)} step={15} />
+                                                        <input type="number" value={t.rotation} disabled={readOnly} onChange={(e) => setTableRotation(t.id, Number(e.target.value) || 0)} step={15} />
                                                       </label>
                                                     )}
                                                     {tt && (
                                                       <label style={{ marginTop: 8, display: "block" }}>Antall stoler (maks {tt.seats})
-                                                        <input type="number" min={0} max={tt.seats} value={t.seatsOverride ?? tt.seats} onChange={(e) => updateSeatsOverride(t.id, Number(e.target.value) || 0)} />
+                                                        <input type="number" min={0} max={tt.seats} value={t.seatsOverride ?? tt.seats} disabled={readOnly} onChange={(e) => updateSeatsOverride(t.id, Number(e.target.value) || 0)} />
                                                       </label>
                                                     )}
                                                     {tt && tt.shape !== "rund" && (
@@ -11415,7 +11445,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
                                                           {(["north", "east", "south", "west"] as const).map((side) => (
                                                             <label key={side} className="check">
-                                                              <input type="checkbox" checked={chairSidesFor(t)[side]} onChange={() => toggleChairSide(t.id, side)} />
+                                                              <input type="checkbox" checked={chairSidesFor(t)[side]} disabled={readOnly} onChange={() => toggleChairSide(t.id, side)} />
                                                               {side === "north" ? "Topp" : side === "south" ? "Bunn" : side === "east" ? "Høyre" : "Venstre"}
                                                             </label>
                                                           ))}
@@ -11423,7 +11453,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                                       </div>
                                                     )}
                                                     <label style={{ marginTop: 8, display: "block" }}>Notat for bord #{idx + 1}
-                                                      <textarea className="textarea" value={t.note || ""} onChange={(e) => updateTableNote(t.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
+                                                      <textarea className="textarea" value={t.note || ""} disabled={readOnly} onChange={(e) => updateTableNote(t.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
                                                     </label>
                                                   </div>
                                                 </div>
@@ -11436,10 +11466,10 @@ ${opts.produksjon ? productionPageHtml : ""}
                                   });
                                 })()}
                                 <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-                                  <button className="btn active" disabled={groupSelection.length < 2} onClick={joinIntoLongTable}>
+                                  <button className="btn active" disabled={readOnly || groupSelection.length < 2} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={joinIntoLongTable}>
                                     Slå sammen{groupSelection.length >= 2 ? ` (${groupSelection.length} valgt)` : ""} til langbord
                                   </button>
-                                  <button className="btn" onClick={addLooseChair}>Legg til løs stol</button>
+                                  <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addLooseChair}>Legg til løs stol</button>
                                 </div>
                                 {(rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).length > 0 && (
                                   <div style={{ marginTop: 8 }}>
@@ -11447,7 +11477,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                     {(rental.floorPlanChairs || []).filter((c) => c.roomId === activeRoomId).map((c, ci) => (
                                       <div key={c.id} className="editable-row">
                                         <span>Stol #{ci + 1}</span>
-                                        <button className="link danger" onClick={() => deleteLooseChair(c.id)}>Slett</button>
+                                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteLooseChair(c.id)}>Slett</button>
                                       </div>
                                     ))}
                                   </div>
@@ -11458,11 +11488,11 @@ ${opts.produksjon ? productionPageHtml : ""}
                                   return (
                                     <div className="soft-box" style={{ marginTop: 12 }}>
                                       <label>Retning (grader)
-                                        <input type="number" value={selectedTable.rotation} onChange={(e) => setTableRotation(selectedTable.id, Number(e.target.value) || 0)} step={15} />
+                                        <input type="number" value={selectedTable.rotation} disabled={readOnly} onChange={(e) => setTableRotation(selectedTable.id, Number(e.target.value) || 0)} step={15} />
                                       </label>
                                       {selectedTt && (
                                         <label style={{ marginTop: 8, display: "block" }}>Antall stoler (maks {selectedTt.seats})
-                                          <input type="number" min={0} max={selectedTt.seats} value={selectedTable.seatsOverride ?? selectedTt.seats} onChange={(e) => updateSeatsOverride(selectedTable.id, Number(e.target.value) || 0)} />
+                                          <input type="number" min={0} max={selectedTt.seats} value={selectedTable.seatsOverride ?? selectedTt.seats} disabled={readOnly} onChange={(e) => updateSeatsOverride(selectedTable.id, Number(e.target.value) || 0)} />
                                         </label>
                                       )}
                                       {selectedTt && selectedTt.shape !== "rund" && (
@@ -11471,7 +11501,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
                                             {(["north", "east", "south", "west"] as const).map((side) => (
                                               <label key={side} className="check">
-                                                <input type="checkbox" checked={selectedSides[side]} onChange={() => toggleChairSide(selectedTable.id, side)} />
+                                                <input type="checkbox" checked={selectedSides[side]} disabled={readOnly} onChange={() => toggleChairSide(selectedTable.id, side)} />
                                                 {side === "north" ? "Topp" : side === "south" ? "Bunn" : side === "east" ? "Høyre" : "Venstre"}
                                               </label>
                                             ))}
@@ -11479,7 +11509,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                                         </div>
                                       )}
                                       <label style={{ marginTop: 8, display: "block" }}>Notat for bord #{tablesInRoom.findIndex((t) => t.id === selectedTable.id) + 1}
-                                        <textarea className="textarea" value={selectedTable.note || ""} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
+                                        <textarea className="textarea" value={selectedTable.note || ""} disabled={readOnly} onChange={(e) => updateTableNote(selectedTable.id, e.target.value)} placeholder="F.eks. bordkart, allergier, spesielle behov" />
                                       </label>
                                     </div>
                                   );
@@ -11563,7 +11593,7 @@ ${opts.produksjon ? productionPageHtml : ""}
             )}
             <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
             <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-              <button className="btn active" onClick={saveOffer}>
+              <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveOffer}>
                 {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
               </button>
               <button className="btn" onClick={() => {
@@ -11617,13 +11647,15 @@ ${opts.produksjon ? productionPageHtml : ""}
                 )}
                 <button
                   className={offer.rungInName ? "btn active" : "btn"}
-                  style={offer.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                  style={offer.rungInName && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                  disabled={readOnly}
+                  title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                   onClick={() => toggleRungIn(offer)}
                 >
                   {offer.rungInName ? "Angre" : "Slått inn"}
                 </button>
-                {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
-                <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
+                {!isEditing && <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => loadOffer(offer)}>Rediger</button>}
+                <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteOffer(offer.id!)}>Slett</button>
               </div>
             </div>
           );
@@ -11659,13 +11691,15 @@ ${opts.produksjon ? productionPageHtml : ""}
                     )}
                     <button
                       className={offer.rungInName ? "btn active" : "btn"}
-                      style={offer.rungInName ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                      style={offer.rungInName && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                      disabled={readOnly}
+                      title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                       onClick={() => toggleRungIn(offer)}
                     >
                       {offer.rungInName ? "Angre" : "Slått inn"}
                     </button>
-                    {!isEditing && <button className="btn" onClick={() => loadOffer(offer)}>Rediger</button>}
-                    <button className="btn danger" onClick={() => deleteOffer(offer.id!)}>Slett</button>
+                    {!isEditing && <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => loadOffer(offer)}>Rediger</button>}
+                    <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteOffer(offer.id!)}>Slett</button>
                   </div>
                 </div>
               );
@@ -12401,12 +12435,14 @@ const SettingsTab = React.memo(function SettingsTab({
   exportData,
   importData,
   setTab,
+  readOnly,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   exportData: () => void;
   importData: (file: File | null) => void;
   setTab: (t: Tab) => void;
+  readOnly: boolean;
 }) {
   const [open, setOpen] = useState("personell");
   const [newMaterialCategory, setNewMaterialCategory] = useState("");
@@ -12497,45 +12533,46 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
 
   return (
     <section className="card">
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
       <Section id="personell" title="Personell">
         <div className="form-grid">
           <label>MVA mat<input type="number" value={localSettings.foodVat}
             onChange={(e) => setLocalSettings({ ...localSettings, foodVat: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
           <label>MVA alkohol<input type="number" value={localSettings.alcoholVat ?? 25}
             onChange={(e) => setLocalSettings({ ...localSettings, alcoholVat: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
           <label>Kostnad kokker/time<input type="number" value={localSettings.chefHourlyRate}
             onChange={(e) => setLocalSettings({ ...localSettings, chefHourlyRate: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
           <label>Grunntid kokker/min<input type="number" value={localSettings.chefBaseMinutes}
             onChange={(e) => setLocalSettings({ ...localSettings, chefBaseMinutes: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
           <label>Tillegg min pr 10 pers<input type="number" value={localSettings.chefExtraMinutesPer10}
             onChange={(e) => setLocalSettings({ ...localSettings, chefExtraMinutesPer10: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
           <label>2 kokker over antall<input type="number" value={localSettings.twoChefsOverGuestCount}
             onChange={(e) => setLocalSettings({ ...localSettings, twoChefsOverGuestCount: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
           <label>Servitør/time<input type="number" value={localSettings.waiterHourlyRate}
             onChange={(e) => setLocalSettings({ ...localSettings, waiterHourlyRate: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
           <label>Servitør etter midnatt<input type="number" value={localSettings.waiterAfterMidnightHourlyRate}
             onChange={(e) => setLocalSettings({ ...localSettings, waiterAfterMidnightHourlyRate: Number(e.target.value) })}
-            onBlur={() => updateData({ settings: localSettings })} /></label>
+            onBlur={() => updateData({ settings: localSettings })} disabled={readOnly} /></label>
         </div>
       </Section>
 
       <Section id="notifications" title="Varsel-e-post for nye portalbestillinger">
         <div className="form-grid two">
-          <input value={newNotifyEmail} onChange={(e) => setNewNotifyEmail(e.target.value)} placeholder="navn@berbusmel.no" />
-          <button className="btn active" onClick={addNotifyEmail}>Legg til</button>
+          <input value={newNotifyEmail} onChange={(e) => setNewNotifyEmail(e.target.value)} placeholder="navn@berbusmel.no" disabled={readOnly} />
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addNotifyEmail}>Legg til</button>
         </div>
         {(data.settings.notificationEmails || []).length === 0 && <p className="muted">Ingen mottakere lagt til – bruker `NOTIFY_EMAIL` fra miljøvariabler som reserveløsning.</p>}
         {(data.settings.notificationEmails || []).map((email) => (
           <div key={email} className="editable-row">
             <span>{email}</span>
-            <button className="link danger" onClick={() => removeNotifyEmail(email)}>Slett</button>
+            <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeNotifyEmail(email)}>Slett</button>
           </div>
         ))}
       </Section>
@@ -12552,6 +12589,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                   retailMargins: { ...(localSettings.retailMargins || {}), [cat]: Number(e.target.value) }
                 })}
                 onBlur={() => updateData({ settings: localSettings })}
+                disabled={readOnly}
               />
             </label>
           ))}
@@ -12571,12 +12609,14 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                 value={v.name}
                 onChange={(e) => setLocalVenues(localVenues.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
                 onBlur={() => updateData({ venues: localVenues })}
+                disabled={readOnly}
               />
               <input
                 type="number"
                 value={v.price}
                 onChange={(e) => setLocalVenues(localVenues.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
                 onBlur={() => updateData({ venues: localVenues })}
+                disabled={readOnly}
               />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
                 <span style={{ fontSize: 12, color: "#64748b" }}>Rom:</span>
@@ -12588,6 +12628,8 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                       type="button"
                       className={active ? "btn active" : "btn"}
                       style={{ padding: "2px 8px", fontSize: 12 }}
+                      disabled={readOnly}
+                      title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                       onClick={() => {
                         const roomIds = active ? (v.roomIds || []).filter((id) => id !== room.id) : [...(v.roomIds || []), room.id];
                         const next = localVenues.map((x, ix) => ix === i ? { ...x, roomIds } : x);
@@ -12601,7 +12643,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                 })}
                 {(data.rooms || []).length === 0 && <span style={{ fontSize: 12, color: "#94a3b8" }}>Ingen rom lagret ennå (se Rombibliotek)</span>}
               </div>
-              <button className="link danger" onClick={() => {
+              <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
                 const next = localVenues.filter((x) => x.id !== v.id);
                 setLocalVenues(next);
                 updateData({ venues: next });
@@ -12610,9 +12652,9 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
           ))}
         </div>
         <div className="form-grid three">
-          <input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} />
-          <input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} />
-          <button className="btn active" onClick={() => {
+          <input placeholder="Nytt lokale" value={newVenue.name} onChange={(e) => setNewVenue({ ...newVenue, name: e.target.value })} disabled={readOnly} />
+          <input type="number" placeholder="Pris" value={newVenue.price} onChange={(e) => setNewVenue({ ...newVenue, price: e.target.value })} disabled={readOnly} />
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
             if (!newVenue.name.trim()) return;
             const next = [...localVenues, { id: `${idFromName(newVenue.name)}-${Date.now()}`, name: newVenue.name.trim(), price: Number(newVenue.price) || 0 }];
             setLocalVenues(next);
@@ -12632,6 +12674,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                   onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
                   onBlur={() => updateData({ rentalAddons: localRentalAddons })}
                   style={{ flex: "2 1 240px", minWidth: 160, whiteSpace: "normal", height: "auto", minHeight: 38 }}
+                  disabled={readOnly}
                 />
                 <input
                   type="number"
@@ -12639,11 +12682,13 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                   onChange={(e) => setLocalRentalAddons(localRentalAddons.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
                   onBlur={() => updateData({ rentalAddons: localRentalAddons })}
                   style={{ flex: "0 0 100px", width: 100, height: 38 }}
+                  disabled={readOnly}
                 />
                 <label className="check" style={{ whiteSpace: "nowrap" }}>
     <input
       type="checkbox"
       checked={!!addon.perUnit}
+      disabled={readOnly}
       onChange={(e) => {
         const next = localRentalAddons.map((x, ix) => ix === i ? { ...x, perUnit: e.target.checked } : x);
         setLocalRentalAddons(next);
@@ -12652,7 +12697,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
     />
     pr stk
   </label>
-                <button className="link danger" onClick={() => {
+                <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
                   const next = localRentalAddons.filter((x) => x.id !== addon.id);
                   setLocalRentalAddons(next);
                   updateData({ rentalAddons: next });
@@ -12667,28 +12712,28 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                   {(addon.packingItems || []).map((pi) => (
                     <div key={pi.id} className="editable-row">
                       <span>{pi.name} · {pi.qty} {pi.unit}</span>
-                      <button className="link danger" onClick={() => removeAddonPackingItem(addon.id, pi.id)}>Slett</button>
+                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeAddonPackingItem(addon.id, pi.id)}>Slett</button>
                     </div>
                   ))}
                   <div className="form-grid three" style={{ marginTop: 8 }}>
-                    <input placeholder="Navn (f.eks. Knust is)" value={addonPackingForm.name} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, name: e.target.value })} />
-                    <input placeholder="Enhet (kg, stk...)" value={addonPackingForm.unit} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, unit: e.target.value })} />
-                    <input type="number" placeholder="Antall" value={addonPackingForm.qty} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, qty: e.target.value })} />
+                    <input placeholder="Navn (f.eks. Knust is)" value={addonPackingForm.name} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, name: e.target.value })} disabled={readOnly} />
+                    <input placeholder="Enhet (kg, stk...)" value={addonPackingForm.unit} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, unit: e.target.value })} disabled={readOnly} />
+                    <input type="number" placeholder="Antall" value={addonPackingForm.qty} onChange={(e) => setAddonPackingForm({ ...addonPackingForm, qty: e.target.value })} disabled={readOnly} />
                   </div>
-                  <button className="btn active" style={{ marginTop: 8 }} onClick={() => addAddonPackingItem(addon.id)}>Legg til artikkel</button>
+                  <button className="btn active" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addAddonPackingItem(addon.id)}>Legg til artikkel</button>
                 </div>
               )}
             </React.Fragment>
           ))}
         </div>
         <div className="form-grid four">
-  <input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} />
-  <input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} />
+  <input placeholder="Nytt tillegg" value={newRentalAddon.name} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, name: e.target.value })} disabled={readOnly} />
+  <input type="number" placeholder="Pris" value={newRentalAddon.price} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, price: e.target.value })} disabled={readOnly} />
   <label className="check">
-    <input type="checkbox" checked={newRentalAddon.perUnit} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, perUnit: e.target.checked })} />
+    <input type="checkbox" checked={newRentalAddon.perUnit} onChange={(e) => setNewRentalAddon({ ...newRentalAddon, perUnit: e.target.checked })} disabled={readOnly} />
     pr stk
   </label>
-  <button className="btn active" onClick={() => {
+  <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
     if (!newRentalAddon.name.trim()) return;
     const next = [...localRentalAddons, { id: `${idFromName(newRentalAddon.name)}-${Date.now()}`, name: newRentalAddon.name.trim(), price: Number(newRentalAddon.price) || 0, perUnit: newRentalAddon.perUnit }];
     setLocalRentalAddons(next);
@@ -12711,8 +12756,9 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                   onChange={(e) => setLocalPackingListTemplates(localPackingListTemplates.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
                   onBlur={() => updateData({ packingListTemplates: localPackingListTemplates })}
                   style={{ flex: "2 1 240px", minWidth: 160 }}
+                  disabled={readOnly}
                 />
-                <button className="link danger" onClick={() => removePackingListTemplate(template.id)}>Slett</button>
+                <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removePackingListTemplate(template.id)}>Slett</button>
                 <button className="link" onClick={() => setExpandedPackingTemplateId(expandedPackingTemplateId === template.id ? null : template.id)}>
                   Sjekkpunkter ({template.items.length})
                 </button>
@@ -12722,12 +12768,12 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                   {template.items.map((item) => (
                     <div key={item.id} className="editable-row">
                       <span>{item.label}</span>
-                      <button className="link danger" onClick={() => removePackingTemplateItem(template.id, item.id)}>Slett</button>
+                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removePackingTemplateItem(template.id, item.id)}>Slett</button>
                     </div>
                   ))}
                   <div className="form-grid two" style={{ marginTop: 8 }}>
-                    <input placeholder="Sjekkpunkt (f.eks. Kull)" value={newPackingTemplateItemLabel} onChange={(e) => setNewPackingTemplateItemLabel(e.target.value)} />
-                    <button className="btn active" onClick={() => addPackingTemplateItem(template.id)}>Legg til punkt</button>
+                    <input placeholder="Sjekkpunkt (f.eks. Kull)" value={newPackingTemplateItemLabel} onChange={(e) => setNewPackingTemplateItemLabel(e.target.value)} disabled={readOnly} />
+                    <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addPackingTemplateItem(template.id)}>Legg til punkt</button>
                   </div>
                 </div>
               )}
@@ -12735,8 +12781,8 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
           ))}
         </div>
         <div className="form-grid two">
-          <input placeholder="Ny mal (f.eks. BBQ-buffet)" value={newPackingListTemplateName} onChange={(e) => setNewPackingListTemplateName(e.target.value)} />
-          <button className="btn active" onClick={addPackingListTemplate}>+ Ny mal</button>
+          <input placeholder="Ny mal (f.eks. BBQ-buffet)" value={newPackingListTemplateName} onChange={(e) => setNewPackingListTemplateName(e.target.value)} disabled={readOnly} />
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addPackingListTemplate}>+ Ny mal</button>
         </div>
       </Section>
 
@@ -12746,6 +12792,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
           newValue={newMaterialCategory}
           setNewValue={setNewMaterialCategory}
           onSave={(next) => updateData({ materialCategories: next })}
+          disabled={readOnly}
         />
       </Section>
 
@@ -12756,6 +12803,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
           newValue={newProductCategory}
           setNewValue={setNewProductCategory}
           onSave={(next) => updateData({ productCategories: next })}
+          disabled={readOnly}
         />
         <h3>Menykategorier</h3>
         <CategoryEditor
@@ -12763,6 +12811,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
           newValue={newMenuCategory}
           setNewValue={setNewMenuCategory}
           onSave={(next) => updateData({ menuCategories: next })}
+          disabled={readOnly}
         />
       </Section>
 
@@ -12774,14 +12823,16 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
                 value={p.name}
                 onChange={(e) => setLocalPackaging(localPackaging.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
                 onBlur={() => updateData({ packaging: localPackaging })}
+                disabled={readOnly}
               />
               <input
                 type="number"
                 value={p.price}
                 onChange={(e) => setLocalPackaging(localPackaging.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
                 onBlur={() => updateData({ packaging: localPackaging })}
+                disabled={readOnly}
               />
-              <button className="link danger" onClick={() => {
+              <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
                 const next = localPackaging.filter((x) => x.id !== p.id);
                 setLocalPackaging(next);
                 updateData({ packaging: next });
@@ -12790,9 +12841,9 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
           ))}
         </div>
         <div className="form-grid three">
-          <input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} />
-          <input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} />
-          <button className="btn active" onClick={() => {
+          <input placeholder="Ny emballasje" value={newPackaging.name} onChange={(e) => setNewPackaging({ ...newPackaging, name: e.target.value })} disabled={readOnly} />
+          <input type="number" placeholder="Pris" value={newPackaging.price} onChange={(e) => setNewPackaging({ ...newPackaging, price: e.target.value })} disabled={readOnly} />
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
             if (!newPackaging.name.trim()) return;
             const next = [...localPackaging, { id: `${idFromName(newPackaging.name)}-${Date.now()}`, name: newPackaging.name.trim(), price: Number(newPackaging.price) || 0 }];
             setLocalPackaging(next);
@@ -12805,9 +12856,9 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
       <h3>Database</h3>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button className="btn active" onClick={exportData}>Eksporter database</button>
-        <label className="btn">
+        <label className="btn" style={readOnly ? { opacity: 0.5, cursor: "not-allowed" } : undefined} title={readOnly ? "Du har ikke redigeringstilgang" : undefined}>
           Importer database
-          <input type="file" accept="application/json" hidden onChange={(e) => importData(e.target.files?.[0] || null)} />
+          <input type="file" accept="application/json" hidden disabled={readOnly} onChange={(e) => { if (!readOnly) importData(e.target.files?.[0] || null); }} />
         </label>
       </div>
       <p style={{ fontSize: 12, color: "#64748b" }}>Tips: Ta backup før du importerer ny fil.</p>
