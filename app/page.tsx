@@ -7347,7 +7347,7 @@ ${orderPages}`;
               <div className="card">
                 <div className="between">
                   <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12 }}>
-                    <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Dagens produksjonsgrid</h3>
+                    <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Dagens produksjon</h3>
                     <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Fyll inn antall per kunde/kanal.</p>
                   </div>
                   <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={applyRecurringOrdersForDay}>Legg til fastordre for denne dagen</button>
@@ -7371,10 +7371,10 @@ ${orderPages}`;
                   <table>
                     <thead>
                       <tr>
-                        <th style={{ position: "sticky", left: 0, zIndex: 3, background: "#f8fafc" }}>Produkt</th>
-                        <th style={{ position: "sticky", left: 160, zIndex: 3, background: "#f8fafc" }}>Kategori</th>
-                        <th style={{ position: "sticky", left: 300, zIndex: 3, background: "#f8fafc", textAlign: "center" }}>Sum</th>
-                        <th style={{ position: "sticky", left: 370, zIndex: 3, background: "#f8fafc", textAlign: "center", borderRight: "2px solid #cbd5e1" }}>Bestillinger</th>
+                        <th style={{ position: "sticky", left: 0, zIndex: 3, backgroundColor: "#f8fafc", width: 170, minWidth: 170, maxWidth: 170 }}>Produkt</th>
+                        <th style={{ position: "sticky", left: 170, zIndex: 3, backgroundColor: "#f8fafc", width: 150, minWidth: 150, maxWidth: 150 }}>Kategori</th>
+                        <th style={{ position: "sticky", left: 320, zIndex: 3, backgroundColor: "#f8fafc", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}>Sum</th>
+                        <th style={{ position: "sticky", left: 380, zIndex: 3, backgroundColor: "#f8fafc", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", borderRight: "2px solid #cbd5e1" }}>Bestillinger</th>
                         {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
                       </tr>
                     </thead>
@@ -7392,10 +7392,10 @@ ${orderPages}`;
                         const total = totalForProduct(product.id, { ...activeDay, quantities: localQuantities });
                         return (
                           <tr key={line.id}>
-                            <td style={{ position: "sticky", left: 0, zIndex: 1, background: "white" }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
-                            <td style={{ position: "sticky", left: 160, zIndex: 1, background: "white" }}>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
-                            <td style={{ position: "sticky", left: 300, zIndex: 1, background: "white", textAlign: "center" }}><b>{total}</b></td>
-                            <td style={{ position: "sticky", left: 370, zIndex: 1, background: "white", textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                            <td style={{ position: "sticky", left: 0, zIndex: 1, backgroundColor: "white", width: 170, minWidth: 170, maxWidth: 170 }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                            <td style={{ position: "sticky", left: 170, zIndex: 1, backgroundColor: "white", width: 150, minWidth: 150, maxWidth: 150 }}>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                            <td style={{ position: "sticky", left: 320, zIndex: 1, backgroundColor: "white", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}><b>{total}</b></td>
+                            <td style={{ position: "sticky", left: 380, zIndex: 1, backgroundColor: "white", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                             {columns.map((col) => (
                               <td key={col.id}>
                                 <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
@@ -7422,10 +7422,10 @@ ${orderPages}`;
                               const total = totalForProduct(product.id);
                               return (
                                 <tr key={product.id} style={{ background: "#fffbeb" }}>
-                                  <td style={{ position: "sticky", left: 0, zIndex: 1, background: "#fffbeb" }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
-                                  <td style={{ position: "sticky", left: 160, zIndex: 1, background: "#fffbeb" }}><small style={{ color: "#64748b" }}>{product.category}</small></td>
-                                  <td style={{ position: "sticky", left: 300, zIndex: 1, background: "#fffbeb", textAlign: "center" }}><b>{total}</b></td>
-                                  <td style={{ position: "sticky", left: 370, zIndex: 1, background: "#fffbeb", textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                                  <td style={{ position: "sticky", left: 0, zIndex: 1, backgroundColor: "#fffbeb", width: 170, minWidth: 170, maxWidth: 170 }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                                  <td style={{ position: "sticky", left: 170, zIndex: 1, backgroundColor: "#fffbeb", width: 150, minWidth: 150, maxWidth: 150 }}><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                                  <td style={{ position: "sticky", left: 320, zIndex: 1, backgroundColor: "#fffbeb", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}><b>{total}</b></td>
+                                  <td style={{ position: "sticky", left: 380, zIndex: 1, backgroundColor: "#fffbeb", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                                   {columns.map((col) => (
                                     <td key={col.id}>
                                       <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
