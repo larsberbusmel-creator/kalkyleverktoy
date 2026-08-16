@@ -378,6 +378,7 @@ type UserAccessEntry = {
   role: "superadmin" | "user";
   permissions: Partial<Record<Tab, TabPermission>>;
   createdAt?: string;
+  authUserId?: string;
 };
 
 type AppData = {
@@ -12074,6 +12075,8 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
   isSuperadmin: boolean;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const emptyEntry = (): UserAccessEntry => ({
     id: `user-${Date.now()}`,
     email: "",
@@ -12092,13 +12095,33 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
     );
   }
 
+  async function callAdminApi(path: string, body: any): Promise<{ ok: boolean; data?: any; error?: string }> {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return { ok: false, error: "Ikke innlogget." };
+    try {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: json.error || `Feil (${res.status})` };
+      return { ok: true, data: json };
+    } catch (e) {
+      return { ok: false, error: "Nettverksfeil." };
+    }
+  }
+
   function startNew() {
     setForm(emptyEntry());
     setEditingId("new");
+    setFeedback(null);
   }
   function startEdit(u: UserAccessEntry) {
     setForm({ ...u, permissions: { ...u.permissions } });
     setEditingId(u.id);
+    setFeedback(null);
   }
   function cancelEdit() {
     setEditingId(null);
@@ -12123,12 +12146,58 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
     setForm({ ...form, permissions: { ...form.permissions, [tabKey]: nextPerm } });
   }
 
+  async function inviteUser() {
+    if (!form.email.trim()) return alert("Legg inn e-postadresse først.");
+    setBusy(true);
+    setFeedback(null);
+    const result = await callAdminApi("/api/admin/users/create", { email: form.email.trim(), name: form.name });
+    setBusy(false);
+    if (result.ok) {
+      setForm((f) => ({ ...f, authUserId: result.data.authUserId }));
+      setFeedback({ type: "success", text: `Invitasjon sendt til ${form.email.trim()}. Husk å trykke "Lagre" for å knytte innloggingen til tilgangsoppsettet.` });
+    } else {
+      setFeedback({ type: "error", text: `Kunne ikke opprette innlogging: ${result.error}` });
+    }
+  }
+
+  async function resetPassword(u: UserAccessEntry) {
+    if (!confirm(`Send lenke for å tilbakestille passord til ${u.email}?`)) return;
+    setBusy(true);
+    setFeedback(null);
+    const result = await callAdminApi("/api/admin/users/reset-password", { email: u.email });
+    setBusy(false);
+    setFeedback(result.ok
+      ? { type: "success", text: `Lenke for tilbakestilling av passord sendt til ${u.email}.` }
+      : { type: "error", text: `Kunne ikke sende tilbakestillingslenke til ${u.email}: ${result.error}` });
+  }
+
+  async function deleteLogin(u: UserAccessEntry) {
+    if (!u.authUserId) return;
+    if (!confirm(`Sikker på at du vil slette innloggingskontoen til ${u.email}?\n\nDette er UMIDDELBART og IRREVERSIBELT - personen mister tilgang til å logge inn. Tilgangsraden i listen under fjernes IKKE automatisk; gjør det som et eget steg med "Slett" om ønskelig.`)) return;
+    setBusy(true);
+    setFeedback(null);
+    const result = await callAdminApi("/api/admin/users/delete", { authUserId: u.authUserId });
+    setBusy(false);
+    setFeedback(result.ok
+      ? { type: "success", text: `Innloggingskontoen til ${u.email} er slettet. Husk å oppdatere/fjerne tilgangsraden under om ønskelig.` }
+      : { type: "error", text: `Kunne ikke slette innlogging for ${u.email}: ${result.error}` });
+  }
+
   return (
     <section className="card">
       <p style={{ color: "#64748b", marginTop: 0 }}>
         Styr hvilke faner ansatte kan se og redigere. Brukere som ikke ligger i denne listen får foreløpig full tilgang
         (bakoverkompatibelt) — legg til alle som skal ha begrenset tilgang her.
       </p>
+
+      {feedback && (
+        <div style={feedback.type === "success"
+          ? { background: "#dcfce7", border: "1px solid #16a34a", borderRadius: 12, padding: 12, margin: "12px 0", color: "#166534" }
+          : { background: "#fef2f2", border: "1px solid #dc2626", borderRadius: 12, padding: 12, margin: "12px 0", color: "#991b1b" }}
+        >
+          {feedback.text}
+        </div>
+      )}
 
       {editingId === null && (
         <button className="btn active" onClick={startNew}>+ Ny bruker</button>
@@ -12153,6 +12222,16 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
                 <option value="superadmin">Superadmin (full tilgang til alt)</option>
               </select>
             </label>
+          </div>
+
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+            {form.authUserId ? (
+              <span style={{ color: "#166534", fontWeight: 700, fontSize: 13 }}>✓ Innlogging opprettet</span>
+            ) : (
+              <button className="btn" disabled={busy || !form.email.trim()} onClick={inviteUser}>
+                Opprett innlogging og send invitasjon
+              </button>
+            )}
           </div>
 
           {form.role === "user" && (
@@ -12187,8 +12266,12 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
                   ? "Alt"
                   : allTabConfig.filter((t) => u.permissions[t.key]?.view).map((t) => t.label + (u.permissions[t.key]?.edit ? " (rediger)" : " (se)")).join(", ") || "Ingen"}
               </td>
-              <td style={{ display: "flex", gap: 8 }}>
+              <td style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn" onClick={() => startEdit(u)}>Rediger</button>
+                <button className="btn" disabled={busy} onClick={() => resetPassword(u)}>Send passord-tilbakestilling</button>
+                {u.authUserId && (
+                  <button className="btn danger" disabled={busy} onClick={() => deleteLogin(u)}>Slett innlogging</button>
+                )}
                 <button className="btn danger" onClick={() => deleteEntry(u.id)}>Slett</button>
               </td>
             </tr>
