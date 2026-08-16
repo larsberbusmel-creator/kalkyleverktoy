@@ -4134,11 +4134,13 @@ th{background:#f3f4f6}
           const avgMargin = marginPercentFrom(priceExVat, costRange.avg);
           return (
             <div className="soft-box">
-              <h2>Meny-oppbygging (forrett/hovedrett/dessert)</h2>
-              <p style={{ color: "#64748b", fontSize: 13 }}>
-                Bygg menyen av rettkategorier. Hver kategori kan ha flere alternativer (eksisterende kalkulerte produkter).
-                Ved bestilling kan kunden velge hvilket alternativ som gjelder, og produksjonsgrunnlaget regnes ut fra faktisk valg.
-              </p>
+              <div style={{ borderLeft: "4px solid #db2777", paddingLeft: 12 }}>
+                <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Meny-oppbygging (forrett/hovedrett/dessert)</h3>
+                <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>
+                  Bygg menyen av rettkategorier. Hver kategori kan ha flere alternativer (eksisterende kalkulerte produkter).
+                  Ved bestilling kan kunden velge hvilket alternativ som gjelder, og produksjonsgrunnlaget regnes ut fra faktisk valg.
+                </p>
+              </div>
 
               <div className="form-grid three">
                 <input value={newCourseName} disabled={readOnly} onChange={(e) => setNewCourseName(e.target.value)} placeholder="Ny rettkategori, f.eks. Forrett" />
@@ -5471,11 +5473,13 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
 
       {showWebshopImport && (
         <div className="soft-box">
-          <h3>Importer webshopordre</h3>
-          <p style={{ color: "#64748b" }}>
-            Lim inn e-posttekst fra Postmark/webshop. Systemet matcher på produktnummer (f.eks. CA000004).
-            URL-lenker og støytekst fjernes automatisk.
-          </p>
+          <div style={{ borderLeft: "4px solid #2563eb", paddingLeft: 12 }}>
+            <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Importer webshopordre</h3>
+            <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>
+              Lim inn e-posttekst fra Postmark/webshop. Systemet matcher på produktnummer (f.eks. CA000004).
+              URL-lenker og støytekst fjernes automatisk.
+            </p>
+          </div>
           <textarea className="textarea" value={webshopRawText} disabled={readOnly} onChange={(e) => setWebshopRawText(e.target.value)} placeholder="Lim inn e-posttekst her..." style={{ minHeight: 200 }} />
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
             <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={parseWebshopOrder}>Les ordre</button>
@@ -5614,8 +5618,10 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
             if (selectedForAdd?.type !== "selskapsmeny" || !(selectedForAdd.menuCourses || []).length) return null;
             return (
               <div className="soft-box">
-                <h3>Fordel gjester per rett ({selectedForAdd.name})</h3>
-                <p style={{ color: "#64748b", fontSize: 13 }}>Totalt antall gjester for denne menylinjen er {lineToAdd.quantity}. Fordel dette tallet per rettkategori under.</p>
+                <div style={{ borderLeft: "4px solid #2563eb", paddingLeft: 12 }}>
+                  <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Fordel gjester per rett ({selectedForAdd.name})</h3>
+                  <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Totalt antall gjester for denne menylinjen er {lineToAdd.quantity}. Fordel dette tallet per rettkategori under.</p>
+                </div>
                 {(selectedForAdd.menuCourses || []).map((course) => {
                   const rows = menuSelectionDraft[course.id] || [{ productId: "", guestCount: lineToAdd.quantity || 1 }];
                   const totalGuests = menuSelectionTotalGuests(course.id);
@@ -8124,7 +8130,10 @@ ${orderPages}`;
           {panel === "invoice" && (
             <div className="card">
               <div className="between">
-                <div><h3>Fakturagrunnlag</h3><p style={{ color: "#64748b" }}>Alle dager i perioden må være godkjent før print.</p></div>
+                <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12 }}>
+                  <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Fakturagrunnlag</h3>
+                  <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Alle dager i perioden må være godkjent før print.</p>
+                </div>
                 <button className="btn active" onClick={printInvoice}>Print fakturagrunnlag</button>
               </div>
               <div className="form-grid two">
@@ -8162,7 +8171,10 @@ ${orderPages}`;
           {/* Godkjenning */}
           <div className="card">
             <div className="production-approve-box">
-              <div><h3>Godkjenning av dag</h3><p style={{ color: "#64748b" }}>Dagen må godkjennes før den kan tas med i fakturagrunnlaget.</p></div>
+              <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12 }}>
+                <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Godkjenning av dag</h3>
+                <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Dagen må godkjennes før den kan tas med i fakturagrunnlaget.</p>
+              </div>
               <button
                 className={activeDay.approved ? "btn active" : "btn"}
                 disabled={readOnly}
@@ -8185,9 +8197,9 @@ ${orderPages}`;
         <>
           <div className="card">
             <div className="between">
-              <div>
-                <h3>Cateringordre for {weekdayNo(activeDate)} {formatDateNo(activeDate)}</h3>
-                <p style={{ color: "#64748b" }}>Ordre av type Catering og Påsmurt vises automatisk på leveringsdatoen.</p>
+              <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12 }}>
+                <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Cateringordre for {weekdayNo(activeDate)} {formatDateNo(activeDate)}</h3>
+                <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Ordre av type Catering og Påsmurt vises automatisk på leveringsdatoen.</p>
               </div>
               <button className="btn active" onClick={printCateringDay}>
                 Print alle ordre for dagen
