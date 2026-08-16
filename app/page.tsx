@@ -9655,20 +9655,6 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     }
     updateListRpc("rentalOffers", { [offerId]: offer });
 
-    const teardownNoteId = `note-teardown-${offerId}`;
-    const otherNotes = (data.calendarNotes || []).filter((n) => n.id !== teardownNoteId);
-    if (offer.teardownAt) {
-      const venueName = offer.venueExternal ? (offer.venueExternalName || "Eksternt lokale") : offer.venue;
-      updateData({
-        calendarNotes: [
-          ...otherNotes,
-          { id: teardownNoteId, date: offer.teardownAt.slice(0, 10), title: `Nedrigg (${offer.customer}) (${venueName})`, text: `Nedrigg kl. ${offer.teardownAt.slice(11, 16)}` },
-        ],
-      });
-    } else {
-      updateData({ calendarNotes: otherNotes });
-    }
-
     if (offer.date) {
       const existingLinkedOrder = (data.orders || []).find((o) => o.id === `rental-order-${offerId}`);
       const rentalOrder = {
@@ -10873,7 +10859,7 @@ ${opts.produksjon ? productionPageHtml : ""}
                     onChange={(e) => setRental({ ...rental, teardownAt: e.target.value })}
                   />
                   <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                    Fylles dette ut, legges det automatisk inn et notat i kalenderen: "Nedrigg ({rental.customer || "kundenavn"}) ({rental.venueExternal ? (rental.venueExternalName || "lokalenavn") : (rental.venue || "lokalenavn")})".
+                    Fylles dette ut, dukker det opp som en egen hendelse i den abonnerte kalenderen: "Nedrigg, {rental.customer || "kundenavn"}, {rental.venueExternal ? (rental.venueExternalName || "lokalenavn") : (rental.venue || "lokalenavn")}".
                   </p>
                 </div>
               </details>

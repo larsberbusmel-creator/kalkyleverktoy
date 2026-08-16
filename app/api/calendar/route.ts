@@ -77,11 +77,12 @@ export async function GET() {
 
   const orders = (row?.data?.orders || []).filter((o: any) => !o.deletedAt);
   const products = row?.data?.products || [];
+  const rentalOffers = row?.data?.rentalOffers || [];
 
   const now =
     new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 
-  const events = orders.map((o: any) => {
+  const orderEvents = orders.map((o: any) => {
     const customerName =
       o.customerType === "bedrift"
         ? o.companyName || o.customer
@@ -147,6 +148,45 @@ export async function GET() {
 
     return lines;
   }).join("\r\n");
+
+  // Nedrigg-hendelser: egne VEVENT-blokker bygget fra rentalOffers med et
+  // satt teardownAt (datetime-local-verdi, format "YYYY-MM-DDTHH:MM")
+  const teardownEvents = rentalOffers
+    .filter((offer: any) => !!offer.teardownAt)
+    .map((offer: any) => {
+      const [teardownDate, teardownTime] = String(offer.teardownAt).split("T");
+      const dtstart = `DTSTART:${toIcalDate(teardownDate, teardownTime)}`;
+      const dtend = `DTEND:${addMinutes(teardownDate, teardownTime, 60)}`;
+
+      const venueName = offer.venueExternal
+        ? (offer.venueExternalName || "Eksternt lokale")
+        : offer.venue;
+      const summary = escapeIcal(`Nedrigg, ${offer.customer}, ${venueName}`);
+
+      const lines = [
+        "BEGIN:VEVENT",
+        `UID:misemetrics-teardown-${offer.id}@berbusmel.no`,
+        `DTSTAMP:${now}`,
+        dtstart,
+        dtend,
+        `SUMMARY:${summary}`,
+        `LOCATION:${escapeIcal(venueName)}`,
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        "DESCRIPTION:Påminnelse",
+        "TRIGGER:-PT60M",
+        "END:VALARM",
+        "END:VEVENT",
+      ]
+        .filter(Boolean)
+        .map(foldLine)
+        .join("\r\n");
+
+      return lines;
+    })
+    .join("\r\n");
+
+  const events = [orderEvents, teardownEvents].filter(Boolean).join("\r\n");
 
   const ical = [
     "BEGIN:VCALENDAR",
