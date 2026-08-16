@@ -150,6 +150,7 @@ note?: string;
   rungInAt?: string;
   packingListEnabled?: boolean;
   selectedPackingListTemplateIds?: string[];
+  extraPackingListItems?: string[];
 };
 
 type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
@@ -197,6 +198,7 @@ type RentalOffer = {
   rungInName?: string;
   rungInAt?: string;
   selectedPackingListTemplateIds?: string[];
+  extraPackingListItems?: string[];
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -478,16 +480,20 @@ function escapeHtml(value: string) {
 // Delt hjelpefunksjon for å bygge sjekklisteseksjonen fra valgte pakkelistemaler,
 // brukt av print-funksjonene for både Leie av lokale og Ordre. Selvstendige inline-
 // stiler, siden funksjonen limes inn i forskjellige print-vinduer med ulike <style>.
-function packingListTemplatesHtml(templates: PackingListTemplate[], selectedIds: string[] | undefined): string {
+function packingListTemplatesHtml(templates: PackingListTemplate[], selectedIds: string[] | undefined, extraItems?: string[]): string {
   const selected = templates.filter((t) => (selectedIds || []).includes(t.id));
-  if (!selected.length) return "";
+  const extras = (extraItems || []).filter(Boolean);
+  if (!selected.length && !extras.length) return "";
   const blocks = selected.map((t) => {
     const rows = t.items.length
       ? t.items.map((item) => `<div style="padding:3px 0">☐ ${escapeHtml(item.label)}</div>`).join("")
       : `<div style="color:#94a3b8">Ingen punkter i denne malen.</div>`;
     return `<div style="margin:10px 0"><h3 style="margin:0 0 4px">${escapeHtml(t.name)}</h3>${rows}</div>`;
   }).join("");
-  return `<h2 style="margin:18px 0 4px">Sjekkliste</h2>${blocks}`;
+  const extraBlock = extras.length
+    ? `<div style="margin:10px 0"><h3 style="margin:0 0 4px">Andre punkter</h3>${extras.map((label) => `<div style="padding:3px 0">☐ ${escapeHtml(label)}</div>`).join("")}</div>`
+    : "";
+  return `<h2 style="margin:18px 0 4px">Sjekkliste</h2>${blocks}${extraBlock}`;
 }
 
 function normalizeAllergen(value: string) {
@@ -4637,7 +4643,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     isRecurring: false, recurringDays: [], recurringNote: "",
     allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
     dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
-    packingListEnabled: false, selectedPackingListTemplateIds: [],
+    packingListEnabled: false, selectedPackingListTemplateIds: [], extraPackingListItems: [],
   });
 
   const todayStr = today();
@@ -4665,6 +4671,19 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   const [calendarView, setCalendarView] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(todayStr.slice(0, 7));
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(todayStr);
+  const [newExtraOrderPackingItem, setNewExtraOrderPackingItem] = useState("");
+  const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
+  const [printFlags, setPrintFlags] = useState({ recipes: false, shopping: false, packingList: false });
+
+  function addExtraOrderPackingListItem() {
+    if (!newExtraOrderPackingItem.trim()) return;
+    setForm({ ...form, extraPackingListItems: [...(form.extraPackingListItems || []), newExtraOrderPackingItem.trim()] });
+    setNewExtraOrderPackingItem("");
+  }
+
+  function removeExtraOrderPackingListItem(index: number) {
+    setForm({ ...form, extraPackingListItems: (form.extraPackingListItems || []).filter((_, i) => i !== index) });
+  }
 
   const pageSize = 30;
 
@@ -5121,7 +5140,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     return html;
   }
 
-  function printOrder(order: Order, printLevel: "basis" | "recipes" | "full" = "full") {
+  function printOrder(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
     const rows = order.orderLines.map((line) => {
       const product = data.products.find((p) => p.id === line.productId);
       const lineTotal = (product?.customerPrice || 0) * line.quantity;
@@ -5177,13 +5196,13 @@ prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPa
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
 const twoColHtml = productionTwoColumnHtml(expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections));          return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
         }).join("");
-        const recipePages = printLevel === "basis" ? "" : order.orderLines.map((line) => {
+        const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
           const html = scaledRecipeHtmlForOrder(product, Number(line.quantity) || 0, line.menuSelections);
           if (!html) return "";
           return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
         }).join("");
-const materialsAgg = printLevel === "full" ? collectOrderMaterials(order) : {};
+const materialsAgg = flags.shopping ? collectOrderMaterials(order) : {};
         const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
         Object.values(materialsAgg).forEach((entry) => {
           if (!byCategory[entry.category]) byCategory[entry.category] = [];
@@ -5197,28 +5216,11 @@ const materialsAgg = printLevel === "full" ? collectOrderMaterials(order) : {};
         }).join("");
 prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div class="page-break"></div><h2>Oppskrifter (skalert til bestilt antall)</h2>${recipePages}` : ""}${shoppingHtml ? `<div class="page-break"></div><h2>Varebestilling</h2>${shoppingHtml}` : ""}`;      }
     }
+    const packingListSection = flags.packingList
+      ? `<div class="page-break"></div>${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackingListTemplateIds, order.extraPackingListItems)}`
+      : "";
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div></body></html>`);
-    w.document.close(); w.focus();
-  }
-
-  function printOrderPackingList(order: Order) {
-    const customerName = order.customerType === "bedrift"
-      ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}`
-      : order.customer;
-    const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Pakkeliste – ${escapeHtml(customerName || order.customer)}</title><style>
-body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827}
-h1{margin-bottom:4px}
-.muted{color:#64748b}
-button{padding:10px 14px;border-radius:10px;border:1px solid #111827;background:#111827;color:white;font-weight:800;cursor:pointer;margin-bottom:14px}
-@media print{button{display:none}body{padding:0}}
-</style></head><body>
-<button onclick="window.print()">Skriv ut</button>
-<h1>Pakkeliste</h1>
-<p class="muted">${escapeHtml(customerName || "Ikke angitt")} · ${formatDateNo(order.date)} ${order.time || ""}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
-${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackingListTemplateIds)}
-</body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${packingListSection}</body></html>`);
     w.document.close(); w.focus();
   }
 
@@ -5656,31 +5658,57 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackin
             <label>Gravid<input type="number" value={form.dietPregnant || "0"} onChange={(e) => setForm({ ...form, dietPregnant: e.target.value })} /></label>
             <label>Andre hensyn<input value={form.dietOther || ""} onChange={(e) => setForm({ ...form, dietOther: e.target.value })} placeholder="Fritekst" /></label>
           </div>
-          <label className="check">
-            <input type="checkbox" checked={!!form.packingListEnabled} onChange={(e) => setForm({ ...form, packingListEnabled: e.target.checked })} />
-            Lag pakkeliste for denne ordren
-          </label>
+          <div className="section-toggle" onClick={() => setForm({ ...form, packingListEnabled: !form.packingListEnabled })}>
+            <h3>Lag pakkeliste for denne ordren</h3>
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="section-toggle-count">{(form.selectedPackingListTemplateIds || []).length + (form.extraPackingListItems || []).length}</span>
+              {form.packingListEnabled ? "▲" : "▼"}
+            </span>
+          </div>
           {form.packingListEnabled && (
-            <div className="chips">
-              {(data.packingListTemplates || []).map((t) => {
-                const active = (form.selectedPackingListTemplateIds || []).includes(t.id);
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className={active ? "btn active" : "btn"}
-                    onClick={() => {
-                      const ids = active
-                        ? (form.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
-                        : [...(form.selectedPackingListTemplateIds || []), t.id];
-                      setForm({ ...form, selectedPackingListTemplateIds: ids });
-                    }}
-                  >
-                    {t.name}
-                  </button>
-                );
-              })}
-              {(data.packingListTemplates || []).length === 0 && <span className="muted" style={{ fontSize: 13 }}>Ingen pakkelistemaler opprettet ennå – se Innstillinger.</span>}
+            <div className="soft-box">
+              <div className="chips">
+                {(data.packingListTemplates || []).map((t) => {
+                  const active = (form.selectedPackingListTemplateIds || []).includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={active ? "btn active" : "btn"}
+                      onClick={() => {
+                        const ids = active
+                          ? (form.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
+                          : [...(form.selectedPackingListTemplateIds || []), t.id];
+                        setForm({ ...form, selectedPackingListTemplateIds: ids });
+                      }}
+                    >
+                      {t.name}
+                    </button>
+                  );
+                })}
+                {(data.packingListTemplates || []).length === 0 && <span className="muted" style={{ fontSize: 13 }}>Ingen pakkelistemaler opprettet ennå – se Innstillinger.</span>}
+              </div>
+              {(form.selectedPackingListTemplateIds || []).length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  {(data.packingListTemplates || []).filter((t) => (form.selectedPackingListTemplateIds || []).includes(t.id)).map((t) => (
+                    <div key={t.id} style={{ marginBottom: 8 }}>
+                      <b>{t.name}</b>
+                      {t.items.map((item) => <div key={item.id} style={{ fontSize: 13 }}>☐ {item.label}</div>)}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <h4 style={{ marginTop: 12, marginBottom: 4 }}>Ekstra punkter (kun for denne ordren)</h4>
+              {(form.extraPackingListItems || []).map((label, i) => (
+                <div key={i} className="editable-row">
+                  <span>☐ {label}</span>
+                  <button className="link danger" onClick={() => removeExtraOrderPackingListItem(i)}>Slett</button>
+                </div>
+              ))}
+              <div className="form-grid two" style={{ marginTop: 8 }}>
+                <input placeholder="F.eks. Ekstra servietter" value={newExtraOrderPackingItem} onChange={(e) => setNewExtraOrderPackingItem(e.target.value)} />
+                <button className="btn active" onClick={addExtraOrderPackingListItem}>Legg til</button>
+              </div>
             </div>
           )}
           <h3>Allergier i ordren</h3>
@@ -5876,25 +5904,31 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackin
                   <summary style={{ cursor: "pointer", color: "#64748b" }}>Produksjonsgrunnlag</summary>
                   <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.courseName || r.source}</td><td>{r.name}</td><td>{formatAmountUnit(r.amount, r.unit)}</td></tr>)}</tbody></table>
                 </details>
+                <div className="section-toggle" style={{ marginTop: 12 }} onClick={() => setPrintOptionsOpen(!printOptionsOpen)}>
+                  <h3>Utskriftsvalg</h3>
+                  <span>{printOptionsOpen ? "▲" : "▼"}</span>
+                </div>
+                {printOptionsOpen && (
+                  <div className="soft-box">
+                    <label className="check">
+                      <input type="checkbox" checked={printFlags.recipes} onChange={(e) => setPrintFlags({ ...printFlags, recipes: e.target.checked })} />
+                      Inkluder oppskrifter
+                    </label>
+                    <label className="check">
+                      <input type="checkbox" checked={printFlags.shopping} onChange={(e) => setPrintFlags({ ...printFlags, shopping: e.target.checked })} />
+                      Inkluder varebestilling/handleliste
+                    </label>
+                    {o.packingListEnabled && (
+                      <label className="check">
+                        <input type="checkbox" checked={printFlags.packingList} onChange={(e) => setPrintFlags({ ...printFlags, packingList: e.target.checked })} />
+                        Inkluder pakkeliste
+                      </label>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                   <button className="btn" onClick={() => editOrder(o)}>Rediger</button>
-                  <select
-                    className="btn"
-                    defaultValue=""
-                    style={{ width: "auto", maxWidth: 220 }}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === "pakkeliste") printOrderPackingList(o);
-                      else if (v) printOrder(o, v as "basis" | "recipes" | "full");
-                      e.target.value = "";
-                    }}
-                  >
-                    <option value="" disabled>Skriv ut...</option>
-                    <option value="basis">Print ordre</option>
-                    <option value="recipes">Print med oppskrift</option>
-                    <option value="full">Print med oppskrift/varebestilling</option>
-                    {o.packingListEnabled && <option value="pakkeliste">Print pakkeliste</option>}
-                  </select>
+                  <button className="btn active" onClick={() => printOrder(o, printFlags)}>Print</button>
                   <button className="btn danger" onClick={() => softDeleteOrder(o.id)}>Flytt til papirkurv</button>
                 </div>
               </div>
@@ -10483,6 +10517,18 @@ h2{margin-bottom:16px}
   }
 
   const [customPackingForm, setCustomPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
+  const [showPackingListPanel, setShowPackingListPanel] = useState(false);
+  const [newExtraPackingItem, setNewExtraPackingItem] = useState("");
+
+  function addExtraPackingListItem() {
+    if (!newExtraPackingItem.trim()) return;
+    setRental({ ...rental, extraPackingListItems: [...(rental.extraPackingListItems || []), newExtraPackingItem.trim()] });
+    setNewExtraPackingItem("");
+  }
+
+  function removeExtraPackingListItem(index: number) {
+    setRental({ ...rental, extraPackingListItems: (rental.extraPackingListItems || []).filter((_, i) => i !== index) });
+  }
 
   function addCustomPackingItem() {
     if (!customPackingForm.name.trim()) return;
@@ -10510,7 +10556,7 @@ h1{margin-bottom:4px}
 <h1>Pakkeliste</h1>
 <p>${escapeHtml(rental.customer)} · ${rental.guestCount || 0} gjester · ${rental.courseCount || 1} retter · ${rental.mealType === "buffet" ? "Buffet" : "Flere retter"}</p>
 <table><thead><tr><th>Artikkel</th><th class="right">Antall</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPackingListTemplateIds)}
+${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPackingListTemplateIds, rental.extraPackingListItems)}
 <script>window.print()</script>
 </body></html>`);
     w.document.close();
@@ -11007,36 +11053,57 @@ ${opts.produksjon ? productionPageHtml : ""}
                   </div>
                 )}
 
-                <h3 style={{ marginTop: 16 }}>Bruk standard pakkeliste</h3>
-                <div className="chips">
-                  {(data.packingListTemplates || []).map((t) => {
-                    const active = (rental.selectedPackingListTemplateIds || []).includes(t.id);
-                    return (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className={active ? "btn active" : "btn"}
-                        onClick={() => {
-                          const ids = active
-                            ? (rental.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
-                            : [...(rental.selectedPackingListTemplateIds || []), t.id];
-                          setRental({ ...rental, selectedPackingListTemplateIds: ids });
-                        }}
-                      >
-                        {t.name}
-                      </button>
-                    );
-                  })}
-                  {(data.packingListTemplates || []).length === 0 && <span className="muted" style={{ fontSize: 13 }}>Ingen pakkelistemaler opprettet ennå – se Innstillinger.</span>}
+                <div className="section-toggle" style={{ marginTop: 16 }} onClick={() => setShowPackingListPanel(!showPackingListPanel)}>
+                  <h3>Bruk standard pakkeliste</h3>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="section-toggle-count">{(rental.selectedPackingListTemplateIds || []).length + (rental.extraPackingListItems || []).length}</span>
+                    {showPackingListPanel ? "▲" : "▼"}
+                  </span>
                 </div>
-                {(rental.selectedPackingListTemplateIds || []).length > 0 && (
-                  <div className="soft-box" style={{ marginTop: 8 }}>
-                    {(data.packingListTemplates || []).filter((t) => (rental.selectedPackingListTemplateIds || []).includes(t.id)).map((t) => (
-                      <div key={t.id} style={{ marginBottom: 8 }}>
-                        <b>{t.name}</b>
-                        {t.items.map((item) => <div key={item.id} style={{ fontSize: 13 }}>☐ {item.label}</div>)}
+                {showPackingListPanel && (
+                  <div className="soft-box">
+                    <div className="chips">
+                      {(data.packingListTemplates || []).map((t) => {
+                        const active = (rental.selectedPackingListTemplateIds || []).includes(t.id);
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            className={active ? "btn active" : "btn"}
+                            onClick={() => {
+                              const ids = active
+                                ? (rental.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
+                                : [...(rental.selectedPackingListTemplateIds || []), t.id];
+                              setRental({ ...rental, selectedPackingListTemplateIds: ids });
+                            }}
+                          >
+                            {t.name}
+                          </button>
+                        );
+                      })}
+                      {(data.packingListTemplates || []).length === 0 && <span className="muted" style={{ fontSize: 13 }}>Ingen pakkelistemaler opprettet ennå – se Innstillinger.</span>}
+                    </div>
+                    {(rental.selectedPackingListTemplateIds || []).length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        {(data.packingListTemplates || []).filter((t) => (rental.selectedPackingListTemplateIds || []).includes(t.id)).map((t) => (
+                          <div key={t.id} style={{ marginBottom: 8 }}>
+                            <b>{t.name}</b>
+                            {t.items.map((item) => <div key={item.id} style={{ fontSize: 13 }}>☐ {item.label}</div>)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <h4 style={{ marginTop: 12, marginBottom: 4 }}>Ekstra punkter (kun for denne utleien)</h4>
+                    {(rental.extraPackingListItems || []).map((label, i) => (
+                      <div key={i} className="editable-row">
+                        <span>☐ {label}</span>
+                        <button className="link danger" onClick={() => removeExtraPackingListItem(i)}>Slett</button>
                       </div>
                     ))}
+                    <div className="form-grid two" style={{ marginTop: 8 }}>
+                      <input placeholder="F.eks. Ekstra kull" value={newExtraPackingItem} onChange={(e) => setNewExtraPackingItem(e.target.value)} />
+                      <button className="btn active" onClick={addExtraPackingListItem}>Legg til</button>
+                    </div>
                   </div>
                 )}
 
