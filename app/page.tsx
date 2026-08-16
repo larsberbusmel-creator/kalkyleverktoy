@@ -6113,6 +6113,9 @@ function ProductionTab({
     ...storkjokkenCustomers.map((c) => ({ id: c.id, name: c.name, invoice: !c.internal })),
   ];
 
+  const [gridViewMode, setGridViewMode] = useState<"tabell" | "enkel">("tabell");
+  const [selectedSingleColumnId, setSelectedSingleColumnId] = useState<string>(columns[0]?.id || "");
+
   // Cateringordre for valgt dag
   const cateringOrders = data.orders.filter(
     (o) => o.date === activeDate && !o.deletedAt && (o.type === "catering" || o.type === "pasmuurt")
@@ -7360,86 +7363,160 @@ ${orderPages}`;
                   ))}
                 </div>
 
-                <input
-                  value={gridSearch}
-                  onChange={(e) => setGridSearch(e.target.value)}
-                  placeholder="Søk produkt, f.eks. bolle"
-                  style={{ maxWidth: 280, margin: "8px 0" }}
-                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
+                  <input
+                    value={gridSearch}
+                    onChange={(e) => setGridSearch(e.target.value)}
+                    placeholder="Søk produkt, f.eks. bolle"
+                    style={{ maxWidth: 280, margin: 0 }}
+                  />
+                  <button className={gridViewMode === "enkel" ? "btn active" : "btn"} onClick={() => setGridViewMode(gridViewMode === "tabell" ? "enkel" : "tabell")}>
+                    {gridViewMode === "enkel" ? "📊 Tabellvisning" : "📱 Én kolonne om gangen"}
+                  </button>
+                </div>
 
-                <div style={{ overflow: "auto", maxHeight: "70vh", border: "1px solid #e2e8f0", borderRadius: 10 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{ position: "sticky", top: 0, left: 0, zIndex: 4, backgroundColor: "#f8fafc", width: 170, minWidth: 170, maxWidth: 170 }}>Produkt</th>
-                        <th style={{ position: "sticky", top: 0, left: 170, zIndex: 4, backgroundColor: "#f8fafc", width: 150, minWidth: 150, maxWidth: 150 }}>Kategori</th>
-                        <th style={{ position: "sticky", top: 0, left: 320, zIndex: 4, backgroundColor: "#f8fafc", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}>Sum</th>
-                        <th style={{ position: "sticky", top: 0, left: 380, zIndex: 4, backgroundColor: "#f8fafc", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", borderRight: "2px solid #cbd5e1" }}>Bestillinger</th>
-                        {columns.map((col) => <th key={col.id} style={{ position: "sticky", top: 0, zIndex: 3, backgroundColor: "#f8fafc", textAlign: "center" }}>{col.name}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleTemplateLines
-                        .filter((line) => {
-                          if (!gridSearch.trim()) return true;
+                {(() => {
+                  const filteredVisibleLines = visibleTemplateLines.filter((line) => {
+                    if (!gridSearch.trim()) return true;
+                    const product = data.products.find((p) => p.id === line.productId);
+                    return product?.name.toLowerCase().includes(gridSearch.trim().toLowerCase());
+                  });
+                  const templateProductIds = new Set(templateLines.map((l) => l.productId));
+                  const extraProducts = data.products.filter((p) => {
+                    if (templateProductIds.has(p.id)) return false;
+                    if (ordersQuantityForProduct(p.id, activeDate) <= 0) return false;
+                    if (gridSearch.trim() && !p.name.toLowerCase().includes(gridSearch.trim().toLowerCase())) return false;
+                    return true;
+                  });
+
+                  if (gridViewMode === "enkel") {
+                    return (
+                      <div className="production-grid-simple">
+                        <label style={{ display: "block", marginBottom: 10 }}>
+                          Kunde/kanal
+                          <select
+                            value={selectedSingleColumnId}
+                            onChange={(e) => setSelectedSingleColumnId(e.target.value)}
+                            style={{ display: "block", width: "100%", maxWidth: 320, marginTop: 4 }}
+                          >
+                            {columns.map((col) => <option key={col.id} value={col.id}>{col.name}</option>)}
+                          </select>
+                        </label>
+                        {filteredVisibleLines.map((line) => {
                           const product = data.products.find((p) => p.id === line.productId);
-                          return product?.name.toLowerCase().includes(gridSearch.trim().toLowerCase());
-                        })
-                        .map((line) => {
-                        const product = data.products.find((p) => p.id === line.productId);
-                        if (!product) return null;
-                        const qtyRow = localQuantities[product.id] || {};
-                        const total = totalForProduct(product.id, { ...activeDay, quantities: localQuantities });
-                        return (
-                          <tr key={line.id}>
-                            <td style={{ position: "sticky", left: 0, zIndex: 1, backgroundColor: "white", width: 170, minWidth: 170, maxWidth: 170 }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
-                            <td style={{ position: "sticky", left: 170, zIndex: 1, backgroundColor: "white", width: 150, minWidth: 150, maxWidth: 150 }}>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
-                            <td style={{ position: "sticky", left: 320, zIndex: 1, backgroundColor: "white", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}><b>{total}</b></td>
-                            <td style={{ position: "sticky", left: 380, zIndex: 1, backgroundColor: "white", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
-                            {columns.map((col) => (
-                              <td key={col.id}>
-                                <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
-                              </td>
-                            ))}
-                        
-                          </tr>
-                        );
-                      })}
-                      {(() => {
-                        const templateProductIds = new Set(templateLines.map((l) => l.productId));
-                        const extraProducts = data.products.filter((p) => {
-                          if (templateProductIds.has(p.id)) return false;
-                          if (ordersQuantityForProduct(p.id, activeDate) <= 0) return false;
-                          if (gridSearch.trim() && !p.name.toLowerCase().includes(gridSearch.trim().toLowerCase())) return false;
-                          return true;
-                        });
-                        if (!extraProducts.length) return null;
-                        return (
+                          if (!product) return null;
+                          const qtyRow = localQuantities[product.id] || {};
+                          const total = totalForProduct(product.id, { ...activeDay, quantities: localQuantities });
+                          return (
+                            <div key={line.id} className="pg-simple-card">
+                              <div className="pg-simple-card-head">
+                                <div>
+                                  <b>{product.name}</b>
+                                  <br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small>
+                                </div>
+                                <b>{total}</b>
+                              </div>
+                              <input
+                                type="number"
+                                className="pg-simple-input"
+                                value={qtyRow[selectedSingleColumnId] || ""}
+                                disabled={readOnly}
+                                onChange={(e) => setCell(product.id, selectedSingleColumnId, Number(e.target.value) || 0)}
+                              />
+                            </div>
+                          );
+                        })}
+                        {extraProducts.length > 0 && (
                           <>
-                            <tr><td colSpan={4 + columns.length} style={{ background: "#fffbeb", color: "#92400e", fontWeight: 700, padding: "6px 8px" }}>⚠ Bestilt, men ikke i produksjonsmal</td></tr>
+                            <div className="pg-simple-warning-label">⚠ Bestilt, men ikke i produksjonsmal</div>
                             {extraProducts.map((product) => {
                               const qtyRow = localQuantities[product.id] || {};
                               const total = totalForProduct(product.id);
                               return (
-                                <tr key={product.id} style={{ background: "#fffbeb" }}>
-                                  <td style={{ position: "sticky", left: 0, zIndex: 1, backgroundColor: "#fffbeb", width: 170, minWidth: 170, maxWidth: 170 }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
-                                  <td style={{ position: "sticky", left: 170, zIndex: 1, backgroundColor: "#fffbeb", width: 150, minWidth: 150, maxWidth: 150 }}><small style={{ color: "#64748b" }}>{product.category}</small></td>
-                                  <td style={{ position: "sticky", left: 320, zIndex: 1, backgroundColor: "#fffbeb", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}><b>{total}</b></td>
-                                  <td style={{ position: "sticky", left: 380, zIndex: 1, backgroundColor: "#fffbeb", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
-                                  {columns.map((col) => (
-                                    <td key={col.id}>
-                                      <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
-                                    </td>
-                                  ))}
-                                </tr>
+                                <div key={product.id} className="pg-simple-card pg-simple-card-warning">
+                                  <div className="pg-simple-card-head">
+                                    <div>
+                                      <b>{product.name}</b>
+                                      <br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small>
+                                    </div>
+                                    <b>{total}</b>
+                                  </div>
+                                  <input
+                                    type="number"
+                                    className="pg-simple-input"
+                                    value={qtyRow[selectedSingleColumnId] || ""}
+                                    disabled={readOnly}
+                                    onChange={(e) => setCell(product.id, selectedSingleColumnId, Number(e.target.value) || 0)}
+                                  />
+                                </div>
                               );
                             })}
                           </>
-                        );
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div style={{ overflow: "auto", maxHeight: "70vh", border: "1px solid #e2e8f0", borderRadius: 10 }}>
+                      <table className="production-grid">
+                        <thead>
+                          <tr>
+                            <th className="pg-col-product" style={{ position: "sticky", top: 0, zIndex: 4, backgroundColor: "#f8fafc" }}>Produkt</th>
+                            <th className="pg-col-category" style={{ position: "sticky", top: 0, zIndex: 4, backgroundColor: "#f8fafc" }}>Kategori</th>
+                            <th className="pg-col-sum" style={{ position: "sticky", top: 0, zIndex: 4, backgroundColor: "#f8fafc" }}>Sum</th>
+                            <th className="pg-col-orders" style={{ position: "sticky", top: 0, zIndex: 4, backgroundColor: "#f8fafc" }}>Bestillinger</th>
+                            {columns.map((col) => <th key={col.id} style={{ position: "sticky", top: 0, zIndex: 3, backgroundColor: "#f8fafc", textAlign: "center" }}>{col.name}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredVisibleLines.map((line) => {
+                            const product = data.products.find((p) => p.id === line.productId);
+                            if (!product) return null;
+                            const qtyRow = localQuantities[product.id] || {};
+                            const total = totalForProduct(product.id, { ...activeDay, quantities: localQuantities });
+                            return (
+                              <tr key={line.id}>
+                                <td className="pg-col-product" style={{ position: "sticky", zIndex: 1, backgroundColor: "white" }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                                <td className="pg-col-category" style={{ position: "sticky", zIndex: 1, backgroundColor: "white" }}>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small className="pg-col-category-sub" style={{ color: "#64748b" }}>{product.category}</small></td>
+                                <td className="pg-col-sum" style={{ position: "sticky", zIndex: 1, backgroundColor: "white" }}><b>{total}</b></td>
+                                <td className="pg-col-orders" style={{ position: "sticky", zIndex: 1, backgroundColor: "white", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                                {columns.map((col) => (
+                                  <td key={col.id} className="pg-qty-cell">
+                                    <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                                  </td>
+                                ))}
+
+                              </tr>
+                            );
+                          })}
+                          {extraProducts.length > 0 && (
+                            <>
+                              <tr><td colSpan={4 + columns.length} style={{ background: "#fffbeb", color: "#92400e", fontWeight: 700, padding: "6px 8px" }}>⚠ Bestilt, men ikke i produksjonsmal</td></tr>
+                              {extraProducts.map((product) => {
+                                const qtyRow = localQuantities[product.id] || {};
+                                const total = totalForProduct(product.id);
+                                return (
+                                  <tr key={product.id} style={{ background: "#fffbeb" }}>
+                                    <td className="pg-col-product" style={{ position: "sticky", zIndex: 1, backgroundColor: "#fffbeb" }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                                    <td className="pg-col-category" style={{ position: "sticky", zIndex: 1, backgroundColor: "#fffbeb" }}><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                                    <td className="pg-col-sum" style={{ position: "sticky", zIndex: 1, backgroundColor: "#fffbeb" }}><b>{total}</b></td>
+                                    <td className="pg-col-orders" style={{ position: "sticky", zIndex: 1, backgroundColor: "#fffbeb", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                                    {columns.map((col) => (
+                                      <td key={col.id} className="pg-qty-cell">
+                                        <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
+                                      </td>
+                                    ))}
+                                  </tr>
+                                );
+                              })}
+                            </>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
             </>
           )}
@@ -8287,6 +8364,26 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
         .order-row-header { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: white; border: 0; cursor: pointer; text-align: left; gap: 12px; }
         .order-row-header:hover { background: #f8fafc; }
         .order-row-body { padding: 0 16px 16px; border-top: 1px solid #e2e8f0; background: #fafafa; }
+
+        .production-grid th.pg-col-product, .production-grid td.pg-col-product { width: 170px; min-width: 170px; max-width: 170px; left: 0; }
+        .production-grid th.pg-col-category, .production-grid td.pg-col-category { width: 150px; min-width: 150px; max-width: 150px; left: 170px; }
+        .production-grid th.pg-col-sum, .production-grid td.pg-col-sum { width: 60px; min-width: 60px; max-width: 60px; left: 320px; text-align: center; }
+        .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { width: 100px; min-width: 100px; max-width: 100px; left: 380px; text-align: center; border-right: 2px solid #cbd5e1; }
+        @media (max-width: 768px) {
+          .production-grid th.pg-col-product, .production-grid td.pg-col-product { width: 110px; min-width: 110px; max-width: 110px; }
+          .production-grid th.pg-col-category, .production-grid td.pg-col-category { width: 80px; min-width: 80px; max-width: 80px; left: 110px; }
+          .production-grid th.pg-col-sum, .production-grid td.pg-col-sum { left: 190px; }
+          .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { width: 70px; min-width: 70px; max-width: 70px; left: 250px; }
+          .production-grid .pg-col-category-sub { display: none; }
+          .production-grid th, .production-grid td { padding: 5px 6px; }
+          .production-grid input[type="number"] { min-height: 44px; font-size: 16px; }
+        }
+
+        .pg-simple-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+        .pg-simple-card-warning { background: #fffbeb; border-color: #fbbf24; }
+        .pg-simple-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+        .pg-simple-warning-label { background: #fffbeb; color: #92400e; font-weight: 700; padding: 6px 8px; border-radius: 8px; margin: 12px 0 8px; }
+        .pg-simple-input { width: 100%; min-height: 48px; font-size: 16px; text-align: center; box-sizing: border-box; }
       `}</style>
     </section>
   );
