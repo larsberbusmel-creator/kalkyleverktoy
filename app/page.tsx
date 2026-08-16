@@ -10529,9 +10529,9 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     return `<svg viewBox="0 0 ${roomPxW + 40} ${roomPxH + 40}" style="width:100%;max-width:680px;background:#f8fafc;border-radius:8px"><g transform="translate(20,20)">${wallsHtml}${obstaclesHtml}${tablesHtml}</g></svg>`;
   }
 
-  function printRiggingDocument() {
+  function printRiggingDocument(): string | null {
     const roomsToPrint = (rental.floorPlanRoomIds || []).map((id) => roomById(id)).filter(Boolean) as Room[];
-    if (!roomsToPrint.length) { alert("Ingen rom valgt for bordplanen."); return; }
+    if (!roomsToPrint.length) return null;
     const pages = roomsToPrint.map((room) => {
       const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
       const scale = Math.min(680 / Math.max(room.width, 1), 480 / Math.max(room.length, 1));
@@ -10542,21 +10542,12 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
 ${renderStaticRoomSvg(room, tables, scale, true)}
 <table><thead><tr><th>#</th><th>Bordtype</th><th>Notat</th></tr></thead><tbody>${rows}</tbody></table>`;
     }).join("");
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<html><head><title>Riggeplan – ${escapeHtml(rental.customer)}</title><style>
-body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827}
-h2{border-bottom:1px solid #e5e7eb;padding-bottom:6px}
-table{width:100%;border-collapse:collapse;margin-top:12px}
-th,td{border-bottom:1px solid #e5e7eb;padding:6px 8px;text-align:left;font-size:13px}
-@media print{.page-break{page-break-before:always}}
-</style></head><body>${pages}<script>window.print()</script></body></html>`);
-    w.document.close();
+    return `<div class="print-rigging">${pages}</div>`;
   }
 
-  function printGuestIllustration() {
+  function printGuestIllustration(): string | null {
     const roomsToPrint = (rental.floorPlanRoomIds || []).map((id) => roomById(id)).filter(Boolean) as Room[];
-    if (!roomsToPrint.length) { alert("Ingen rom valgt for bordplanen."); return; }
+    if (!roomsToPrint.length) return null;
     const pages = roomsToPrint.map((room) => {
       const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
       const scale = Math.min(680 / Math.max(room.width, 1), 480 / Math.max(room.length, 1));
@@ -10564,14 +10555,7 @@ th,td{border-bottom:1px solid #e5e7eb;padding:6px 8px;text-align:left;font-size:
 <h2>${escapeHtml(room.name)}</h2>
 ${renderStaticRoomSvg(room, tables, scale, false)}`;
     }).join("");
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<html><head><title>Bordplan – ${escapeHtml(rental.customer)}</title><style>
-body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827;text-align:center}
-h2{margin-bottom:16px}
-@media print{.page-break{page-break-before:always}}
-</style></head><body>${pages}<script>window.print()</script></body></html>`);
-    w.document.close();
+    return `<div class="print-guest">${pages}</div>`;
   }
 
   function packingListRows(): { name: string; unit: string; qty: number }[] {
@@ -10632,28 +10616,18 @@ h2{margin-bottom:16px}
     setRental({ ...rental, customPackingItems: (rental.customPackingItems || []).filter((c) => c.id !== id) });
   }
 
-  function printPackingList() {
+  function printPackingList(): string {
     const rows = packingListRows();
     const rowsHtml = rows.map((r) => `<tr><td>${escapeHtml(r.name)}</td><td class="right">${r.qty} ${escapeHtml(r.unit)}</td></tr>`).join("");
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<html><head><title>Pakkeliste – ${escapeHtml(rental.customer)}</title><style>
-body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827}
-table{width:100%;border-collapse:collapse;margin-top:12px}
-th,td{border-bottom:1px solid #e5e7eb;padding:8px 10px;text-align:left}
-.right{text-align:right}
-h1{margin-bottom:4px}
-</style></head><body>
+    return `<div class="print-packing">
 <h1>Pakkeliste</h1>
 <p>${escapeHtml(rental.customer)} · ${rental.guestCount || 0} gjester · ${rental.courseCount || 1} retter · ${rental.mealType === "buffet" ? "Buffet" : "Flere retter"}</p>
 <table><thead><tr><th>Artikkel</th><th class="right">Antall</th></tr></thead><tbody>${rowsHtml}</tbody></table>
 ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPackingListTemplateIds, rental.extraPackingListItems)}
-<script>window.print()</script>
-</body></html>`);
-    w.document.close();
+</div>`;
   }
 
-  function printOffer(opts: { tilbud?: boolean; recipes?: boolean; kjoreplan?: boolean; produksjon?: boolean }) {
+  function printOffer(opts: { tilbud?: boolean; recipes?: boolean; kjoreplan?: boolean; produksjon?: boolean }): string {
     const venueName = rental.venueExternal ? (rental.venueExternalName || "Eksternt lokale") : rental.venue;
     const productRows = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
@@ -10712,29 +10686,7 @@ ${rentalAllergenWarningHtml}
 ${productionHtml}
 ${recipePagesHtml ? `<h2 style="margin-top:20px">Oppskrifter</h2>${recipePagesHtml}` : ""}
 ${shoppingRowsR ? `<h2 style="margin-top:20px">Varebestilling</h2>${shoppingRowsR}` : ""}`;
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Tilbud – ${escapeHtml(rental.customer)}</title><style>
-@page{size:A4;margin:14mm;margin-top:14mm}html{-webkit-print-color-adjust:exact}
-body{font-family:Arial,sans-serif;color:#111827;padding:32px;line-height:1.5}
-.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
-.logo{height:90px;width:auto;object-fit:contain}
-.header-right{text-align:right;font-size:13px;color:#374151}
-h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
-table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
-th{background:#f3f4f6;text-align:left;padding:8px;border-bottom:2px solid #e5e7eb}
-td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
-.total-row{font-size:17px;font-weight:900;background:#f8fafc}
-.total-row td{padding:12px 8px}
-.info-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px}
-.info-box p{margin:4px 0}
-.included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
-.disclaimer{font-size:10px;color:#94a3b8;margin-top:8px;text-align:center}
-.footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
-.recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}
-.recipe-block h3{margin:0 0 8px;font-size:14px}
-.right{text-align:right}
-@media print{button{display:none}body{padding:0}.page-break{page-break-before:always}}*{-webkit-print-color-adjust:exact}</style></head><body>
+    return `<div class="print-offer">
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
 <div class="header">
   <img src="/logo.png" class="logo" />
@@ -10765,9 +10717,86 @@ ${opts.recipes && recipePagesHtml ? `<div class="page-break"></div><h2>Oppskrift
 ${opts.kjoreplan && rental.runSheetEnabled && runSheetItems.length ? `<div class="page-break"></div>${runSheetHtml()}` : ""}
 ${opts.produksjon ? productionPageHtml : ""}
 <div class="footer">Brødrene Berbusmel &nbsp;|&nbsp; tlf 413 73 000 &nbsp;|&nbsp; brodrene@berbusmel.no</div>
-</body></html>`);
+</div>`;
+  }
+
+  // Slår sammen alle valgte utskriftsdokumenter til ÉTT window.open()-kall.
+  // Nettlesere blokkerer window.open() nr. 2+ innenfor samme klikk-event,
+  // så å kalle printOffer/printRiggingDocument/printGuestIllustration/
+  // printPackingList hver for seg (som hver åpnet sitt eget vindu) gjorde at
+  // kun det første valgte dokumentet faktisk ble åpnet.
+  function printSelectedDocuments() {
+    const sections: string[] = [];
+    let floorPlanMissing = false;
+
+    if (printOpts.tilbud || printOpts.recipes || printOpts.kjoreplan || printOpts.produksjon) {
+      sections.push(printOffer(printOpts));
+    }
+    if (printOpts.riggedokument) {
+      const html = printRiggingDocument();
+      if (html) sections.push(html); else floorPlanMissing = true;
+    }
+    if (printOpts.gjesteillustrasjon) {
+      const html = printGuestIllustration();
+      if (html) sections.push(html); else floorPlanMissing = true;
+    }
+    if (printOpts.pakkeliste) {
+      sections.push(printPackingList());
+    }
+
+    if (!sections.length) {
+      alert("Velg minst ett dokument å skrive ut.");
+      return;
+    }
+
+    const body = sections.join('<div class="page-break"></div>');
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Utskrift – ${escapeHtml(rental.customer)}</title><style>
+@page{size:A4;margin:14mm;margin-top:14mm}
+html{-webkit-print-color-adjust:exact}
+*{-webkit-print-color-adjust:exact}
+body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
+@media print{.page-break{page-break-before:always}}
+
+.print-offer{padding:32px;line-height:1.5}
+.print-offer .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
+.print-offer .logo{height:90px;width:auto;object-fit:contain}
+.print-offer .header-right{text-align:right;font-size:13px;color:#374151}
+.print-offer h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
+.print-offer table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+.print-offer th{background:#f3f4f6;text-align:left;padding:8px;border-bottom:2px solid #e5e7eb}
+.print-offer td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.print-offer .total-row{font-size:17px;font-weight:900;background:#f8fafc}
+.print-offer .total-row td{padding:12px 8px}
+.print-offer .info-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px}
+.print-offer .info-box p{margin:4px 0}
+.print-offer .included{font-size:12px;color:#64748b;margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
+.print-offer .disclaimer{font-size:10px;color:#94a3b8;margin-top:8px;text-align:center}
+.print-offer .footer{margin-top:32px;text-align:center;font-size:11px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px}
+.print-offer .recipe-block{margin:12px 0;background:#f8fafc;border-radius:8px;padding:12px}
+.print-offer .recipe-block h3{margin:0 0 8px;font-size:14px}
+.print-offer .right{text-align:right}
+@media print{.print-offer button{display:none}.print-offer{padding:0}}
+
+.print-rigging{padding:24px}
+.print-rigging h2{border-bottom:1px solid #e5e7eb;padding-bottom:6px}
+.print-rigging table{width:100%;border-collapse:collapse;margin-top:12px}
+.print-rigging th,.print-rigging td{border-bottom:1px solid #e5e7eb;padding:6px 8px;text-align:left;font-size:13px}
+
+.print-guest{padding:24px;text-align:center}
+.print-guest h2{margin-bottom:16px}
+
+.print-packing{padding:24px}
+.print-packing table{width:100%;border-collapse:collapse;margin-top:12px}
+.print-packing th,.print-packing td{border-bottom:1px solid #e5e7eb;padding:8px 10px;text-align:left}
+.print-packing .right{text-align:right}
+.print-packing h1{margin-bottom:4px}
+</style></head><body>${body}<script>window.print()</script></body></html>`);
     w.document.close();
     w.focus();
+
+    if (floorPlanMissing) alert("Bordplan ble ikke tatt med: ingen rom er valgt i Bordplan-fanen ennå.");
   }
 
   const filteredProducts = data.products.filter((p) =>
@@ -11743,12 +11772,7 @@ ${opts.produksjon ? productionPageHtml : ""}
               <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveOffer}>
                 {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
               </button>
-              <button className="btn" onClick={() => {
-                if (printOpts.tilbud || printOpts.recipes || printOpts.kjoreplan || printOpts.produksjon) printOffer(printOpts);
-                if (printOpts.riggedokument) printRiggingDocument();
-                if (printOpts.gjesteillustrasjon) printGuestIllustration();
-                if (printOpts.pakkeliste) printPackingList();
-              }}>Skriv ut</button>
+              <button className="btn" onClick={printSelectedDocuments}>Skriv ut</button>
               <button className="btn" onClick={cancelEdit}>Avbryt</button>
             </div>
           </div>
