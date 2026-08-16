@@ -148,6 +148,8 @@ note?: string;
   dietOther?: string;
   rungInName?: string;
   rungInAt?: string;
+  packingListEnabled?: boolean;
+  selectedPackingListTemplateIds?: string[];
 };
 
 type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
@@ -194,6 +196,7 @@ type RentalOffer = {
   runSheet?: RunSheetItem[];
   rungInName?: string;
   rungInAt?: string;
+  selectedPackingListTemplateIds?: string[];
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -231,6 +234,9 @@ type InventoryMonthData = {
 
 type RentalAddonPackingItem = { id: string; name: string; unit: string; qty: number };
 type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean; packingItems?: RentalAddonPackingItem[] };
+
+type PackingListItem = { id: string; label: string };
+type PackingListTemplate = { id: string; name: string; items: PackingListItem[] };
 
 type ProductListKind = "bakst" | "catering" | "storkjokken";
 
@@ -393,6 +399,7 @@ type AppData = {
   productCategories: string[];
   materialCategories: string[];
   recipeCategories: string[];
+  packingListTemplates: PackingListTemplate[];
   inventoryCounts?: Record<string, InventoryMonthData>;
   calendarNotes: CalendarNote[];
   rentalOffers?: RentalOffer[];
@@ -465,6 +472,21 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+// Delt hjelpefunksjon for å bygge sjekklisteseksjonen fra valgte pakkelistemaler,
+// brukt av print-funksjonene for både Leie av lokale og Ordre. Selvstendige inline-
+// stiler, siden funksjonen limes inn i forskjellige print-vinduer med ulike <style>.
+function packingListTemplatesHtml(templates: PackingListTemplate[], selectedIds: string[] | undefined): string {
+  const selected = templates.filter((t) => (selectedIds || []).includes(t.id));
+  if (!selected.length) return "";
+  const blocks = selected.map((t) => {
+    const rows = t.items.length
+      ? t.items.map((item) => `<div style="padding:3px 0">☐ ${escapeHtml(item.label)}</div>`).join("")
+      : `<div style="color:#94a3b8">Ingen punkter i denne malen.</div>`;
+    return `<div style="margin:10px 0"><h3 style="margin:0 0 4px">${escapeHtml(t.name)}</h3>${rows}</div>`;
+  }).join("");
+  return `<h2 style="margin:18px 0 4px">Sjekkliste</h2>${blocks}`;
 }
 
 function normalizeAllergen(value: string) {
@@ -592,6 +614,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
+  packingListTemplates: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -642,6 +665,7 @@ function migrateData(raw: Partial<AppData>): AppData {
     menuCategories: raw.menuCategories || defaultMenuCategories,
     productCategories: raw.productCategories || defaultProductCategories,
     recipeCategories: raw.recipeCategories || Array.from(new Set([...defaultRecipeCategories, ...recipes.map((r) => r.category).filter(Boolean)])),
+    packingListTemplates: (raw as any).packingListTemplates || [],
     materialCategories: (raw.materialCategories || defaultMaterialCategories).map((c: string) => {
   if (c === "Kjølevarer") return "Kjøkken, egenprodusert";
   if (c === "Frysevare") return "Bakeri, egenprodusert";
@@ -4579,6 +4603,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     isRecurring: false, recurringDays: [], recurringNote: "",
     allergens: Object.fromEntries(defaultAllergens.map((a) => [a, 0])),
     dietVegan: "0", dietVegetarian: "0", dietPregnant: "0", dietOther: "",
+    packingListEnabled: false, selectedPackingListTemplateIds: [],
   });
 
   const todayStr = today();
@@ -5143,6 +5168,26 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
     w.document.close(); w.focus();
   }
 
+  function printOrderPackingList(order: Order) {
+    const customerName = order.customerType === "bedrift"
+      ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}`
+      : order.customer;
+    const w = window.open("", "_blank"); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Pakkeliste – ${escapeHtml(customerName || order.customer)}</title><style>
+body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111827}
+h1{margin-bottom:4px}
+.muted{color:#64748b}
+button{padding:10px 14px;border-radius:10px;border:1px solid #111827;background:#111827;color:white;font-weight:800;cursor:pointer;margin-bottom:14px}
+@media print{button{display:none}body{padding:0}}
+</style></head><body>
+<button onclick="window.print()">Skriv ut</button>
+<h1>Pakkeliste</h1>
+<p class="muted">${escapeHtml(customerName || "Ikke angitt")} · ${formatDateNo(order.date)} ${order.time || ""}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p>
+${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackingListTemplateIds)}
+</body></html>`);
+    w.document.close(); w.focus();
+  }
+
   function productName(id: string) {
     return data.products.find((p) => p.id === id)?.name || "Ukjent produkt";
   }
@@ -5577,6 +5622,33 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
             <label>Gravid<input type="number" value={form.dietPregnant || "0"} onChange={(e) => setForm({ ...form, dietPregnant: e.target.value })} /></label>
             <label>Andre hensyn<input value={form.dietOther || ""} onChange={(e) => setForm({ ...form, dietOther: e.target.value })} placeholder="Fritekst" /></label>
           </div>
+          <label className="check">
+            <input type="checkbox" checked={!!form.packingListEnabled} onChange={(e) => setForm({ ...form, packingListEnabled: e.target.checked })} />
+            Lag pakkeliste for denne ordren
+          </label>
+          {form.packingListEnabled && (
+            <div className="chips">
+              {(data.packingListTemplates || []).map((t) => {
+                const active = (form.selectedPackingListTemplateIds || []).includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={active ? "btn active" : "btn"}
+                    onClick={() => {
+                      const ids = active
+                        ? (form.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
+                        : [...(form.selectedPackingListTemplateIds || []), t.id];
+                      setForm({ ...form, selectedPackingListTemplateIds: ids });
+                    }}
+                  >
+                    {t.name}
+                  </button>
+                );
+              })}
+              {(data.packingListTemplates || []).length === 0 && <span className="muted" style={{ fontSize: 13 }}>Ingen pakkelistemaler opprettet ennå – se Innstillinger.</span>}
+            </div>
+          )}
           <h3>Allergier i ordren</h3>
           <div className="chips">
             {defaultAllergens.map((a) => {
@@ -5778,7 +5850,8 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                     style={{ width: "auto", maxWidth: 220 }}
                     onChange={(e) => {
                       const v = e.target.value;
-                      if (v) printOrder(o, v as "basis" | "recipes" | "full");
+                      if (v === "pakkeliste") printOrderPackingList(o);
+                      else if (v) printOrder(o, v as "basis" | "recipes" | "full");
                       e.target.value = "";
                     }}
                   >
@@ -5786,6 +5859,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                     <option value="basis">Print ordre</option>
                     <option value="recipes">Print med oppskrift</option>
                     <option value="full">Print med oppskrift/varebestilling</option>
+                    {o.packingListEnabled && <option value="pakkeliste">Print pakkeliste</option>}
                   </select>
                   <button className="btn danger" onClick={() => softDeleteOrder(o.id)}>Flytt til papirkurv</button>
                 </div>
@@ -10402,6 +10476,7 @@ h1{margin-bottom:4px}
 <h1>Pakkeliste</h1>
 <p>${escapeHtml(rental.customer)} · ${rental.guestCount || 0} gjester · ${rental.courseCount || 1} retter · ${rental.mealType === "buffet" ? "Buffet" : "Flere retter"}</p>
 <table><thead><tr><th>Artikkel</th><th class="right">Antall</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPackingListTemplateIds)}
 <script>window.print()</script>
 </body></html>`);
     w.document.close();
@@ -10898,7 +10973,40 @@ ${opts.produksjon ? productionPageHtml : ""}
                   </div>
                 )}
 
-                {(data.coverItems || []).length === 0 && !(rental.customPackingItems || []).length ? (
+                <h3 style={{ marginTop: 16 }}>Bruk standard pakkeliste</h3>
+                <div className="chips">
+                  {(data.packingListTemplates || []).map((t) => {
+                    const active = (rental.selectedPackingListTemplateIds || []).includes(t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={active ? "btn active" : "btn"}
+                        onClick={() => {
+                          const ids = active
+                            ? (rental.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
+                            : [...(rental.selectedPackingListTemplateIds || []), t.id];
+                          setRental({ ...rental, selectedPackingListTemplateIds: ids });
+                        }}
+                      >
+                        {t.name}
+                      </button>
+                    );
+                  })}
+                  {(data.packingListTemplates || []).length === 0 && <span className="muted" style={{ fontSize: 13 }}>Ingen pakkelistemaler opprettet ennå – se Innstillinger.</span>}
+                </div>
+                {(rental.selectedPackingListTemplateIds || []).length > 0 && (
+                  <div className="soft-box" style={{ marginTop: 8 }}>
+                    {(data.packingListTemplates || []).filter((t) => (rental.selectedPackingListTemplateIds || []).includes(t.id)).map((t) => (
+                      <div key={t.id} style={{ marginBottom: 8 }}>
+                        <b>{t.name}</b>
+                        {t.items.map((item) => <div key={item.id} style={{ fontSize: 13 }}>☐ {item.label}</div>)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {(data.coverItems || []).length === 0 && !(rental.customPackingItems || []).length && !(rental.selectedPackingListTemplateIds || []).length ? (
                   <p className="muted">Ingen kuvertartikler definert ennå – gå til Innstillinger → Rombibliotek → Kuvertartikler for å legge dem inn.</p>
                 ) : (
                   <>
@@ -12081,6 +12189,9 @@ const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", per
 const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null);
 const [addonPackingForm, setAddonPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
 const [newNotifyEmail, setNewNotifyEmail] = useState("");
+const [newPackingListTemplateName, setNewPackingListTemplateName] = useState("");
+const [expandedPackingTemplateId, setExpandedPackingTemplateId] = useState<string | null>(null);
+const [newPackingTemplateItemLabel, setNewPackingTemplateItemLabel] = useState("");
 
 function addNotifyEmail() {
   const email = newNotifyEmail.trim();
@@ -12111,10 +12222,41 @@ function removeAddonPackingItem(addonId: string, itemId: string) {
   updateData({ rentalAddons: next });
 }
 
+function addPackingListTemplate() {
+  if (!newPackingListTemplateName.trim()) return;
+  const next = [...localPackingListTemplates, { id: `plt-${Date.now()}`, name: newPackingListTemplateName.trim(), items: [] }];
+  setLocalPackingListTemplates(next);
+  updateData({ packingListTemplates: next });
+  setNewPackingListTemplateName("");
+}
+
+function removePackingListTemplate(templateId: string) {
+  const next = localPackingListTemplates.filter((t) => t.id !== templateId);
+  setLocalPackingListTemplates(next);
+  updateData({ packingListTemplates: next });
+}
+
+function addPackingTemplateItem(templateId: string) {
+  if (!newPackingTemplateItemLabel.trim()) return;
+  const next = localPackingListTemplates.map((t) => t.id === templateId
+    ? { ...t, items: [...t.items, { id: `pli-${Date.now()}`, label: newPackingTemplateItemLabel.trim() }] }
+    : t);
+  setLocalPackingListTemplates(next);
+  updateData({ packingListTemplates: next });
+  setNewPackingTemplateItemLabel("");
+}
+
+function removePackingTemplateItem(templateId: string, itemId: string) {
+  const next = localPackingListTemplates.map((t) => t.id === templateId ? { ...t, items: t.items.filter((i) => i.id !== itemId) } : t);
+  setLocalPackingListTemplates(next);
+  updateData({ packingListTemplates: next });
+}
+
   const [localSettings, setLocalSettings] = useState(data.settings);
   const [localVenues, setLocalVenues] = useState(data.venues);
   const [localPackaging, setLocalPackaging] = useState(data.packaging);
   const [localRentalAddons, setLocalRentalAddons] = useState(data.rentalAddons);
+  const [localPackingListTemplates, setLocalPackingListTemplates] = useState(data.packingListTemplates);
 
   const Section = useCallback(({ id, title, children }: { id: string; title: string; children: React.ReactNode }) =>
     <div className="settings-section">
@@ -12325,6 +12467,48 @@ function removeAddonPackingItem(addonId: string, itemId: string) {
     setNewRentalAddon({ name: "", price: "0", perUnit: false });
   }}>Legg til</button>
 </div>
+      </Section>
+
+      <Section id="packingListTemplates" title="Pakkelistemaler">
+        <p className="muted" style={{ fontSize: 12 }}>
+          Standardiserte sjekklister (f.eks. "BBQ-buffet") som kan velges på tilbud i Leie av lokale og på ordre, i tillegg til den vanlige pakkelisten.
+        </p>
+        <div>
+          {localPackingListTemplates.map((template, i) => (
+            <React.Fragment key={template.id}>
+              <div className="editable-row">
+                <input
+                  value={template.name}
+                  onChange={(e) => setLocalPackingListTemplates(localPackingListTemplates.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                  onBlur={() => updateData({ packingListTemplates: localPackingListTemplates })}
+                  style={{ flex: "2 1 240px", minWidth: 160 }}
+                />
+                <button className="link danger" onClick={() => removePackingListTemplate(template.id)}>Slett</button>
+                <button className="link" onClick={() => setExpandedPackingTemplateId(expandedPackingTemplateId === template.id ? null : template.id)}>
+                  Sjekkpunkter ({template.items.length})
+                </button>
+              </div>
+              {expandedPackingTemplateId === template.id && (
+                <div className="soft-box" style={{ marginTop: -8, marginBottom: 8 }}>
+                  {template.items.map((item) => (
+                    <div key={item.id} className="editable-row">
+                      <span>{item.label}</span>
+                      <button className="link danger" onClick={() => removePackingTemplateItem(template.id, item.id)}>Slett</button>
+                    </div>
+                  ))}
+                  <div className="form-grid two" style={{ marginTop: 8 }}>
+                    <input placeholder="Sjekkpunkt (f.eks. Kull)" value={newPackingTemplateItemLabel} onChange={(e) => setNewPackingTemplateItemLabel(e.target.value)} />
+                    <button className="btn active" onClick={() => addPackingTemplateItem(template.id)}>Legg til punkt</button>
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+        <div className="form-grid two">
+          <input placeholder="Ny mal (f.eks. BBQ-buffet)" value={newPackingListTemplateName} onChange={(e) => setNewPackingListTemplateName(e.target.value)} />
+          <button className="btn active" onClick={addPackingListTemplate}>+ Ny mal</button>
+        </div>
       </Section>
 
       <Section id="materialCats" title="Kategorier for råvarer">
