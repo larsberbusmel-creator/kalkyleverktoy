@@ -11221,14 +11221,14 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               <h2>{editingOfferId ? "Rediger tilbud" : "Nytt tilbud"}</h2>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {rental.rungInName && (
-                  <span style={{ fontSize: 12, color: "#166534" }}>
-                    ✓ {formatDateNo(rental.rungInAt!.slice(0, 10))} ({rental.rungInName})
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
+                    ✓ Slått inn {formatDateNo(rental.rungInAt!.slice(0, 10))} ({rental.rungInName})
                   </span>
                 )}
                 {editingOfferId && (
                   <button
                     className={rental.rungInName ? "btn active" : "btn"}
-                    style={rental.rungInName && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                    style={rental.rungInName && !readOnly ? { background: "#e2e8f0", borderColor: "#cbd5e1", color: "#334155" } : undefined}
                     disabled={readOnly}
                     title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                     onClick={() => toggleRungIn(rental)}
@@ -12154,13 +12154,13 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {offer.rungInName && (
-                  <span style={{ fontSize: 12, color: "#166534" }}>
-                    ✓ {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
+                    ✓ Slått inn {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
                   </span>
                 )}
                 <button
                   className={offer.rungInName ? "btn active" : "btn"}
-                  style={offer.rungInName && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                  style={offer.rungInName && !readOnly ? { background: "#e2e8f0", borderColor: "#cbd5e1", color: "#334155" } : undefined}
                   disabled={readOnly}
                   title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                   onClick={() => toggleRungIn(offer)}
@@ -12202,13 +12202,13 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     {offer.rungInName && (
-                      <span style={{ fontSize: 12, color: "#166534" }}>
-                        ✓ {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
+                        ✓ Slått inn {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
                       </span>
                     )}
                     <button
                       className={offer.rungInName ? "btn active" : "btn"}
-                      style={offer.rungInName && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                      style={offer.rungInName && !readOnly ? { background: "#e2e8f0", borderColor: "#cbd5e1", color: "#334155" } : undefined}
                       disabled={readOnly}
                       title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                       onClick={() => toggleRungIn(offer)}
