@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings" | "rombibliotek";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings" | "rombibliotek" | "users";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert" | "selskapsmeny";
@@ -364,6 +364,16 @@ type RoomExclusionZone = { id: string; x: number; y: number; width: number; heig
 type Room = { id: string; name: string; width: number; length: number; openings: RoomOpening[]; obstacles: RoomObstacle[]; exclusionZones?: RoomExclusionZone[]; notes?: string };
 type TableType = { id: string; name: string; shape: "rund" | "rektangulær" | "firkantet"; width: number; length: number; seats: number; chairDepth: number; chairSize?: number; category: "gjestebord" | "gavebord" | "kakebord" | "buffetbord" | "annet"; joinable?: boolean; defaultChairSides?: ChairSides };
 
+type TabPermission = { view: boolean; edit: boolean };
+type UserAccessEntry = {
+  id: string;
+  email: string;
+  name?: string;
+  role: "superadmin" | "user";
+  permissions: Partial<Record<Tab, TabPermission>>;
+  createdAt?: string;
+};
+
 type AppData = {
   materials: Material[];
   recipes: Recipe[];
@@ -399,7 +409,8 @@ type AppData = {
   scheduledPriceChanges: ScheduledPriceChange[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
-  seenOrderIds: string[]
+  seenOrderIds: string[];
+  userAccess: UserAccessEntry[];
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
@@ -580,6 +591,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   bakeryProductionDays: {},
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
+  userAccess: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -626,6 +638,7 @@ function migrateData(raw: Partial<AppData>): AppData {
     packaging: raw.packaging || initialData.packaging,
     rentalAddons: (raw as any).rentalAddons || defaultRentalAddons,
     productLists: (raw as any).productLists || [],
+    userAccess: (raw as any).userAccess || [],
     menuCategories: raw.menuCategories || defaultMenuCategories,
     productCategories: raw.productCategories || defaultProductCategories,
     recipeCategories: raw.recipeCategories || Array.from(new Set([...defaultRecipeCategories, ...recipes.map((r) => r.category).filter(Boolean)])),
@@ -718,6 +731,7 @@ export default function Page() {
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
+  const [userEmail, setUserEmail] = useState<string>("");
 
   useEffect(() => {
     async function loadData() {
@@ -726,6 +740,7 @@ export default function Page() {
         window.location.href = "/login";
         return;
       }
+      setUserEmail(authData.session.user.email || "");
 
       const { data: row, error } = await supabase
         .from("app_data")
@@ -1151,7 +1166,22 @@ function productCost(product: Product, visited: string[] = []) {
 
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
-  const tabConfig: { key: Tab; label: string; icon: string; color: string }[] = [
+  const currentUserAccess = data.userAccess.find((u) => u.email.toLowerCase() === userEmail.toLowerCase());
+  // Bootstrap: en bruker som ikke finnes i listen ennå (f.eks. før noen har satt opp
+  // Brukere-fanen i det hele tatt) regnes som superadmin, akkurat som dagens oppførsel
+  // der alle innloggede har full tilgang. Så snart noen eksplisitt legges til i listen,
+  // gjelder deres faktiske rolle/rettigheter.
+  const isSuperadmin = data.userAccess.length === 0 || currentUserAccess?.role === "superadmin";
+  function canView(t: Tab) {
+    if (isSuperadmin) return true;
+    return !!currentUserAccess?.permissions?.[t]?.view;
+  }
+  function canEdit(t: Tab) {
+    if (isSuperadmin) return true;
+    return !!currentUserAccess?.permissions?.[t]?.edit;
+  }
+
+  const allTabConfig: { key: Tab; label: string; icon: string; color: string }[] = [
   { key: "dashboard",  label: "Startside",         icon: "📅", color: "#0ea5e9" },
   { key: "materials",  label: "Råvarer",            icon: "🥕", color: "#16a34a" },
   { key: "recipes",    label: "Grunnoppskrifter",   icon: "📖", color: "#7c3aed" },
@@ -1161,7 +1191,10 @@ function productCost(product: Product, visited: string[] = []) {
   { key: "inventory",  label: "Varetelling",        icon: "📦", color: "#0891b2" },
   { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
   { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
+  { key: "users",      label: "Brukere",            icon: "🔑", color: "#9333ea" },
 ];
+
+  const tabConfig = allTabConfig.filter((t) => t.key === "dashboard" || (t.key === "users" ? isSuperadmin : canView(t.key)));
 
   const activeTabConfig = tabConfig.find((t) => t.key === tab);
 
@@ -1235,6 +1268,7 @@ return (
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} />}
+        {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
@@ -11888,6 +11922,138 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
           ))}
         </div>
       </div>
+    </section>
+  );
+}
+
+function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  allTabConfig: { key: Tab; label: string; icon: string; color: string }[];
+  isSuperadmin: boolean;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const emptyEntry = (): UserAccessEntry => ({
+    id: `user-${Date.now()}`,
+    email: "",
+    name: "",
+    role: "user",
+    permissions: {},
+    createdAt: new Date().toISOString(),
+  });
+  const [form, setForm] = useState<UserAccessEntry>(emptyEntry());
+
+  if (!isSuperadmin) {
+    return (
+      <section className="card">
+        <p>Du har ikke tilgang til denne siden.</p>
+      </section>
+    );
+  }
+
+  function startNew() {
+    setForm(emptyEntry());
+    setEditingId("new");
+  }
+  function startEdit(u: UserAccessEntry) {
+    setForm({ ...u, permissions: { ...u.permissions } });
+    setEditingId(u.id);
+  }
+  function cancelEdit() {
+    setEditingId(null);
+  }
+  function saveEntry() {
+    if (!form.email.trim()) return alert("Legg inn e-postadresse.");
+    const next = editingId === "new"
+      ? [...data.userAccess, form]
+      : data.userAccess.map((u) => (u.id === form.id ? form : u));
+    updateData({ userAccess: next });
+    setEditingId(null);
+  }
+  function deleteEntry(id: string) {
+    if (!confirm("Fjerne denne brukerens tilgangsoppsett?")) return;
+    updateData({ userAccess: data.userAccess.filter((u) => u.id !== id) });
+  }
+  function togglePermission(tabKey: Tab, field: "view" | "edit") {
+    const current = form.permissions[tabKey] || { view: false, edit: false };
+    const nextValue = !current[field];
+    const nextPerm = { ...current, [field]: nextValue };
+    if (field === "edit" && nextValue) nextPerm.view = true;
+    setForm({ ...form, permissions: { ...form.permissions, [tabKey]: nextPerm } });
+  }
+
+  return (
+    <section className="card">
+      <p style={{ color: "#64748b", marginTop: 0 }}>
+        Styr hvilke faner ansatte kan se og redigere. Brukere som ikke ligger i denne listen får foreløpig full tilgang
+        (bakoverkompatibelt) — legg til alle som skal ha begrenset tilgang her.
+      </p>
+
+      {editingId === null && (
+        <button className="btn active" onClick={startNew}>+ Ny bruker</button>
+      )}
+
+      {editingId !== null && (
+        <div className="soft-box" style={{ marginTop: 12 }}>
+          <div className="between">
+            <h3>{editingId === "new" ? "Ny bruker" : "Rediger tilgang"}</h3>
+            <button className="btn" onClick={cancelEdit}>Avbryt</button>
+          </div>
+          <div className="form-grid three">
+            <label>E-post (samme som brukes til innlogging)
+              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="navn@bedrift.no" />
+            </label>
+            <label>Navn
+              <input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="F.eks. Kari Nordmann" />
+            </label>
+            <label>Rolle
+              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as "superadmin" | "user" })}>
+                <option value="user">Bruker (styrt av rettigheter under)</option>
+                <option value="superadmin">Superadmin (full tilgang til alt)</option>
+              </select>
+            </label>
+          </div>
+
+          {form.role === "user" && (
+            <table style={{ marginTop: 12 }}>
+              <thead><tr><th>Fane</th><th>Se</th><th>Redigere</th></tr></thead>
+              <tbody>
+                {allTabConfig.map((t) => (
+                  <tr key={t.key}>
+                    <td>{t.icon} {t.label}</td>
+                    <td><input type="checkbox" checked={!!form.permissions[t.key]?.view} onChange={() => togglePermission(t.key, "view")} /></td>
+                    <td><input type="checkbox" checked={!!form.permissions[t.key]?.edit} onChange={() => togglePermission(t.key, "edit")} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <button className="btn active" style={{ marginTop: 12 }} onClick={saveEntry}>Lagre</button>
+        </div>
+      )}
+
+      <table style={{ marginTop: 16 }}>
+        <thead><tr><th>Navn</th><th>E-post</th><th>Rolle</th><th>Faner (se/rediger)</th><th></th></tr></thead>
+        <tbody>
+          {data.userAccess.map((u) => (
+            <tr key={u.id}>
+              <td>{u.name || "-"}</td>
+              <td>{u.email}</td>
+              <td>{u.role === "superadmin" ? "Superadmin" : "Bruker"}</td>
+              <td>
+                {u.role === "superadmin"
+                  ? "Alt"
+                  : allTabConfig.filter((t) => u.permissions[t.key]?.view).map((t) => t.label + (u.permissions[t.key]?.edit ? " (rediger)" : " (se)")).join(", ") || "Ingen"}
+              </td>
+              <td style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={() => startEdit(u)}>Rediger</button>
+                <button className="btn danger" onClick={() => deleteEntry(u.id)}>Slett</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }
