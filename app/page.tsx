@@ -10535,12 +10535,20 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const pages = roomsToPrint.map((room) => {
       const tables = (rental.floorPlanTables || []).filter((t) => t.roomId === room.id);
       const scale = Math.min(680 / Math.max(room.width, 1), 480 / Math.max(room.length, 1));
-      const rows = tables.map((t, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(tableTypeName(t.tableTypeId))}</td><td>${escapeHtml(t.note || "-")}</td></tr>`).join("");
+      const half = Math.ceil(tables.length / 2);
+      const leftTables = tables.slice(0, half);
+      const rightTables = tables.slice(half);
+      const buildRows = (list: typeof tables, offset: number) =>
+        list.map((t, i) => `<tr><td>${offset + i + 1}</td><td>${escapeHtml(t.note || "-")}</td></tr>`).join("");
+      const tablesHtml = `<div style="display:flex;gap:16px">
+<table style="width:48%"><thead><tr><th>#</th><th>Notat</th></tr></thead><tbody>${buildRows(leftTables, 0)}</tbody></table>
+<table style="width:48%"><thead><tr><th>#</th><th>Notat</th></tr></thead><tbody>${buildRows(rightTables, half)}</tbody></table>
+</div>`;
       return `<div class="page-break"></div>
 <h2>Riggeplan: ${escapeHtml(room.name)}</h2>
 <p>Rom: ${room.width}×${room.length} cm · ${tables.length} bord</p>
 ${renderStaticRoomSvg(room, tables, scale, true)}
-<table><thead><tr><th>#</th><th>Bordtype</th><th>Notat</th></tr></thead><tbody>${rows}</tbody></table>`;
+${tablesHtml}`;
     }).join("");
     return `<div class="print-rigging">${pages}</div>`;
   }
