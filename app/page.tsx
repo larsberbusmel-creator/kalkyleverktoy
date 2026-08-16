@@ -7340,9 +7340,9 @@ ${orderPages}`;
 
               <div className="card">
                 <div className="between">
-                  <div>
-                    <h3>Dagens produksjonsgrid</h3>
-                    <p style={{ color: "#64748b" }}>Fyll inn antall per kunde/kanal.</p>
+                  <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12 }}>
+                    <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Dagens produksjonsgrid</h3>
+                    <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Fyll inn antall per kunde/kanal.</p>
                   </div>
                   <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={applyRecurringOrdersForDay}>Legg til fastordre for denne dagen</button>
                 </div>
@@ -7365,10 +7365,10 @@ ${orderPages}`;
                   <table>
                     <thead>
                       <tr>
-                        <th>Produkt</th>
-                        <th>Kategori</th>
-                        <th style={{ textAlign: "center" }}>Sum</th>
-                        <th style={{ textAlign: "center" }}>Bestillinger</th>
+                        <th style={{ position: "sticky", left: 0, zIndex: 3, background: "#f8fafc" }}>Produkt</th>
+                        <th style={{ position: "sticky", left: 160, zIndex: 3, background: "#f8fafc" }}>Kategori</th>
+                        <th style={{ position: "sticky", left: 300, zIndex: 3, background: "#f8fafc", textAlign: "center" }}>Sum</th>
+                        <th style={{ position: "sticky", left: 370, zIndex: 3, background: "#f8fafc", textAlign: "center", borderRight: "2px solid #cbd5e1" }}>Bestillinger</th>
                         {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
                       </tr>
                     </thead>
@@ -7386,10 +7386,10 @@ ${orderPages}`;
                         const total = totalForProduct(product.id, { ...activeDay, quantities: localQuantities });
                         return (
                           <tr key={line.id}>
-                            <td><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
-                            <td>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
-                            <td style={{ textAlign: "center" }}><b>{total}</b></td>
-                            <td style={{ textAlign: "center", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                            <td style={{ position: "sticky", left: 0, zIndex: 1, background: "white" }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                            <td style={{ position: "sticky", left: 160, zIndex: 1, background: "white" }}>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                            <td style={{ position: "sticky", left: 300, zIndex: 1, background: "white", textAlign: "center" }}><b>{total}</b></td>
+                            <td style={{ position: "sticky", left: 370, zIndex: 1, background: "white", textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                             {columns.map((col) => (
                               <td key={col.id}>
                                 <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
@@ -7416,10 +7416,10 @@ ${orderPages}`;
                               const total = totalForProduct(product.id);
                               return (
                                 <tr key={product.id} style={{ background: "#fffbeb" }}>
-                                  <td><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
-                                  <td><small style={{ color: "#64748b" }}>{product.category}</small></td>
-                                  <td style={{ textAlign: "center" }}><b>{total}</b></td>
-                                  <td style={{ textAlign: "center", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                                  <td style={{ position: "sticky", left: 0, zIndex: 1, background: "#fffbeb" }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                                  <td style={{ position: "sticky", left: 160, zIndex: 1, background: "#fffbeb" }}><small style={{ color: "#64748b" }}>{product.category}</small></td>
+                                  <td style={{ position: "sticky", left: 300, zIndex: 1, background: "#fffbeb", textAlign: "center" }}><b>{total}</b></td>
+                                  <td style={{ position: "sticky", left: 370, zIndex: 1, background: "#fffbeb", textAlign: "center", color: "#64748b", borderRight: "2px solid #cbd5e1" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                                   {columns.map((col) => (
                                     <td key={col.id}>
                                       <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
