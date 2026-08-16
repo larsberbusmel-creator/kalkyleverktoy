@@ -8369,9 +8369,14 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
         .production-grid th.pg-col-category, .production-grid td.pg-col-category { width: 150px; min-width: 150px; max-width: 150px; left: 170px; }
         .production-grid th.pg-col-sum, .production-grid td.pg-col-sum { width: 60px; min-width: 60px; max-width: 60px; left: 320px; text-align: center; }
         .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { width: 100px; min-width: 100px; max-width: 100px; left: 380px; text-align: center; border-right: 2px solid #cbd5e1; }
+        /* Skjul Kategori på alt som ikke er ekte PC-bredde (telefon + nettbrett, liggende og stående) */
+        @media (max-width: 1180px) {
+          .production-grid th.pg-col-category, .production-grid td.pg-col-category { display: none; }
+          .production-grid th.pg-col-sum, .production-grid td.pg-col-sum { left: 170px; }
+          .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { left: 230px; }
+        }
         @media (max-width: 768px) {
           .production-grid th.pg-col-product, .production-grid td.pg-col-product { width: 110px; min-width: 110px; max-width: 110px; }
-          .production-grid th.pg-col-category, .production-grid td.pg-col-category { display: none; }
           .production-grid th.pg-col-sum, .production-grid td.pg-col-sum { left: 110px; }
           .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { width: 70px; min-width: 70px; max-width: 70px; left: 170px; }
           .production-grid th, .production-grid td { padding: 5px 6px; }
