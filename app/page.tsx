@@ -151,6 +151,9 @@ note?: string;
   packingListEnabled?: boolean;
   selectedPackingListTemplateIds?: string[];
   extraPackingListItems?: string[];
+  createdBy?: string;
+  createdAt?: string;
+  editLog?: { by: string; at: string }[];
 };
 
 type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
@@ -199,6 +202,9 @@ type RentalOffer = {
   rungInAt?: string;
   selectedPackingListTemplateIds?: string[];
   extraPackingListItems?: string[];
+  createdBy?: string;
+  createdAt?: string;
+  editLog?: { by: string; at: string }[];
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -1294,10 +1300,10 @@ return (
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} readOnly={!canEdit("orders")} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
-        {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} />}
+        {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
@@ -4630,7 +4636,7 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, readOnly }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, readOnly, userEmail, isSuperadmin }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -4639,6 +4645,8 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   setTab: (t: Tab) => void;
   setRentalOfferToOpen: (id: string | null) => void;
   readOnly: boolean;
+  userEmail: string;
+  isSuperadmin: boolean;
 }) {
   const emptyOrder = (): Order => ({
     id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
@@ -4668,6 +4676,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   const [sortField, setSortField] = useState<"date" | "customer" | "orderNumber">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [expandedEditLogOrderId, setExpandedEditLogOrderId] = useState<string | null>(null);
   const [orderPage, setOrderPage] = useState(1);
   const [showTodayOnly, setShowTodayOnly] = useState(false);
   const [hideOldOrders, setHideOldOrders] = useState(false);
@@ -4895,6 +4904,13 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     if (!form.companyName?.trim() && form.customerType === "bedrift") return alert("Legg inn bedriftsnavn.");
     if (!cleanLines.length) return alert("Legg inn minst ett produkt/meny i ordren.");
     const savedOrder = { ...form, id: editingOrderId || `order-${Date.now()}`, orderLines: cleanLines };
+    if (editingOrderId) {
+      savedOrder.editLog = [...(form.editLog || []), { by: userEmail, at: new Date().toISOString() }].slice(-20);
+    } else {
+      savedOrder.createdBy = userEmail;
+      savedOrder.createdAt = new Date().toISOString();
+      savedOrder.editLog = [];
+    }
     updateListRpc("orders", { [savedOrder.id]: savedOrder });
     setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false);
   }
@@ -5936,6 +5952,28 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                         <input type="checkbox" checked={printFlags.packingList} onChange={(e) => setPrintFlags({ ...printFlags, packingList: e.target.checked })} />
                         Inkluder pakkeliste
                       </label>
+                    )}
+                  </div>
+                )}
+                {isSuperadmin && (
+                  <div style={{ marginTop: 12 }}>
+                    <p style={{ fontSize: 12, color: "#64748b" }}>
+                      <b>Opprettet av:</b> {o.createdBy || "Ukjent (før sporing ble innført)"}
+                      {o.createdAt && ` – ${formatDateNo(o.createdAt.slice(0, 10))} ${new Date(o.createdAt).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" })}`}
+                    </p>
+                    <div className="section-toggle" onClick={() => setExpandedEditLogOrderId(expandedEditLogOrderId === o.id ? null : o.id)}>
+                      <h3>Endringslogg ({(o.editLog || []).length})</h3>
+                      <span>{expandedEditLogOrderId === o.id ? "▲" : "▼"}</span>
+                    </div>
+                    {expandedEditLogOrderId === o.id && (
+                      <div className="soft-box">
+                        {(o.editLog || []).length === 0 && <p className="muted">Ingen endringer registrert ennå.</p>}
+                        {[...(o.editLog || [])].reverse().map((entry, i) => (
+                          <p key={i} style={{ fontSize: 12, margin: "4px 0" }}>
+                            {entry.by} – {formatDateNo(entry.at.slice(0, 10))} {new Date(entry.at).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}
@@ -9355,7 +9393,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     </section>
   );
 }
-function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean }) {
+function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly, userEmail, isSuperadmin }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; userEmail: string; isSuperadmin: boolean }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -9363,6 +9401,7 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   const [showTrash, setShowTrash] = useState(false);
   const [offerSearch, setOfferSearch] = useState("");
   const [showTerms, setShowTerms] = useState(false);
+  const [editLogOpen, setEditLogOpen] = useState(false);
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
   const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan" | "pakkeliste">("forside");
     const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
@@ -9606,6 +9645,13 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     if (!rental.customer.trim()) return alert("Legg inn kundenavn.");
     const offerId = rental.id || `rental-${Date.now()}`;
     const offer: RentalOffer = { ...rental, id: offerId };
+    if (editingOfferId) {
+      offer.editLog = [...(rental.editLog || []), { by: userEmail, at: new Date().toISOString() }].slice(-20);
+    } else {
+      offer.createdBy = userEmail;
+      offer.createdAt = new Date().toISOString();
+      offer.editLog = [];
+    }
     updateListRpc("rentalOffers", { [offerId]: offer });
 
     if (offer.date) {
@@ -10788,6 +10834,29 @@ ${opts.produksjon ? productionPageHtml : ""}
             {editingOfferId && (
               <div style={{ background: "#fef9c3", border: "1px solid #fbbf24", borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontWeight: 700 }}>✏️ Redigerer: {rental.customer}</span>
+              </div>
+            )}
+
+            {editingOfferId && isSuperadmin && (
+              <div style={{ marginBottom: 14 }}>
+                <p style={{ fontSize: 12, color: "#64748b" }}>
+                  <b>Opprettet av:</b> {rental.createdBy || "Ukjent (før sporing ble innført)"}
+                  {rental.createdAt && ` – ${formatDateNo(rental.createdAt.slice(0, 10))} ${new Date(rental.createdAt).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" })}`}
+                </p>
+                <div className="section-toggle" onClick={() => setEditLogOpen(!editLogOpen)}>
+                  <h3>Endringslogg ({(rental.editLog || []).length})</h3>
+                  <span>{editLogOpen ? "▲" : "▼"}</span>
+                </div>
+                {editLogOpen && (
+                  <div className="soft-box">
+                    {(rental.editLog || []).length === 0 && <p className="muted">Ingen endringer registrert ennå.</p>}
+                    {[...(rental.editLog || [])].reverse().map((entry, i) => (
+                      <p key={i} style={{ fontSize: 12, margin: "4px 0" }}>
+                        {entry.by} – {formatDateNo(entry.at.slice(0, 10))} {new Date(entry.at).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
