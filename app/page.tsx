@@ -5904,9 +5904,12 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                   <summary style={{ cursor: "pointer", color: "#64748b" }}>Produksjonsgrunnlag</summary>
                   <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.courseName || r.source}</td><td>{r.name}</td><td>{formatAmountUnit(r.amount, r.unit)}</td></tr>)}</tbody></table>
                 </details>
-                <div className="section-toggle" style={{ marginTop: 12 }} onClick={() => setPrintOptionsOpen(!printOptionsOpen)}>
+                <div className="section-toggle print-toggle" style={{ marginTop: 12 }} onClick={() => setPrintOptionsOpen(!printOptionsOpen)}>
                   <h3>Utskriftsvalg</h3>
-                  <span>{printOptionsOpen ? "▲" : "▼"}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="section-toggle-count">{Object.values(printFlags).filter(Boolean).length}</span>
+                    {printOptionsOpen ? "▲" : "▼"}
+                  </span>
                 </div>
                 {printOptionsOpen && (
                   <div className="soft-box">
@@ -9350,6 +9353,7 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
     const [expandedTableIds, setExpandedTableIds] = useState<Set<string>>(new Set());
     const svgRef = useRef<SVGSVGElement>(null);
   const [printOpts, setPrintOpts] = useState({ tilbud: true, recipes: false, kjoreplan: false, produksjon: false, riggedokument: false, gjesteillustrasjon: false, pakkeliste: false });
+  const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
   const [deletedOffers, setDeletedOffers] = useState<RentalOffer[]>(
     ((data as any).deletedRentalOffers || []) as RentalOffer[]
   );
@@ -11509,45 +11513,54 @@ ${opts.produksjon ? productionPageHtml : ""}
                 <tbody>{addonLines.map((line, i) => <tr key={i}><td>{line.text}</td><td>{line.quantity || "-"}</td><td>{currency(line.amount)}</td></tr>)}</tbody>
               </table>
             )}
-            <div className="soft-box" style={{ marginTop: 12 }}>
-              <div className="between" style={{ marginBottom: 6 }}>
-                <label style={{ fontWeight: 800, fontSize: 14 }}>Hva skal skrives ut?</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" className="link" onClick={() => setPrintOpts({ tilbud: true, recipes: true, kjoreplan: !!rental.runSheetEnabled, produksjon: true, riggedokument: true, gjesteillustrasjon: true, pakkeliste: true })}>Velg alle</button>
-                  <button type="button" className="link" onClick={() => setPrintOpts({ tilbud: false, recipes: false, kjoreplan: false, produksjon: false, riggedokument: false, gjesteillustrasjon: false, pakkeliste: false })}>Fjern alle</button>
-                </div>
-              </div>
-              <label className="check">
-                <input type="checkbox" checked={printOpts.tilbud} onChange={(e) => setPrintOpts({ ...printOpts, tilbud: e.target.checked })} />
-                Tilbud (spesifikasjon/pris)
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={printOpts.recipes} onChange={(e) => setPrintOpts({ ...printOpts, recipes: e.target.checked })} />
-                Oppskrifter
-              </label>
-              {rental.runSheetEnabled && (
-                <label className="check">
-                  <input type="checkbox" checked={printOpts.kjoreplan} onChange={(e) => setPrintOpts({ ...printOpts, kjoreplan: e.target.checked })} />
-                  Kjøreplan
-                </label>
-              )}
-              <label className="check">
-                <input type="checkbox" checked={printOpts.produksjon} onChange={(e) => setPrintOpts({ ...printOpts, produksjon: e.target.checked })} />
-                Produksjonsgrunnlag (kjøkken)
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={printOpts.riggedokument} onChange={(e) => setPrintOpts({ ...printOpts, riggedokument: e.target.checked })} />
-                Riggedokument (bordplan)
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={printOpts.gjesteillustrasjon} onChange={(e) => setPrintOpts({ ...printOpts, gjesteillustrasjon: e.target.checked })} />
-                Gjesteillustrasjon (bordplan)
-              </label>
-              <label className="check">
-                <input type="checkbox" checked={printOpts.pakkeliste} onChange={(e) => setPrintOpts({ ...printOpts, pakkeliste: e.target.checked })} />
-                Pakkeliste
-              </label>
+            <div className="section-toggle print-toggle" style={{ marginTop: 12 }} onClick={() => setPrintOptionsOpen(!printOptionsOpen)}>
+              <h3>Utskriftsvalg</h3>
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="section-toggle-count">{Object.values(printOpts).filter(Boolean).length}</span>
+                {printOptionsOpen ? "▲" : "▼"}
+              </span>
             </div>
+            {printOptionsOpen && (
+              <div className="soft-box">
+                <div className="between" style={{ marginBottom: 6 }}>
+                  <label style={{ fontWeight: 800, fontSize: 14 }}>Hva skal skrives ut?</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="link" onClick={() => setPrintOpts({ tilbud: true, recipes: true, kjoreplan: !!rental.runSheetEnabled, produksjon: true, riggedokument: true, gjesteillustrasjon: true, pakkeliste: true })}>Velg alle</button>
+                    <button type="button" className="link" onClick={() => setPrintOpts({ tilbud: false, recipes: false, kjoreplan: false, produksjon: false, riggedokument: false, gjesteillustrasjon: false, pakkeliste: false })}>Fjern alle</button>
+                  </div>
+                </div>
+                <label className="check">
+                  <input type="checkbox" checked={printOpts.tilbud} onChange={(e) => setPrintOpts({ ...printOpts, tilbud: e.target.checked })} />
+                  Tilbud (spesifikasjon/pris)
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={printOpts.recipes} onChange={(e) => setPrintOpts({ ...printOpts, recipes: e.target.checked })} />
+                  Oppskrifter
+                </label>
+                {rental.runSheetEnabled && (
+                  <label className="check">
+                    <input type="checkbox" checked={printOpts.kjoreplan} onChange={(e) => setPrintOpts({ ...printOpts, kjoreplan: e.target.checked })} />
+                    Kjøreplan
+                  </label>
+                )}
+                <label className="check">
+                  <input type="checkbox" checked={printOpts.produksjon} onChange={(e) => setPrintOpts({ ...printOpts, produksjon: e.target.checked })} />
+                  Produksjonsgrunnlag (kjøkken)
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={printOpts.riggedokument} onChange={(e) => setPrintOpts({ ...printOpts, riggedokument: e.target.checked })} />
+                  Riggedokument (bordplan)
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={printOpts.gjesteillustrasjon} onChange={(e) => setPrintOpts({ ...printOpts, gjesteillustrasjon: e.target.checked })} />
+                  Gjesteillustrasjon (bordplan)
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={printOpts.pakkeliste} onChange={(e) => setPrintOpts({ ...printOpts, pakkeliste: e.target.checked })} />
+                  Pakkeliste
+                </label>
+              </div>
+            )}
             <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
             <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
               <button className="btn active" onClick={saveOffer}>
@@ -12887,6 +12900,9 @@ function GlobalStyles() {
     .section-toggle:hover { background:#f1f5f9; border-color:#cbd5e1; }
     .section-toggle h2, .section-toggle h3 { margin:0; }
     .section-toggle-count { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; background:#0f172a; color:white; font-size:13px; font-weight:700; }
+    .section-toggle.print-toggle { background:#eff6ff; border-color:#bfdbfe; }
+    .section-toggle.print-toggle:hover { background:#dbeafe; border-color:#93c5fd; }
+    .section-toggle.print-toggle .section-toggle-count { background:#2563eb; }
     .editable-row { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid #e2e8f0; }
     .full-width { width:100%; }
     .order-line-box { border:1px solid #e2e8f0; border-radius:14px; padding:12px; background:white; }
