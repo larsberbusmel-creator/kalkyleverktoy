@@ -7367,15 +7367,15 @@ ${orderPages}`;
                   style={{ maxWidth: 280, margin: "8px 0" }}
                 />
 
-                <div style={{ overflowX: "auto" }}>
+                <div style={{ overflow: "auto", maxHeight: "70vh", border: "1px solid #e2e8f0", borderRadius: 10 }}>
                   <table>
                     <thead>
                       <tr>
-                        <th style={{ position: "sticky", left: 0, zIndex: 3, backgroundColor: "#f8fafc", width: 170, minWidth: 170, maxWidth: 170 }}>Produkt</th>
-                        <th style={{ position: "sticky", left: 170, zIndex: 3, backgroundColor: "#f8fafc", width: 150, minWidth: 150, maxWidth: 150 }}>Kategori</th>
-                        <th style={{ position: "sticky", left: 320, zIndex: 3, backgroundColor: "#f8fafc", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}>Sum</th>
-                        <th style={{ position: "sticky", left: 380, zIndex: 3, backgroundColor: "#f8fafc", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", borderRight: "2px solid #cbd5e1" }}>Bestillinger</th>
-                        {columns.map((col) => <th key={col.id} style={{ textAlign: "center" }}>{col.name}</th>)}
+                        <th style={{ position: "sticky", top: 0, left: 0, zIndex: 4, backgroundColor: "#f8fafc", width: 170, minWidth: 170, maxWidth: 170 }}>Produkt</th>
+                        <th style={{ position: "sticky", top: 0, left: 170, zIndex: 4, backgroundColor: "#f8fafc", width: 150, minWidth: 150, maxWidth: 150 }}>Kategori</th>
+                        <th style={{ position: "sticky", top: 0, left: 320, zIndex: 4, backgroundColor: "#f8fafc", width: 60, minWidth: 60, maxWidth: 60, textAlign: "center" }}>Sum</th>
+                        <th style={{ position: "sticky", top: 0, left: 380, zIndex: 4, backgroundColor: "#f8fafc", width: 100, minWidth: 100, maxWidth: 100, textAlign: "center", borderRight: "2px solid #cbd5e1" }}>Bestillinger</th>
+                        {columns.map((col) => <th key={col.id} style={{ position: "sticky", top: 0, zIndex: 3, backgroundColor: "#f8fafc", textAlign: "center" }}>{col.name}</th>)}
                       </tr>
                     </thead>
                     <tbody>
