@@ -8371,10 +8371,9 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
         .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { width: 100px; min-width: 100px; max-width: 100px; left: 380px; text-align: center; border-right: 2px solid #cbd5e1; }
         @media (max-width: 768px) {
           .production-grid th.pg-col-product, .production-grid td.pg-col-product { width: 110px; min-width: 110px; max-width: 110px; }
-          .production-grid th.pg-col-category, .production-grid td.pg-col-category { width: 80px; min-width: 80px; max-width: 80px; left: 110px; }
-          .production-grid th.pg-col-sum, .production-grid td.pg-col-sum { left: 190px; }
-          .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { width: 70px; min-width: 70px; max-width: 70px; left: 250px; }
-          .production-grid .pg-col-category-sub { display: none; }
+          .production-grid th.pg-col-category, .production-grid td.pg-col-category { display: none; }
+          .production-grid th.pg-col-sum, .production-grid td.pg-col-sum { left: 110px; }
+          .production-grid th.pg-col-orders, .production-grid td.pg-col-orders { width: 70px; min-width: 70px; max-width: 70px; left: 170px; }
           .production-grid th, .production-grid td { padding: 5px 6px; }
           .production-grid input[type="number"] { min-height: 44px; font-size: 16px; }
         }
