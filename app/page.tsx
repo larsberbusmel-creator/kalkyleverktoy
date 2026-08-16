@@ -202,6 +202,7 @@ type RentalOffer = {
   rungInAt?: string;
   selectedPackingListTemplateIds?: string[];
   extraPackingListItems?: string[];
+  teardownAt?: string;
   createdBy?: string;
   createdAt?: string;
   editLog?: { by: string; at: string }[];
@@ -9654,6 +9655,20 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     }
     updateListRpc("rentalOffers", { [offerId]: offer });
 
+    const teardownNoteId = `note-teardown-${offerId}`;
+    const otherNotes = (data.calendarNotes || []).filter((n) => n.id !== teardownNoteId);
+    if (offer.teardownAt) {
+      const venueName = offer.venueExternal ? (offer.venueExternalName || "Eksternt lokale") : offer.venue;
+      updateData({
+        calendarNotes: [
+          ...otherNotes,
+          { id: teardownNoteId, date: offer.teardownAt.slice(0, 10), title: `Nedrigg (${offer.customer}) (${venueName})`, text: `Nedrigg kl. ${offer.teardownAt.slice(11, 16)}` },
+        ],
+      });
+    } else {
+      updateData({ calendarNotes: otherNotes });
+    }
+
     if (offer.date) {
       const existingLinkedOrder = (data.orders || []).find((o) => o.id === `rental-order-${offerId}`);
       const rentalOrder = {
@@ -10835,6 +10850,33 @@ ${opts.produksjon ? productionPageHtml : ""}
               <div style={{ background: "#fef9c3", border: "1px solid #fbbf24", borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontWeight: 700 }}>✏️ Redigerer: {rental.customer}</span>
               </div>
+            )}
+
+            {editingOfferId && (
+              <details className="soft-box" style={{ padding: 0, marginBottom: 14 }}>
+                <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>
+                    Tidspunkt for nedrigg
+                    {rental.teardownAt && (
+                      <span style={{ fontWeight: 400, color: "#64748b", marginLeft: 8, fontSize: 13 }}>
+                        {formatDateNo(rental.teardownAt.slice(0, 10))} kl. {rental.teardownAt.slice(11, 16)}
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+                </summary>
+                <div style={{ padding: "0 16px 16px" }}>
+                  <input
+                    type="datetime-local"
+                    value={rental.teardownAt || ""}
+                    disabled={readOnly}
+                    onChange={(e) => setRental({ ...rental, teardownAt: e.target.value })}
+                  />
+                  <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                    Fylles dette ut, legges det automatisk inn et notat i kalenderen: "Nedrigg ({rental.customer || "kundenavn"}) ({rental.venueExternal ? (rental.venueExternalName || "lokalenavn") : (rental.venue || "lokalenavn")})".
+                  </p>
+                </div>
+              </details>
             )}
 
             {editingOfferId && isSuperadmin && (

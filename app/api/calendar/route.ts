@@ -52,12 +52,15 @@ function addMinutes(date: string, time: string, minutes: number) {
 }
 
 // Bygger DESCRIPTION-verdien med riktig iCal-escaped newlines
-// iCal bruker literal \n (backslash + n) for linjeskift i feltverdier
-function buildDescription(parts: string[]): string {
-  return parts
+// iCal bruker literal \n (backslash + n) for linjeskift i feltverdier.
+// Tar imot en liste av seksjoner (hver seksjon er en liste av linjer):
+// linjer INNENFOR en seksjon separeres med enkelt \n, seksjonene seg
+// imellom separeres med dobbelt \n (tom linje) for tydeligere inndeling.
+function buildDescription(groups: string[][]): string {
+  return groups
+    .map((g) => g.filter(Boolean).map((p) => escapeIcal(p)).join("\\n"))   // escape hver linje, enkelt \n innad i seksjon
     .filter(Boolean)
-    .map((p) => escapeIcal(p))   // escape spesialtegn i hver del
-    .join("\\n");                  // iCal-newline mellom delene
+    .join("\\n\\n");                  // dobbelt iCal-newline mellom seksjoner
 }
 
 export async function GET() {
@@ -84,12 +87,10 @@ export async function GET() {
         ? o.companyName || o.customer
         : o.customer;
 
-    const productNames = (o.orderLines || [])
-      .map((l: any) => {
-        const p = products.find((x: any) => x.id === l.productId);
-        return `${l.quantity}× ${p?.name || "Ukjent"}`;
-      })
-      .join(", ");
+    const productLines = (o.orderLines || []).map((l: any) => {
+      const p = products.find((x: any) => x.id === l.productId);
+      return `${l.quantity}× ${p?.name || "Ukjent"}`;
+    });
 
     const hasTime = !!o.time;
     const dtstart = hasTime
@@ -99,24 +100,28 @@ export async function GET() {
       ? `DTEND:${addMinutes(o.date, o.time, 60)}`
       : `DTEND;VALUE=DATE:${toIcalDate(o.date, "")}`;
 
-    // SUMMARY: kundenavn + evt. bedrift i parentes
+    // SUMMARY: type-prefiks + kundenavn + evt. bedrift i parentes
+    const typePrefix = String(o.id).startsWith("rental-order-") ? "Leie av lokale // " : "Bakeriet // ";
     const companyPart =
       o.companyName && o.companyName !== customerName
         ? ` (${o.companyName})`
         : "";
-    const summary = escapeIcal(`${customerName}${companyPart}`);
+    const summary = escapeIcal(`${typePrefix}${customerName}${companyPart}`);
 
-    // DESCRIPTION: rene tekstdeler – buildDescription setter riktig \n
+    // DESCRIPTION: gruppert i seksjoner – buildDescription setter enkelt \n
+    // innad i en seksjon og dobbelt \n (tom linje) mellom seksjoner
     const descriptionParts = [
-      o.orderNumber ? `Ordrenr: ${o.orderNumber}` : "",
-      productNames,
-      o.phone ? `Tlf: ${o.phone}` : "",
-      o.deliveryAddress ? `Levering: ${o.deliveryAddress}` : "",
-      o.paymentInfo ? `Betaling: ${o.paymentInfo}` : "",
-      // Notat: bytt eventuelle ekte newlines til iCal-newline
-      o.note
-        ? `Notat: ${o.note.replace(/\r?\n/g, "\\n")}`
-        : "",
+      [o.orderNumber ? `Ordrenr: ${o.orderNumber}` : ""],
+      productLines,
+      [
+        o.phone ? `Tlf: ${o.phone}` : "",
+        o.deliveryAddress ? `Levering: ${o.deliveryAddress}` : "",
+      ],
+      [
+        o.paymentInfo ? `Betaling: ${o.paymentInfo}` : "",
+        // Notat: bytt eventuelle ekte newlines til iCal-newline
+        o.note ? `Notat: ${o.note.replace(/\r?\n/g, "\\n")}` : "",
+      ],
     ];
     const description = buildDescription(descriptionParts);
 
@@ -129,6 +134,11 @@ export async function GET() {
       `SUMMARY:${summary}`,
       `DESCRIPTION:${description}`,
       o.deliveryAddress ? `LOCATION:${escapeIcal(o.deliveryAddress)}` : "",
+      hasTime ? "BEGIN:VALARM" : "",
+      hasTime ? "ACTION:DISPLAY" : "",
+      hasTime ? "DESCRIPTION:Påminnelse" : "",
+      hasTime ? "TRIGGER:-PT60M" : "",
+      hasTime ? "END:VALARM" : "",
       "END:VEVENT",
     ]
       .filter(Boolean)
