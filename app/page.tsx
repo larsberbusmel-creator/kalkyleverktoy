@@ -368,6 +368,13 @@ type BakeryProductionDay = {
   frozenPrices?: Record<string, Record<string, number>>;
 };
 
+type ProductionTemplate = {
+  id: string;
+  name: string;
+  quantities: Record<string, Record<string, number>>;
+  createdAt: string;
+};
+
 type CalendarNote = {
   id: string;
   date: string;
@@ -428,6 +435,7 @@ type AppData = {
   scheduledPriceChanges: ScheduledPriceChange[];
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
+  productionTemplates: ProductionTemplate[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
 };
@@ -627,6 +635,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   scheduledPriceChanges: [],
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
+  productionTemplates: [],
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
@@ -724,6 +733,9 @@ recurringStorkjokkenOrders:
 
 bakeryProductionDays:
   (raw as any).bakeryProductionDays || {},
+
+productionTemplates:
+  (raw as any).productionTemplates || [],
   seenOrderIds: (() => {
   const legacyDates: string[] = (raw as any).seenOrderDates || [];
   const existing: string[] = (raw as any).seenOrderIds || [];
@@ -6161,6 +6173,7 @@ function ProductionTab({
 
   const [localQuantities, setLocalQuantities] = useState<BakeryProductionDay["quantities"]>(() => activeDay.quantities);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showProductionTemplates, setShowProductionTemplates] = useState(false);
 
   useEffect(() => {
     setLocalQuantities(activeDay.quantities);
@@ -7178,6 +7191,66 @@ ${orderPages}`;
     updateData({ bakeryProductionDays: nextDays });
   }
 
+  function dayHasFilledQuantities(day: BakeryProductionDay | undefined) {
+    if (!day) return false;
+    return Object.values(day.quantities || {}).some((row) => Object.values(row || {}).some((v) => Number(v) > 0));
+  }
+
+  function copyProductionWeekFromPrevious() {
+    const monday = startOfWeek(activeDate);
+    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+    const datesToOverwrite = weekDates.filter((date) => !!productionDays[addDays(date, -7)]);
+    const daysWithExistingData = datesToOverwrite.filter((date) => dayHasFilledQuantities(productionDays[date]));
+    if (daysWithExistingData.length > 0) {
+      if (!window.confirm(`${daysWithExistingData.length} av 7 dager denne uken har allerede utfylte tall. Disse vil bli overskrevet med forrige ukes tall. Fortsette?`)) return;
+    }
+    const nextDays: Record<string, BakeryProductionDay> = { ...productionDays };
+    datesToOverwrite.forEach((date) => {
+      const sourceDay = productionDays[addDays(date, -7)];
+      if (!sourceDay) return;
+      const dayNo = weekdayNumber(date);
+      const targetQuantities: BakeryProductionDay["quantities"] = JSON.parse(JSON.stringify(sourceDay.quantities || {}));
+      (data.recurringStorkjokkenOrders || []).filter((order) => order.active && order.weekdays.includes(dayNo)).forEach((order) => {
+        order.lines.forEach((line) => {
+          targetQuantities[line.productId] = { ...(targetQuantities[line.productId] || {}), [order.customerId]: Number(line.quantityByDay?.[dayNo] || 0) };
+        });
+      });
+      nextDays[date] = { date, approved: false, quantities: targetQuantities };
+    });
+    updateData({ bakeryProductionDays: nextDays });
+    if (nextDays[activeDate] && datesToOverwrite.includes(activeDate)) {
+      flushPendingQuantities();
+      setLocalQuantities(nextDays[activeDate].quantities);
+    }
+  }
+
+  function saveCurrentDayAsTemplate() {
+    const name = window.prompt("Navn på malen:");
+    if (!name || !name.trim()) return;
+    const newTemplate: ProductionTemplate = {
+      id: `pt-${Date.now()}`,
+      name: name.trim(),
+      quantities: JSON.parse(JSON.stringify(activeDay.quantities || {})),
+      createdAt: new Date().toISOString(),
+    };
+    updateData({ productionTemplates: [...(data.productionTemplates || []), newTemplate] });
+  }
+
+  function deleteProductionTemplate(id: string) {
+    if (!window.confirm("Slette denne produksjonsmalen?")) return;
+    updateData({ productionTemplates: (data.productionTemplates || []).filter((t) => t.id !== id) });
+  }
+
+  function loadProductionTemplate(template: ProductionTemplate) {
+    if (dayHasFilledQuantities(activeDay)) {
+      if (!window.confirm(`Denne dagen har allerede utfylte tall. Laste inn malen "${template.name}" vil overskrive dem. Fortsette?`)) return;
+    }
+    flushPendingQuantities();
+    const nextQuantities: BakeryProductionDay["quantities"] = JSON.parse(JSON.stringify(template.quantities || {}));
+    setLocalQuantities(nextQuantities);
+    saveDay({ ...activeDay, quantities: nextQuantities });
+  }
+
   function saveRecurringOrder(order: RecurringStorkjokkenOrder) {
     const without = (data.recurringStorkjokkenOrders || []).filter((o) => o.id !== order.id);
     updateData({ recurringStorkjokkenOrders: [...without, order] });
@@ -7310,6 +7383,7 @@ ${orderPages}`;
                 <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
                 <button className="btn" onClick={() => setPanel("stats")}>Salgsstatistikk</button>
                 <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={copyProductionWeekToNext}>Kopiér denne uken → neste uke</button>
+                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={copyProductionWeekFromPrevious}>← Hent forrige uke inn her</button>
               </div>
               <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
             </div>
@@ -7345,6 +7419,37 @@ ${orderPages}`;
                 <Metric label="Totalt antall" value={String(totalUnits)} dark />
                 <Metric label="Total produksjon" value={`${totalUnits} stk`} />
                 <Metric label="Status" value={activeDay.approved ? "Godkjent" : "Ikke godkjent"} tone={activeDay.approved ? "good" : "warn"} />
+              </div>
+
+              <div className="card">
+                <div className="section-toggle" onClick={() => setShowProductionTemplates(!showProductionTemplates)}>
+                  <h3>Produksjonsmaler</h3>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="section-toggle-count">{(data.productionTemplates || []).length}</span>
+                    {showProductionTemplates ? "▲" : "▼"}
+                  </span>
+                </div>
+                {showProductionTemplates && (
+                  <div className="soft-box">
+                    <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                      Lagre antallene for den valgte dagen som en gjenbrukbar mal (f.eks. "Jul", "17. mai"), og last dem inn på en annen dag senere.
+                    </p>
+                    <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveCurrentDayAsTemplate}>Lagre dagens tall som mal</button>
+                    {(data.productionTemplates || []).length === 0 && <p className="muted">Ingen produksjonsmaler lagret ennå.</p>}
+                    {(data.productionTemplates || []).map((template) => (
+                      <div key={template.id} className="editable-row">
+                        <div>
+                          <b>{template.name}</b>
+                          <br /><small style={{ color: "#64748b" }}>Opprettet {formatDateNo(template.createdAt.slice(0, 10))}</small>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => loadProductionTemplate(template)}>Last inn på {formatDateNo(activeDate)}</button>
+                          <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteProductionTemplate(template.id)}>Slett</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="card">
