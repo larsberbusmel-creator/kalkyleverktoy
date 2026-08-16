@@ -13,7 +13,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Ugyldig e-postadresse." }, { status: 400 });
     }
 
-    const { error } = await check.supabaseAdmin.auth.resetPasswordForEmail(email);
+    const { error } = await check.supabaseAdmin.auth.resetPasswordForEmail(email, { redirectTo: "https://misemetrics.app/login" });
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }

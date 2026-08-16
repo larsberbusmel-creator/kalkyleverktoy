@@ -15,7 +15,10 @@ export async function POST(req: Request) {
 
     const { data, error } = await check.supabaseAdmin.auth.admin.inviteUserByEmail(
       email,
-      name && typeof name === "string" && name.trim() ? { data: { name: name.trim() } } : undefined
+      {
+        redirectTo: "https://misemetrics.app/login",
+        ...(name && typeof name === "string" && name.trim() ? { data: { name: name.trim() } } : {}),
+      }
     );
 
     if (error || !data?.user) {
