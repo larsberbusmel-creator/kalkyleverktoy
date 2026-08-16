@@ -72,6 +72,12 @@ export async function POST(req: Request) {
       if (deliveryProduct) cleanLines.push({ productId: deliveryProduct.id, quantity: 1 });
     }
 
+    // Fast transport: automatisk tillegg av kundens valgte transportprodukt,
+    // uavhengig av wantsDelivery - dette er en egen, uavhengig mekanisme.
+    if (customer.fastTransportProductId && !cleanLines.some((l: any) => l.productId === customer.fastTransportProductId)) {
+      cleanLines.push({ productId: customer.fastTransportProductId, quantity: 1 });
+    }
+
     if (!cleanLines.length) {
       return NextResponse.json({ error: "Ingen varer valgt" }, { status: 400 });
     }

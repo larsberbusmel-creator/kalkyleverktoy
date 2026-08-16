@@ -282,6 +282,7 @@ type StorkjokkenCustomer = {
   allowedProductIds?: string[];
   favoriteProductIds?: string[];
   deliveryAvailable?: boolean;
+  fastTransportProductId?: string;
 };
 
 type PortalDeadlineDay = { closed?: boolean; cutoffTime?: string };
@@ -4920,6 +4921,17 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     if (!form.customer.trim() && form.customerType === "privat") return alert("Legg inn kundenavn.");
     if (!form.companyName?.trim() && form.customerType === "bedrift") return alert("Legg inn bedriftsnavn.");
     if (!cleanLines.length) return alert("Legg inn minst ett produkt/meny i ordren.");
+    // Fast transport: for NYE ordre av type storkjøkken, se om kundenavnet matcher
+    // en registrert storkjøkkenkunde med fastTransportProductId satt (samme
+    // navne-match-mønster som brukes andre steder for storkjøkken-priser på
+    // print, siden Order ikke har noen egen FK til StorkjokkenCustomer).
+    if (!editingOrderId && form.customerType === "storkjokken") {
+      const matchName = (form.companyName || form.customer || "").trim().toLowerCase();
+      const matchedCustomer = matchName ? (data.storkjokkenCustomers || []).find((c) => c.name.trim().toLowerCase() === matchName) : undefined;
+      if (matchedCustomer?.fastTransportProductId && !cleanLines.some((l) => l.productId === matchedCustomer.fastTransportProductId)) {
+        cleanLines.push({ productId: matchedCustomer.fastTransportProductId, quantity: 1 });
+      }
+    }
     const savedOrder = { ...form, id: editingOrderId || `order-${Date.now()}`, orderLines: cleanLines };
     if (editingOrderId) {
       savedOrder.editLog = [...(form.editLog || []), { by: userEmail, at: new Date().toISOString() }].slice(-20);
@@ -6102,8 +6114,23 @@ function ProductionTab({
   const [statsCustomerId, setStatsCustomerId] = useState<string | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [customerDraft, setCustomerDraft] = useState<Partial<StorkjokkenCustomer>>({});
+  const [fastTransportEnabled, setFastTransportEnabled] = useState(false);
 
   const productionDays = data.bakeryProductionDays || {};
+
+  // "Fast transport": når en kunde med fastTransportProductId satt får minst
+  // én ny produksjonslinje (via fastordre), sørg for at transportproduktet
+  // også ligger inne for den kunden - med mindre det allerede er der.
+  // Muterer quantities in-place (kalleren har allerede en fersk kopi).
+  function ensureFastTransportLine(quantities: BakeryProductionDay["quantities"], customerId: string) {
+    const customer = (data.storkjokkenCustomers || []).find((c) => c.id === customerId);
+    const transportProductId = customer?.fastTransportProductId;
+    if (!transportProductId) return;
+    const existingQty = Number(quantities[transportProductId]?.[customerId] || 0);
+    if (existingQty > 0) return;
+    quantities[transportProductId] = { ...(quantities[transportProductId] || {}), [customerId]: 1 };
+  }
+
   function recurringQuantitiesForDate(date: string) {
     const dayNo = weekdayNumber(date);
     const quantities: BakeryProductionDay["quantities"] = {};
@@ -6111,6 +6138,7 @@ function ProductionTab({
       order.lines.forEach((line) => {
         quantities[line.productId] = { ...(quantities[line.productId] || {}), [order.customerId]: Number(line.quantityByDay?.[dayNo] || 0) };
       });
+      ensureFastTransportLine(quantities, order.customerId);
     });
     return quantities;
   }
@@ -6299,7 +6327,8 @@ function ProductionTab({
 
   function startEditCustomer(customer: StorkjokkenCustomer) {
     setEditingCustomerId(customer.id);
-    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin, allowedProductIds: customer.allowedProductIds, deliveryAvailable: customer.deliveryAvailable });
+    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin, allowedProductIds: customer.allowedProductIds, deliveryAvailable: customer.deliveryAvailable, fastTransportProductId: customer.fastTransportProductId });
+    setFastTransportEnabled(!!customer.fastTransportProductId);
   }
 
   function toggleAllowedProduct(productId: string) {
@@ -6320,6 +6349,7 @@ function ProductionTab({
   function cancelEditCustomer() {
     setEditingCustomerId(null);
     setCustomerDraft({});
+    setFastTransportEnabled(false);
   }
 
   function saveEditCustomer() {
@@ -6327,6 +6357,7 @@ function ProductionTab({
     updateCustomer(editingCustomerId, customerDraft);
     setEditingCustomerId(null);
     setCustomerDraft({});
+    setFastTransportEnabled(false);
   }
 
   function archiveCustomer(id: string) {
@@ -6354,8 +6385,28 @@ function ProductionTab({
 
   function addPickupOrder(customerId: string, productId: string, quantity: number) {
     if (!productId || !quantity) return;
-    const entry: StorkjokkenPickupOrder = { id: `pickup-${Date.now()}`, customerId, productId, quantity, date: today(), createdAt: new Date().toISOString(), priceExVat: priceForCustomer(productId, customerId) };
-    updateData({ storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), entry] });
+    const date = today();
+    const entry: StorkjokkenPickupOrder = { id: `pickup-${Date.now()}`, customerId, productId, quantity, date, createdAt: new Date().toISOString(), priceExVat: priceForCustomer(productId, customerId) };
+    const newEntries: StorkjokkenPickupOrder[] = [entry];
+
+    const customer = (data.storkjokkenCustomers || []).find((c) => c.id === customerId);
+    const transportProductId = customer?.fastTransportProductId;
+    if (transportProductId && transportProductId !== productId) {
+      const alreadyHasTransport = (data.storkjokkenPickupOrders || []).some((p) => p.customerId === customerId && p.productId === transportProductId && p.date === date);
+      if (!alreadyHasTransport) {
+        newEntries.push({
+          id: `pickup-${Date.now()}-transport`,
+          customerId,
+          productId: transportProductId,
+          quantity: 1,
+          date,
+          createdAt: new Date().toISOString(),
+          priceExVat: priceForCustomer(transportProductId, customerId),
+        });
+      }
+    }
+
+    updateData({ storkjokkenPickupOrders: [...(data.storkjokkenPickupOrders || []), ...newEntries] });
   }
 
   function approvePendingPortalOrder(id: string) {
@@ -7202,6 +7253,7 @@ ${orderPages}`;
         order.lines.forEach((line) => {
           targetQuantities[line.productId] = { ...(targetQuantities[line.productId] || {}), [order.customerId]: Number(line.quantityByDay?.[dayNo] || 0) };
         });
+        ensureFastTransportLine(targetQuantities, order.customerId);
       });
       nextDays[targetDate] = { date: targetDate, approved: false, quantities: targetQuantities };
     });
@@ -7231,6 +7283,7 @@ ${orderPages}`;
         order.lines.forEach((line) => {
           targetQuantities[line.productId] = { ...(targetQuantities[line.productId] || {}), [order.customerId]: Number(line.quantityByDay?.[dayNo] || 0) };
         });
+        ensureFastTransportLine(targetQuantities, order.customerId);
       });
       nextDays[date] = { date, approved: false, quantities: targetQuantities };
     });
@@ -7351,6 +7404,7 @@ ${orderPages}`;
       order.lines.forEach((line) => {
         nextDay.quantities[line.productId] = { ...(nextDay.quantities[line.productId] || {}), [order.customerId]: Number(nextDay.quantities[line.productId]?.[order.customerId] || 0) + Number(line.quantityByDay?.[dayNo] || 0) };
       });
+      ensureFastTransportLine(nextDay.quantities, order.customerId);
     });
     saveDay(nextDay);
   }
@@ -7890,6 +7944,34 @@ ${orderPages}`;
                                   </label>
                                   {!customerDraft.pin && (
                                     <button type="button" className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setCustomerDraft({ ...customerDraft, pin: generateUniquePin() })}>Generer PIN</button>
+                                  )}
+                                </div>
+
+                                <div style={{ marginTop: 8 }}>
+                                  <label className="check">
+                                    <input
+                                      type="checkbox"
+                                      checked={fastTransportEnabled}
+                                      disabled={readOnly}
+                                      onChange={(e) => {
+                                        setFastTransportEnabled(e.target.checked);
+                                        if (!e.target.checked) setCustomerDraft({ ...customerDraft, fastTransportProductId: undefined });
+                                      }}
+                                    />
+                                    Fast transport
+                                  </label>
+                                  {fastTransportEnabled && (
+                                    <select
+                                      value={customerDraft.fastTransportProductId || ""}
+                                      disabled={readOnly}
+                                      onChange={(e) => setCustomerDraft({ ...customerDraft, fastTransportProductId: e.target.value || undefined })}
+                                      style={{ display: "block", marginTop: 6, maxWidth: 320 }}
+                                    >
+                                      <option value="">Velg transportprodukt</option>
+                                      {data.products.filter((p) => p.category === "Transport").map((p) => (
+                                        <option key={p.id} value={p.id}>{p.name} - {currency(p.customerPrice)} kr</option>
+                                      ))}
+                                    </select>
                                   )}
                                 </div>
 
