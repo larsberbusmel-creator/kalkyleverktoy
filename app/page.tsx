@@ -392,6 +392,19 @@ type ReportArticleMapping = {
   productId: string;
 };
 
+type ReportSnapshot = {
+  id: string;
+  month: string; // "YYYY-MM"
+  savedAt: string;
+  totalSoldUnits: number;
+  totalRevenueBrutto: number;
+  totalRevenueNetto: number;
+  totalExpectedCost: number;
+  totalExpectedProfit: number;
+  unmatchedCount: number;
+  materialVarianceSummary?: { materialId: string; theoretical: number; actual: number; diffPercent: number }[];
+};
+
 type CalendarNote = {
   id: string;
   date: string;
@@ -454,6 +467,7 @@ type AppData = {
   bakeryProductionDays: Record<string, BakeryProductionDay>;
   productionTemplates: ProductionTemplate[];
   reportArticleMappings: ReportArticleMapping[];
+  reportSnapshots: ReportSnapshot[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
 };
@@ -699,6 +713,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   bakeryProductionDays: {},
   productionTemplates: [],
   reportArticleMappings: [],
+  reportSnapshots: [],
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
@@ -802,6 +817,9 @@ productionTemplates:
 
 reportArticleMappings:
   (raw as any).reportArticleMappings || [],
+
+reportSnapshots:
+  (raw as any).reportSnapshots || [],
   seenOrderIds: (() => {
   const legacyDates: string[] = (raw as any).seenOrderDates || [];
   const existing: string[] = (raw as any).seenOrderIds || [];
@@ -1429,7 +1447,7 @@ return (
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
-        {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} readOnly={!canEdit("reports")} />}
+        {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
@@ -8753,6 +8771,190 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
   );
 }
 
+// ── Lønnsomhetsrapport: Mat vs. Deli ──────────────────────────────────────
+// Trukket ut som selvstendig, ren funksjon + delt komponent slik at BÅDE
+// InventoryTab (Varetelling) og ReportsTab (Rapporter) kan rendre nøyaktig
+// samme, uendrede beregning fra samme sted - ingen duplisert logikk.
+// Formlene her er BYTTET IKKE, kun flyttet ut av InventoryTab sin lokale
+// closure og parameterisert på `month` i stedet for å lese `inventoryMonth`
+// direkte, slik at samme funksjon kan brukes for en hvilken som helst måned.
+type ProfitabilityCalcInventoryUpdater = (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void;
+
+function computeProfitability(data: AppData, month: string, productUnitCost: (p: Product) => number) {
+  const egenprodusertCategories = ["Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
+  const drinkBuckets = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
+  function belongsToBucket(m: Material, bucket: string) {
+    if (bucket === "Alle") return true;
+    if (bucket === "Mat") return !drinkBuckets.includes(m.category) && m.category !== "Deli";
+    return m.category === bucket;
+  }
+  const countsByMonth = data.inventoryCounts || {};
+  function valueForBucketInMonth(monthKey: string, bucket: string) {
+    const monthIsFrozen = countsByMonth[monthKey]?.pricesFrozen;
+    if (egenprodusertCategories.includes(bucket)) {
+      const items = countsByMonth[monthKey]?.items || {};
+      return data.products.filter((p) => p.category === bucket).reduce((sum, p) => {
+        const c = items[`product_${p.id}`] as any || { packages: 0, loose: 0 };
+        const packages = Number(c.packages || 0);
+        const loose = Number(c.loose || 0);
+        const unitCost = monthIsFrozen && c.frozenUnitCost != null ? c.frozenUnitCost : productUnitCost(p);
+        return sum + (packages * Number(p.unitsPerCase || 1) + loose) * unitCost;
+      }, 0);
+    }
+    const items = countsByMonth[monthKey]?.items || {};
+    return data.materials.reduce((sum, m) => {
+      if (!belongsToBucket(m, bucket)) return sum;
+      const c = items[m.id] as any || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
+      const packages = Number(c.packages || 0);
+      const loose = Number(c.loose || 0);
+      const packagePrice = c.packagePrice ?? m.packagePrice;
+      const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+      const looseVal2 = m.category === "Brennevin" ? loose * packagePrice : loose * pricePerUnit;
+      return sum + packages * packagePrice + looseVal2;
+    }, 0);
+  }
+
+  const prevMonthKey = (() => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  })();
+
+  const profitability: ProfitabilityInput = countsByMonth[month]?.profitability || {};
+  const matSalesNetto = profitability.matSalesNetto || 0;
+  const deliSalesNetto = profitability.deliSalesNetto || 0;
+  const varekjopMatTotalt = profitability.varekjopMatTotalt || 0;
+
+  const deliOpening = valueForBucketInMonth(prevMonthKey, "Deli");
+  const deliClosing = valueForBucketInMonth(month, "Deli");
+  const matOpening = valueForBucketInMonth(prevMonthKey, "Mat");
+  const matClosing = valueForBucketInMonth(month, "Mat");
+
+  const totalSalesNetto = matSalesNetto + deliSalesNetto;
+  const deliSalesShare = totalSalesNetto > 0 ? deliSalesNetto / totalSalesNetto : 0;
+  const deliInnkjopEstimat = varekjopMatTotalt * deliSalesShare;
+  const matInnkjopEstimat = varekjopMatTotalt - deliInnkjopEstimat;
+
+  const deliVarekostKr = deliOpening + deliInnkjopEstimat - deliClosing;
+  const matVarekostKr = matOpening + matInnkjopEstimat - matClosing;
+
+  const deliVarekostPctResult = deliSalesNetto > 0 ? deliVarekostKr / deliSalesNetto : 0;
+  const matVarekostPctResult = matSalesNetto > 0 ? matVarekostKr / matSalesNetto : 0;
+  const totalVarekostKr = matVarekostKr + deliVarekostKr;
+  const totalVarekostPctResult = totalSalesNetto > 0 ? totalVarekostKr / totalSalesNetto : 0;
+  const matBruttoKr = matSalesNetto - matVarekostKr;
+  const deliBruttoKr = deliSalesNetto - deliVarekostKr;
+  const matMarginPct = matSalesNetto > 0 ? matBruttoKr / matSalesNetto : 0;
+  const deliMarginPct = deliSalesNetto > 0 ? deliBruttoKr / deliSalesNetto : 0;
+
+  return {
+    profitability, matSalesNetto, deliSalesNetto, varekjopMatTotalt,
+    deliOpening, deliClosing, matOpening, matClosing,
+    deliInnkjopEstimat, matInnkjopEstimat, deliVarekostKr, matVarekostKr,
+    deliVarekostPctResult, matVarekostPctResult, totalVarekostKr, totalVarekostPctResult,
+    matBruttoKr, deliBruttoKr, matMarginPct, deliMarginPct,
+  };
+}
+
+function ProfitabilityReport({ data, month, productUnitCost, updateInventoryRpc, readOnly }: {
+  data: AppData;
+  month: string;
+  productUnitCost: (p: Product) => number;
+  updateInventoryRpc: ProfitabilityCalcInventoryUpdater;
+  readOnly: boolean;
+}) {
+  const {
+    profitability, matSalesNetto, deliSalesNetto, varekjopMatTotalt,
+    deliOpening, deliClosing, matOpening, matClosing,
+    deliInnkjopEstimat, matInnkjopEstimat, deliVarekostKr, matVarekostKr,
+    deliVarekostPctResult, matVarekostPctResult, totalVarekostKr, totalVarekostPctResult,
+    matBruttoKr, deliBruttoKr, matMarginPct, deliMarginPct,
+  } = computeProfitability(data, month, productUnitCost);
+
+  function updateProfitability(patch: Partial<ProfitabilityInput>) {
+    updateInventoryRpc(month, { profitability: { ...profitability, ...patch } });
+  }
+
+  return (
+    <details className="soft-box" style={{ padding: 0 }}>
+      <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Lønnsomhetsrapport: Mat vs. Deli</span>
+        <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+      </summary>
+      <div style={{ padding: "0 16px 16px" }}>
+        <p style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
+          Regner ekte varekost via lagerbevegelse: Åpningsbeholdning (forrige måneds telling) + Innkjøp − Sluttbeholdning (denne månedens telling).
+          Innkjøpet fra regnskapet er kun kjent samlet for mat+deli, så Deli sin andel anslås fra Deli sin egen kost/utsalgspris-proxy, og resten tilfaller Mat.
+        </p>
+
+        <div className="form-grid three">
+          <label>Mat-salg netto eks. mva (ekskl. deli)
+            <input type="number" value={profitability.matSalesNetto || ""} disabled={readOnly} onChange={(e) => updateProfitability({ matSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
+          </label>
+          <label>Deli-salg netto eks. mva
+            <input type="number" value={profitability.deliSalesNetto || ""} disabled={readOnly} onChange={(e) => updateProfitability({ deliSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
+          </label>
+          <label>Varekjøp mat totalt (fra regnskap, mat+deli samlet)
+            <input type="number" value={profitability.varekjopMatTotalt || ""} disabled={readOnly} onChange={(e) => updateProfitability({ varekjopMatTotalt: Number(e.target.value) || 0 })} placeholder="F.eks. 600000" />
+          </label>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
+          <div style={{ border: "2px solid #f59e0b", background: "#fffbeb", borderRadius: 10, padding: 12 }}>
+            <h4 style={{ margin: "0 0 8px 0", color: "#92400e" }}>Mat</h4>
+            <div className="metric-row">
+              <Metric label="Åpningsbeholdning" value={currency(matOpening)} />
+              <Metric label="Sluttbeholdning" value={currency(matClosing)} />
+            </div>
+            <div className="metric-row">
+              <Metric label="Anslått innkjøp" value={currency(matInnkjopEstimat)} />
+              <Metric label="Varekost kr" value={currency(matVarekostKr)} />
+            </div>
+            <div className="metric-row">
+              <Metric label="Varekost %" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
+              <Metric label="Bruttomargin %" value={`${num(matMarginPct * 100, 1)} %`} tone={marginTone(matMarginPct * 100)} />
+            </div>
+            <div className="metric-row">
+              <Metric label="Bruttofortjeneste" value={currency(matBruttoKr)} />
+            </div>
+          </div>
+
+          <div style={{ border: "2px solid #2563eb", background: "#eff6ff", borderRadius: 10, padding: 12 }}>
+            <h4 style={{ margin: "0 0 8px 0", color: "#1e3a8a" }}>Deli</h4>
+            <div className="metric-row">
+              <Metric label="Åpningsbeholdning" value={currency(deliOpening)} />
+              <Metric label="Sluttbeholdning" value={currency(deliClosing)} />
+            </div>
+            <div className="metric-row">
+              <Metric label="Anslått innkjøp" value={currency(deliInnkjopEstimat)} />
+              <Metric label="Varekost kr" value={currency(deliVarekostKr)} />
+            </div>
+            <div className="metric-row">
+              <Metric label="Varekost %" value={`${num(deliVarekostPctResult * 100, 1)} %`} dark />
+              <Metric label="Bruttomargin %" value={`${num(deliMarginPct * 100, 1)} %`} tone={marginTone(deliMarginPct * 100)} />
+            </div>
+            <div className="metric-row">
+              <Metric label="Bruttofortjeneste" value={currency(deliBruttoKr)} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ border: "2px solid #1e293b", background: "#f1f5f9", borderRadius: 10, padding: 12, marginTop: 12 }}>
+          <h4 style={{ margin: "0 0 8px 0", color: "#0f172a" }}>Mat + Deli samlet</h4>
+          <div className="metric-row">
+            <Metric label="Varekost totalt kr" value={currency(totalVarekostKr)} dark />
+            <Metric label="Varekost totalt %" value={`${num(totalVarekostPctResult * 100, 1)} %`} dark />
+          </div>
+        </div>
+
+        {(!matSalesNetto || !deliSalesNetto || !varekjopMatTotalt) && (
+          <div className="warning">Fyll inn alle tre inputfeltene over for å se en fullstendig beregning.</div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number; updateInventoryRpc: (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void; readOnly: boolean }) {
   const currentYm = new Date().toISOString().slice(0, 7);
   const [inventoryMonth, setInventoryMonth] = useState(currentYm);
@@ -9007,42 +9209,9 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     return data.materials.filter((m) => m.category === bucket).reduce((sum, m) => sum + materialWasteValue(m), 0);
   }
 
-  // ── Lønnsomhetsrapport: Mat vs. Deli ──────────────────────────────────────
-  const profitability = currentInventory.profitability || {};
-
-  function updateProfitability(patch: Partial<ProfitabilityInput>) {
-    updateInventoryRpc(inventoryMonth, { profitability: { ...profitability, ...patch } });
-  }
-
-  const matSalesNetto = profitability.matSalesNetto || 0;
-  const deliSalesNetto = profitability.deliSalesNetto || 0;
-  const varekjopMatTotalt = profitability.varekjopMatTotalt || 0;
-
-  // Ekte varekost via lagerbevegelse: Åpningsbeholdning + Innkjøp − Sluttbeholdning.
-  // Innkjøpet (fra regnskap) er kun kjent samlet for mat+deli, så vi fordeler det
-  // proporsjonalt med salgsandel — vi har full dekning på salgstall og innkjøpspris,
-  // i motsetning til utsalgspris som langt fra alle råvarer har registrert.
-  const deliOpening = valueForBucketInMonth(prevMonthKey, "Deli");
-  const deliClosing = valueForBucketInMonth(inventoryMonth, "Deli");
-  const matOpening = valueForBucketInMonth(prevMonthKey, "Mat");
-  const matClosing = valueForBucketInMonth(inventoryMonth, "Mat");
-
-  const totalSalesNetto = matSalesNetto + deliSalesNetto;
-  const deliSalesShare = totalSalesNetto > 0 ? deliSalesNetto / totalSalesNetto : 0;
-  const deliInnkjopEstimat = varekjopMatTotalt * deliSalesShare;
-  const matInnkjopEstimat = varekjopMatTotalt - deliInnkjopEstimat;
-
-  const deliVarekostKr = deliOpening + deliInnkjopEstimat - deliClosing;
-  const matVarekostKr = matOpening + matInnkjopEstimat - matClosing;
-
-  const deliVarekostPctResult = deliSalesNetto > 0 ? deliVarekostKr / deliSalesNetto : 0;
-  const matVarekostPctResult = matSalesNetto > 0 ? matVarekostKr / matSalesNetto : 0;
-  const totalVarekostKr = matVarekostKr + deliVarekostKr;
-  const totalVarekostPctResult = totalSalesNetto > 0 ? totalVarekostKr / totalSalesNetto : 0;
-  const matBruttoKr = matSalesNetto - matVarekostKr;
-  const deliBruttoKr = deliSalesNetto - deliVarekostKr;
-  const matMarginPct = matSalesNetto > 0 ? matBruttoKr / matSalesNetto : 0;
-  const deliMarginPct = deliSalesNetto > 0 ? deliBruttoKr / deliSalesNetto : 0;
+  // Lønnsomhetsrapport: Mat vs. Deli - beregningen selv er flyttet til den
+  // delte, uendrede computeProfitability()/<ProfitabilityReport> lenger opp
+  // i filen (gjenbrukt fra Rapporter-fanen også). Se rendring nedenfor.
 
   function getLocationCount(materialId: string, location: string): { packages: number; loose: number } {
     const item = counts[materialId] as any;
@@ -9744,82 +9913,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
         </div>
       </details>
 
-      <details className="soft-box" style={{ padding: 0 }}>
-        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Lønnsomhetsrapport: Mat vs. Deli</span>
-          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
-        </summary>
-        <div style={{ padding: "0 16px 16px" }}>
-          <p style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
-            Regner ekte varekost via lagerbevegelse: Åpningsbeholdning (forrige måneds telling) + Innkjøp − Sluttbeholdning (denne månedens telling).
-            Innkjøpet fra regnskapet er kun kjent samlet for mat+deli, så Deli sin andel anslås fra Deli sin egen kost/utsalgspris-proxy, og resten tilfaller Mat.
-          </p>
-
-          <div className="form-grid three">
-            <label>Mat-salg netto eks. mva (ekskl. deli)
-              <input type="number" value={profitability.matSalesNetto || ""} disabled={readOnly} onChange={(e) => updateProfitability({ matSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
-            </label>
-            <label>Deli-salg netto eks. mva
-              <input type="number" value={profitability.deliSalesNetto || ""} disabled={readOnly} onChange={(e) => updateProfitability({ deliSalesNetto: Number(e.target.value) || 0 })} placeholder="0" />
-            </label>
-            <label>Varekjøp mat totalt (fra regnskap, mat+deli samlet)
-              <input type="number" value={profitability.varekjopMatTotalt || ""} disabled={readOnly} onChange={(e) => updateProfitability({ varekjopMatTotalt: Number(e.target.value) || 0 })} placeholder="F.eks. 600000" />
-            </label>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
-            <div style={{ border: "2px solid #f59e0b", background: "#fffbeb", borderRadius: 10, padding: 12 }}>
-              <h4 style={{ margin: "0 0 8px 0", color: "#92400e" }}>Mat</h4>
-              <div className="metric-row">
-                <Metric label="Åpningsbeholdning" value={currency(matOpening)} />
-                <Metric label="Sluttbeholdning" value={currency(matClosing)} />
-              </div>
-              <div className="metric-row">
-                <Metric label="Anslått innkjøp" value={currency(matInnkjopEstimat)} />
-                <Metric label="Varekost kr" value={currency(matVarekostKr)} />
-              </div>
-              <div className="metric-row">
-                <Metric label="Varekost %" value={`${num(matVarekostPctResult * 100, 1)} %`} dark />
-                <Metric label="Bruttomargin %" value={`${num(matMarginPct * 100, 1)} %`} tone={marginTone(matMarginPct * 100)} />
-              </div>
-              <div className="metric-row">
-                <Metric label="Bruttofortjeneste" value={currency(matBruttoKr)} />
-              </div>
-            </div>
-
-            <div style={{ border: "2px solid #2563eb", background: "#eff6ff", borderRadius: 10, padding: 12 }}>
-              <h4 style={{ margin: "0 0 8px 0", color: "#1e3a8a" }}>Deli</h4>
-              <div className="metric-row">
-                <Metric label="Åpningsbeholdning" value={currency(deliOpening)} />
-                <Metric label="Sluttbeholdning" value={currency(deliClosing)} />
-              </div>
-              <div className="metric-row">
-                <Metric label="Anslått innkjøp" value={currency(deliInnkjopEstimat)} />
-                <Metric label="Varekost kr" value={currency(deliVarekostKr)} />
-              </div>
-              <div className="metric-row">
-                <Metric label="Varekost %" value={`${num(deliVarekostPctResult * 100, 1)} %`} dark />
-                <Metric label="Bruttomargin %" value={`${num(deliMarginPct * 100, 1)} %`} tone={marginTone(deliMarginPct * 100)} />
-              </div>
-              <div className="metric-row">
-                <Metric label="Bruttofortjeneste" value={currency(deliBruttoKr)} />
-              </div>
-            </div>
-          </div>
-
-          <div style={{ border: "2px solid #1e293b", background: "#f1f5f9", borderRadius: 10, padding: 12, marginTop: 12 }}>
-            <h4 style={{ margin: "0 0 8px 0", color: "#0f172a" }}>Mat + Deli samlet</h4>
-            <div className="metric-row">
-              <Metric label="Varekost totalt kr" value={currency(totalVarekostKr)} dark />
-              <Metric label="Varekost totalt %" value={`${num(totalVarekostPctResult * 100, 1)} %`} dark />
-            </div>
-          </div>
-
-          {(!matSalesNetto || !deliSalesNetto || !varekjopMatTotalt) && (
-            <div className="warning">Fyll inn alle tre inputfeltene over for å se en fullstendig beregning.</div>
-          )}
-        </div>
-      </details>
+      <ProfitabilityReport data={data} month={inventoryMonth} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={readOnly} />
 
       <details className="soft-box" style={{ padding: 0 }}>
         <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -13382,10 +13476,11 @@ type ParsedArticle = {
   kost: number;
 };
 
-function ReportsTab({ data, updateData, productUnitCost, readOnly }: {
+function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, readOnly }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productUnitCost: (p: Product) => number;
+  updateInventoryRpc: ProfitabilityCalcInventoryUpdater;
   readOnly: boolean;
 }) {
   const [parsedArticles, setParsedArticles] = useState<ParsedArticle[]>([]);
@@ -13394,6 +13489,7 @@ function ReportsTab({ data, updateData, productUnitCost, readOnly }: {
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
   const [unmatchedSelections, setUnmatchedSelections] = useState<Record<string, string>>({});
+  const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
 
   async function handleFileUpload(file: File | null) {
     if (!file) return;
@@ -13461,6 +13557,7 @@ function ReportsTab({ data, updateData, productUnitCost, readOnly }: {
       if (period) {
         setPeriodFrom(period.from);
         setPeriodTo(period.to);
+        setReportMonth(period.from.slice(0, 7));
       }
     } catch (e) {
       setFileError("Kunne ikke lese filen. Sjekk at det er en gyldig Favn-eksport (.xlsx).");
@@ -13634,6 +13731,33 @@ function ReportsTab({ data, updateData, productUnitCost, readOnly }: {
     .filter((r): r is NonNullable<typeof r> => !!r && (r.theoreticalValue !== 0 || r.actualValue !== 0))
     .sort((a, b) => Math.abs(b.diffValue) - Math.abs(a.diffValue));
 
+  // DEL A: månedlig historikk - lagre et øyeblikksbilde av denne opplastingens
+  // nøkkeltall for senere sammenligning over tid.
+  function saveReportSnapshot() {
+    if (!reportMonth) return;
+    const existing = (data.reportSnapshots || []).find((s) => s.month === reportMonth);
+    if (existing) {
+      if (!window.confirm(`Det finnes allerede en lagret rapport for ${reportMonth}. Overskrive den?`)) return;
+    }
+    const snapshot: ReportSnapshot = {
+      id: existing?.id || `rs-${Date.now()}`,
+      month: reportMonth,
+      savedAt: new Date().toISOString(),
+      totalSoldUnits: statsTotals.quantity,
+      totalRevenueBrutto: statsTotals.brutto,
+      totalRevenueNetto: statsTotals.netto,
+      totalExpectedCost: statsTotals.expectedCost,
+      totalExpectedProfit: statsTotals.expectedProfit,
+      unmatchedCount: unmatched.length,
+      materialVarianceSummary: materialDiffRows.map((r) => ({ materialId: r.materialId, theoretical: r.theoreticalValue, actual: r.actualValue, diffPercent: r.diffPct })),
+    };
+    const without = (data.reportSnapshots || []).filter((s) => s.month !== reportMonth);
+    updateData({ reportSnapshots: [...without, snapshot] });
+  }
+
+  const reportHistory = [...(data.reportSnapshots || [])].sort((a, b) => b.month.localeCompare(a.month));
+  const maxHistoryRevenue = Math.max(1, ...reportHistory.map((s) => s.totalRevenueNetto));
+
   return (
     <section className="card">
       {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
@@ -13783,8 +13907,83 @@ function ReportsTab({ data, updateData, productUnitCost, readOnly }: {
               </table>
             </div>
           </div>
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <h3>Lagre denne rapporten</h3>
+            <div className="form-grid two">
+              <label>Måned rapporten gjelder for
+                <input type="month" value={reportMonth} disabled={readOnly} onChange={(e) => setReportMonth(e.target.value)} />
+              </label>
+              <div style={{ display: "flex", alignItems: "flex-end" }}>
+                <button className="btn active" disabled={readOnly || !reportMonth} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveReportSnapshot}>
+                  Lagre denne rapporten for {reportMonth || "..."}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <details className="soft-box" style={{ padding: 0, marginTop: 16 }}>
+            <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Historikk <span className="section-toggle-count">{reportHistory.length}</span></span>
+              <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+            </summary>
+            <div style={{ padding: "0 16px 16px" }}>
+              {reportHistory.length === 0 ? (
+                <p className="muted">Ingen tidligere rapporter lagret ennå.</p>
+              ) : (
+                <>
+                  <div style={{ overflow: "auto" }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Måned</th>
+                          <th style={{ textAlign: "right" }}>Solgt antall</th>
+                          <th style={{ textAlign: "right" }}>Omsetning netto</th>
+                          <th style={{ textAlign: "right" }}>Forventet kost</th>
+                          <th style={{ textAlign: "right" }}>Forventet fortjeneste</th>
+                          <th style={{ textAlign: "right" }}>Dekningsgrad %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportHistory.map((s) => {
+                          const dg = s.totalRevenueNetto > 0 ? (s.totalExpectedProfit / s.totalRevenueNetto) * 100 : 0;
+                          return (
+                            <tr key={s.id}>
+                              <td>{s.month}</td>
+                              <td style={{ textAlign: "right" }}>{s.totalSoldUnits}</td>
+                              <td style={{ textAlign: "right" }}>{currency(s.totalRevenueNetto)}</td>
+                              <td style={{ textAlign: "right" }}>{currency(s.totalExpectedCost)}</td>
+                              <td style={{ textAlign: "right" }}>{currency(s.totalExpectedProfit)}</td>
+                              <td style={{ textAlign: "right" }}>{num(dg, 1)} %</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="inventory-chart" style={{ marginTop: 16 }}>
+                    {[...reportHistory].reverse().map((s) => (
+                      <div key={s.id} className="inventory-month">
+                        <div className="between"><b>{s.month}</b><b>{currency(s.totalRevenueNetto)}</b></div>
+                        <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.max(4, (s.totalRevenueNetto / maxHistoryRevenue) * 100)}%` }} /></div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </details>
         </>
       )}
+
+      <div style={{ marginTop: 16 }}>
+        <label style={{ display: "block", marginBottom: 8, maxWidth: 220 }}>
+          Måned for Lønnsomhetsrapport
+          <input type="month" value={reportMonth} disabled={readOnly} onChange={(e) => setReportMonth(e.target.value)} />
+        </label>
+        <ProfitabilityReport data={data} month={reportMonth} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={readOnly} />
+      </div>
     </section>
   );
 }
