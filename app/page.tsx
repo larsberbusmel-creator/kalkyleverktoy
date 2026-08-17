@@ -781,6 +781,7 @@ export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [rentalOfferToOpen, setRentalOfferToOpen] = useState<string | null>(null);
+  const [orderToOpen, setOrderToOpen] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -1354,11 +1355,11 @@ return (
       {/* ── INNHOLD ── */}
       <div className="main-content">
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
-        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} />}
+        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
@@ -1487,10 +1488,12 @@ function CalendarDashboard({
   data,
   updateData,
   setTab,
+  setOrderToOpen,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   setTab: (tab: Tab) => void;
+  setOrderToOpen: (id: string | null) => void;
 }) {
   const todayDate = today();
   const [view, setView] = useState<"month" | "day">("month");
@@ -1754,7 +1757,7 @@ const bg = isToday ? "#dcfce7"
                       </div>
                     )}
                     {dateOrders.map((o) => (
-                      <div key={o.id} style={{ padding: "8px 14px", borderBottom: "1px solid #f1f5f9", fontSize: 13 }} onClick={() => setTab("orders")}>
+                      <div key={o.id} style={{ padding: "8px 14px", borderBottom: "1px solid #f1f5f9", fontSize: 13, cursor: "pointer" }} onClick={() => { setOrderToOpen(o.id); setTab("orders"); }}>
                         <b>{o.time || "--"}</b> {o.customerType === "bedrift" ? o.companyName || o.customer : o.customer}
                         <div style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>
                           {o.orderLines.map((l) => { const p = data.products.find((x) => x.id === l.productId); return `${l.quantity}×${p?.name || "?"}`; }).join(", ")}
@@ -1807,7 +1810,7 @@ const bg = isToday ? "#dcfce7"
                   <table>
                     <tbody>
                       {selectedOrders.map((o) => (
-                        <tr key={o.id} className="click-row" onClick={() => setTab("orders")}>
+                        <tr key={o.id} className="click-row" onClick={() => { setOrderToOpen(o.id); setTab("orders"); }}>
                           <td>{o.time || "-"}</td>
                           <td>{o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer}</td>
                           <td>{o.orderLines.map((l) => { const p = data.products.find((x) => x.id === l.productId); return `${l.quantity} × ${p?.name || "Produkt"}`; }).join(", ")}</td>
@@ -4706,7 +4709,7 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, readOnly, userEmail, isSuperadmin }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, pendingOrderId, clearPendingOrderId, readOnly, userEmail, isSuperadmin }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -4714,6 +4717,8 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   recipeAllergens: (r: Recipe) => string[];
   setTab: (t: Tab) => void;
   setRentalOfferToOpen: (id: string | null) => void;
+  pendingOrderId?: string | null;
+  clearPendingOrderId?: () => void;
   readOnly: boolean;
   userEmail: string;
   isSuperadmin: boolean;
@@ -5008,6 +5013,13 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     setLineToAdd({ productId: "", quantity: order.guests || 1 });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  useEffect(() => {
+    if (!pendingOrderId) return;
+    const order = data.orders.find((o) => o.id === pendingOrderId);
+    if (order) editOrder(order);
+    clearPendingOrderId?.();
+  }, [pendingOrderId]);
 
   function softDeleteOrder(id: string) {
     if (!confirm("Flytte ordren til papirkurv?")) return;
