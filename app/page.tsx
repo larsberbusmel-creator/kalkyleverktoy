@@ -389,7 +389,8 @@ type ProductionTemplate = {
 type ReportArticleMapping = {
   id: string;
   articleName: string;
-  productId: string;
+  productId: string; // id til enten et Product eller et Material, avhengig av itemType
+  itemType: "product" | "material";
 };
 
 type ReportSnapshot = {
@@ -9122,7 +9123,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   function saveWasteReportMapping(articleName: string) {
     const productId = wasteReportUnmatchedSelections[articleName];
     if (!productId) return;
-    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName, productId };
+    // Kastet vare-rapporten gjelder kun ferdigprodukter (Product), aldri råvarer direkte.
+    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName, productId, itemType: "product" };
     const without = (data.reportArticleMappings || []).filter((m) => m.articleName !== articleName);
     updateData({ reportArticleMappings: [...without, mapping] });
   }
@@ -9132,7 +9134,9 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   const wasteReportMatched: { articleName: string; quantity: number; kostpris: number; product: Product }[] = [];
   const wasteReportUnmatched: { articleName: string; quantity: number; kostpris: number }[] = [];
   wasteReportRows.forEach((row) => {
-    const mapping = (data.reportArticleMappings || []).find((m) => m.articleName === row.articleName);
+    // Kastet vare-rapporten gjelder kun ferdigprodukter - ignorer evt. råvare-koblinger
+    // (itemType "material") som er lagret fra Rapporter-fanens bredere matching.
+    const mapping = (data.reportArticleMappings || []).find((m) => m.articleName === row.articleName && m.itemType !== "material");
     let product = mapping ? data.products.find((p) => p.id === mapping.productId) : undefined;
     if (!product) {
       product = data.products.find((p) => p.name.trim().toLowerCase() === row.articleName.trim().toLowerCase());
@@ -13476,6 +13480,11 @@ type ParsedArticle = {
   kost: number;
 };
 
+type MatchedArticle = ParsedArticle & (
+  | { itemType: "product"; itemId: string; product: Product }
+  | { itemType: "material"; itemId: string; material: Material }
+);
+
 function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, readOnly }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -13566,36 +13575,52 @@ function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, rea
     }
   }
 
-  // DEL 3: matching mot produkter - eksisterende kobling først, så eksakt navn-match
-  const matched: (ParsedArticle & { productId: string; product: Product })[] = [];
+  // DEL 3: matching mot produkter OG råvarer (rene videresalgsvarer som grillkull,
+  // bæreposer osv. er registrert som Material, ikke Product) - eksisterende kobling
+  // først (uansett type), så eksakt navn-match mot produkter, så mot råvarer.
+  const matched: MatchedArticle[] = [];
   const unmatched: ParsedArticle[] = [];
   parsedArticles.forEach((article) => {
     const mapping = (data.reportArticleMappings || []).find((m) => m.articleName === article.articleName);
-    let product = mapping ? data.products.find((p) => p.id === mapping.productId) : undefined;
-    if (!product) {
-      product = data.products.find((p) => p.name.trim().toLowerCase() === article.articleName.trim().toLowerCase());
+    if (mapping) {
+      if (mapping.itemType === "material") {
+        const material = data.materials.find((m) => m.id === mapping.productId);
+        if (material) { matched.push({ ...article, itemType: "material", itemId: material.id, material }); return; }
+      } else {
+        const product = data.products.find((p) => p.id === mapping.productId);
+        if (product) { matched.push({ ...article, itemType: "product", itemId: product.id, product }); return; }
+      }
     }
-    if (product) matched.push({ ...article, productId: product.id, product });
-    else unmatched.push(article);
+    const product = data.products.find((p) => p.name.trim().toLowerCase() === article.articleName.trim().toLowerCase());
+    if (product) { matched.push({ ...article, itemType: "product", itemId: product.id, product }); return; }
+    const material = data.materials.find((m) => m.name.trim().toLowerCase() === article.articleName.trim().toLowerCase());
+    if (material) { matched.push({ ...article, itemType: "material", itemId: material.id, material }); return; }
+    unmatched.push(article);
   });
 
   function saveMapping(articleName: string) {
-    const productId = unmatchedSelections[articleName];
-    if (!productId) return;
-    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName, productId };
+    const selection = unmatchedSelections[articleName];
+    if (!selection) return;
+    const [itemType, itemId] = selection.split(":") as ["product" | "material", string];
+    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName, productId: itemId, itemType };
     const without = (data.reportArticleMappings || []).filter((m) => m.articleName !== articleName);
     updateData({ reportArticleMappings: [...without, mapping] });
   }
 
-  // DEL 4: produktstatistikk - gruppert per produkt (samme produkt kan i sjeldne
-  // tilfeller være koblet fra flere ulike artikkelnavn)
-  const productStatsMap: Record<string, { productId: string; productName: string; quantity: number; brutto: number; netto: number; expectedCost: number }> = {};
+  // DEL 4: produktstatistikk - gruppert per produkt/råvare (samme produkt/råvare kan
+  // i sjeldne tilfeller være koblet fra flere ulike artikkelnavn). Råvare-matchede
+  // artikler (rene videresalgsvarer) bruker material.pricePerUnit, ikke productUnitCost.
+  const productStatsMap: Record<string, { key: string; itemType: "product" | "material"; name: string; quantity: number; brutto: number; netto: number; expectedCost: number }> = {};
   matched.forEach((article) => {
-    const expectedCost = productUnitCost(article.product) * article.quantity;
-    if (!productStatsMap[article.productId]) {
-      productStatsMap[article.productId] = { productId: article.productId, productName: article.product.name, quantity: 0, brutto: 0, netto: 0, expectedCost: 0 };
+    const key = `${article.itemType}:${article.itemId}`;
+    const expectedCost = article.itemType === "product"
+      ? productUnitCost(article.product) * article.quantity
+      : article.material.pricePerUnit * article.quantity;
+    const name = article.itemType === "product" ? article.product.name : article.material.name;
+    if (!productStatsMap[key]) {
+      productStatsMap[key] = { key, itemType: article.itemType, name, quantity: 0, brutto: 0, netto: 0, expectedCost: 0 };
     }
-    const row = productStatsMap[article.productId];
+    const row = productStatsMap[key];
     row.quantity += article.quantity;
     row.brutto += article.brutto;
     row.netto += article.netto;
@@ -13673,6 +13698,9 @@ function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, rea
 
   const theoreticalConsumption: Record<string, number> = {};
   matched.forEach((article) => {
+    // Råvare-matchede artikler ER selve råvaren som selges videre - de har ingen
+    // oppskrift å beregne teoretisk forbruk fra, så de skal ikke inngå her.
+    if (article.itemType !== "product") return;
     const perUnit = productMaterialConsumptionPerUnit(article.product);
     Object.entries(perUnit).forEach(([materialId, amount]) => {
       theoreticalConsumption[materialId] = (theoreticalConsumption[materialId] || 0) + amount * article.quantity;
@@ -13779,7 +13807,7 @@ function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, rea
       {parsedArticles.length > 0 && (
         <>
           <p className="muted" style={{ marginTop: 8 }}>
-            {parsedArticles.length} artikler lest fra rapporten. {matched.length} matchet mot produkter, {unmatched.length} ikke matchet.
+            {parsedArticles.length} artikler lest fra rapporten. {matched.length} matchet (produkter/råvarer), {unmatched.length} ikke matchet.
           </p>
 
           {unmatched.length > 0 && (
@@ -13797,8 +13825,13 @@ function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, rea
                       disabled={readOnly}
                       onChange={(e) => setUnmatchedSelections({ ...unmatchedSelections, [article.articleName]: e.target.value })}
                     >
-                      <option value="">Velg produkt...</option>
-                      {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      <option value="">Velg produkt eller råvare...</option>
+                      <optgroup label="Produkter">
+                        {data.products.map((p) => <option key={`product:${p.id}`} value={`product:${p.id}`}>{p.name}</option>)}
+                      </optgroup>
+                      <optgroup label="Råvarer">
+                        {data.materials.map((m) => <option key={`material:${m.id}`} value={`material:${m.id}`}>{m.name}</option>)}
+                      </optgroup>
                     </select>
                     <button
                       className="btn active"
@@ -13831,8 +13864,11 @@ function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, rea
                 </thead>
                 <tbody>
                   {productStats.map((r) => (
-                    <tr key={r.productId}>
-                      <td>{r.productName}</td>
+                    <tr key={r.key}>
+                      <td>
+                        {r.name}
+                        {r.itemType === "material" && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: "#92400e", background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 6, padding: "1px 6px" }}>Råvare</span>}
+                      </td>
                       <td style={{ textAlign: "right" }}>{r.quantity}</td>
                       <td style={{ textAlign: "right" }}>{currency(r.brutto)}</td>
                       <td style={{ textAlign: "right" }}>{currency(r.netto)}</td>
