@@ -3,8 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import * as XLSX from "xlsx";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "settings" | "rombibliotek" | "users";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "reports" | "settings" | "rombibliotek" | "users";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert" | "selskapsmeny";
@@ -384,6 +385,12 @@ type ProductionTemplate = {
   createdAt: string;
 };
 
+type ReportArticleMapping = {
+  id: string;
+  articleName: string;
+  productId: string;
+};
+
 type CalendarNote = {
   id: string;
   date: string;
@@ -445,6 +452,7 @@ type AppData = {
   recurringStorkjokkenOrders: RecurringStorkjokkenOrder[];
   bakeryProductionDays: Record<string, BakeryProductionDay>;
   productionTemplates: ProductionTemplate[];
+  reportArticleMappings: ReportArticleMapping[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
 };
@@ -689,6 +697,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   recurringStorkjokkenOrders: [],
   bakeryProductionDays: {},
   productionTemplates: [],
+  reportArticleMappings: [],
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
@@ -789,6 +798,9 @@ bakeryProductionDays:
 
 productionTemplates:
   (raw as any).productionTemplates || [],
+
+reportArticleMappings:
+  (raw as any).reportArticleMappings || [],
   seenOrderIds: (() => {
   const legacyDates: string[] = (raw as any).seenOrderDates || [];
   const existing: string[] = (raw as any).seenOrderIds || [];
@@ -1327,6 +1339,7 @@ function productCost(product: Product, visited: string[] = []) {
   { key: "production", label: "Produksjon",         icon: "🥖", color: "#ea580c" },
   { key: "inventory",  label: "Varetelling",        icon: "📦", color: "#0891b2" },
   { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
+  { key: "reports",    label: "Rapporter",          icon: "📊", color: "#0d9488" },
   { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
   { key: "users",      label: "Brukere",            icon: "🔑", color: "#9333ea" },
 ];
@@ -1415,6 +1428,7 @@ return (
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
+        {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} readOnly={!canEdit("reports")} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
@@ -13152,6 +13166,423 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
           ))}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+type ParsedArticle = {
+  articleName: string;
+  groupName: string;
+  subgroupName: string;
+  quantity: number;
+  brutto: number;
+  netto: number;
+  kost: number;
+};
+
+function ReportsTab({ data, updateData, productUnitCost, readOnly }: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  productUnitCost: (p: Product) => number;
+  readOnly: boolean;
+}) {
+  const [parsedArticles, setParsedArticles] = useState<ParsedArticle[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
+  const [unmatchedSelections, setUnmatchedSelections] = useState<Record<string, string>>({});
+
+  async function handleFileUpload(file: File | null) {
+    if (!file) return;
+    setParsing(true);
+    setFileError(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets["Artikler"];
+      if (!sheet) {
+        setFileError('Fant ikke arket "Artikler" i filen.');
+        setParsing(false);
+        return;
+      }
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+      // "Periode"-felt nær toppen av arket, format "DD.MM.ÅÅÅÅ - DD.MM.ÅÅÅÅ"
+      let period: { from: string; to: string } | null = null;
+      for (const row of rows) {
+        const idx = row.findIndex((cell) => String(cell).trim().toLowerCase() === "periode");
+        if (idx >= 0 && row[idx + 1]) {
+          const m = String(row[idx + 1]).match(/(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2})\.(\d{2})\.(\d{4})/);
+          if (m) period = { from: `${m[3]}-${m[2]}-${m[1]}`, to: `${m[6]}-${m[5]}-${m[4]}` };
+          break;
+        }
+      }
+
+      // Finn header-raden dynamisk (radnummer varierer mellom eksporter)
+      const headerRowIndex = rows.findIndex((row) => {
+        const cells = row.map((c) => String(c).trim());
+        return cells.includes("Gruppe") && cells.includes("Undergruppe") && cells.includes("Artikkel") && cells.includes("Antall");
+      });
+      if (headerRowIndex < 0) {
+        setFileError('Fant ikke header-raden (Gruppe/Undergruppe/Artikkel/Antall) i "Artikler"-arket.');
+        setParsing(false);
+        return;
+      }
+      const header = rows[headerRowIndex].map((c) => String(c).trim());
+      const idxGruppe = header.indexOf("Gruppe");
+      const idxUndergruppe = header.indexOf("Undergruppe");
+      const idxArtikkel = header.indexOf("Artikkel");
+      const idxAntall = header.indexOf("Antall");
+      const idxBrutto = header.indexOf("Brutto");
+      const idxNetto = header.indexOf("Netto");
+      const idxKost = header.indexOf("Kost");
+
+      const articles: ParsedArticle[] = [];
+      for (let i = headerRowIndex + 1; i < rows.length; i++) {
+        const row = rows[i];
+        const articleName = String(row[idxArtikkel] ?? "").trim();
+        if (!articleName) continue; // gruppe-/undergruppe-oppsummeringsrad, ikke et enkeltprodukt
+        articles.push({
+          articleName,
+          groupName: String(row[idxGruppe] ?? "").trim(),
+          subgroupName: String(row[idxUndergruppe] ?? "").trim(),
+          quantity: Number(row[idxAntall]) || 0,
+          brutto: idxBrutto >= 0 ? Number(row[idxBrutto]) || 0 : 0,
+          netto: idxNetto >= 0 ? Number(row[idxNetto]) || 0 : 0,
+          kost: idxKost >= 0 ? Number(row[idxKost]) || 0 : 0,
+        });
+      }
+
+      setParsedArticles(articles);
+      setUnmatchedSelections({});
+      if (period) {
+        setPeriodFrom(period.from);
+        setPeriodTo(period.to);
+      }
+    } catch (e) {
+      setFileError("Kunne ikke lese filen. Sjekk at det er en gyldig Favn-eksport (.xlsx).");
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  // DEL 3: matching mot produkter - eksisterende kobling først, så eksakt navn-match
+  const matched: (ParsedArticle & { productId: string; product: Product })[] = [];
+  const unmatched: ParsedArticle[] = [];
+  parsedArticles.forEach((article) => {
+    const mapping = (data.reportArticleMappings || []).find((m) => m.articleName === article.articleName);
+    let product = mapping ? data.products.find((p) => p.id === mapping.productId) : undefined;
+    if (!product) {
+      product = data.products.find((p) => p.name.trim().toLowerCase() === article.articleName.trim().toLowerCase());
+    }
+    if (product) matched.push({ ...article, productId: product.id, product });
+    else unmatched.push(article);
+  });
+
+  function saveMapping(articleName: string) {
+    const productId = unmatchedSelections[articleName];
+    if (!productId) return;
+    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName, productId };
+    const without = (data.reportArticleMappings || []).filter((m) => m.articleName !== articleName);
+    updateData({ reportArticleMappings: [...without, mapping] });
+  }
+
+  // DEL 4: produktstatistikk - gruppert per produkt (samme produkt kan i sjeldne
+  // tilfeller være koblet fra flere ulike artikkelnavn)
+  const productStatsMap: Record<string, { productId: string; productName: string; quantity: number; brutto: number; netto: number; expectedCost: number }> = {};
+  matched.forEach((article) => {
+    const expectedCost = productUnitCost(article.product) * article.quantity;
+    if (!productStatsMap[article.productId]) {
+      productStatsMap[article.productId] = { productId: article.productId, productName: article.product.name, quantity: 0, brutto: 0, netto: 0, expectedCost: 0 };
+    }
+    const row = productStatsMap[article.productId];
+    row.quantity += article.quantity;
+    row.brutto += article.brutto;
+    row.netto += article.netto;
+    row.expectedCost += expectedCost;
+  });
+  const productStats = Object.values(productStatsMap)
+    .map((r) => {
+      const expectedProfit = r.netto - r.expectedCost;
+      const marginPct = r.netto > 0 ? (expectedProfit / r.netto) * 100 : 0;
+      return { ...r, expectedProfit, marginPct };
+    })
+    .sort((a, b) => b.netto - a.netto);
+
+  const statsTotals = productStats.reduce(
+    (sum, r) => ({
+      quantity: sum.quantity + r.quantity,
+      brutto: sum.brutto + r.brutto,
+      netto: sum.netto + r.netto,
+      expectedCost: sum.expectedCost + r.expectedCost,
+      expectedProfit: sum.expectedProfit + r.expectedProfit,
+    }),
+    { quantity: 0, brutto: 0, netto: 0, expectedCost: 0, expectedProfit: 0 }
+  );
+
+  // DEL 5.1: teoretisk råvareforbruk - samme rekursive mønster som productIngredientMap/
+  // productNutrition (product -> recipe -> material), men keyet på materialId (ikke navn)
+  // og med riktig mengde-multiplikasjon nedover i treet (samme prinsipp som productKgCost).
+  function recipeMaterialConsumption(recipe: Recipe, amountUsed: number, map: Record<string, number>, visited: string[]) {
+    if (visited.includes(recipe.id)) return;
+    const totalAmount = recipe.lines.reduce((sum, l) => sum + Number(l.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+    const scale = totalAmount > 0 ? amountUsed / totalAmount : 0;
+    recipe.lines.forEach((line) => {
+      const waste = Math.min(Number(line.wastePercent || 0), 95) / 100;
+      const baseAmount = Number(line.amount || 0) * scale;
+      const adjustedAmount = waste > 0 ? baseAmount / (1 - waste) : baseAmount;
+      if (line.itemType === "material") {
+        map[line.itemId] = (map[line.itemId] || 0) + adjustedAmount;
+      } else if (line.itemType === "recipe") {
+        const subRecipe = data.recipes.find((r) => r.id === line.itemId);
+        if (subRecipe) recipeMaterialConsumption(subRecipe, adjustedAmount, map, [...visited, recipe.id]);
+      }
+    });
+  }
+
+  function productMaterialConsumptionRaw(product: Product, amountUsed: number, map: Record<string, number>, visited: string[]): Record<string, number> {
+    if (visited.includes(product.id)) return map;
+    product.lines.forEach((line) => {
+      const waste = Math.min(Number(line.wastePercent || 0), 95) / 100;
+      const baseAmount = Number(line.amount || 0) * amountUsed;
+      const adjustedAmount = waste > 0 ? baseAmount / (1 - waste) : baseAmount;
+      if (line.itemType === "material") {
+        map[line.itemId] = (map[line.itemId] || 0) + adjustedAmount;
+      } else if (line.itemType === "recipe") {
+        const recipe = data.recipes.find((r) => r.id === line.itemId);
+        if (recipe) recipeMaterialConsumption(recipe, adjustedAmount, map, []);
+      } else if (line.itemType === "product") {
+        const subProduct = data.products.find((p) => p.id === line.itemId);
+        if (subProduct) productMaterialConsumptionRaw(subProduct, adjustedAmount, map, [...visited, product.id]);
+      }
+    });
+    return map;
+  }
+
+  // Konsum for ÉN enhet av produktet - samme normalisering (kg->enhet via
+  // recipeYieldAmount/unitWeightKg) som productKgCost -> productUnitCost bruker.
+  function productMaterialConsumptionPerUnit(product: Product): Record<string, number> {
+    const raw = productMaterialConsumptionRaw(product, 1, {}, []);
+    const totalWeight = Number(product.recipeYieldAmount || 1) || 1;
+    const unitWeight = Number(product.unitWeightKg || 1) || 1;
+    const scale = unitWeight / totalWeight;
+    const result: Record<string, number> = {};
+    Object.entries(raw).forEach(([materialId, amount]) => { result[materialId] = amount * scale; });
+    return result;
+  }
+
+  const theoreticalConsumption: Record<string, number> = {};
+  matched.forEach((article) => {
+    const perUnit = productMaterialConsumptionPerUnit(article.product);
+    Object.entries(perUnit).forEach(([materialId, amount]) => {
+      theoreticalConsumption[materialId] = (theoreticalConsumption[materialId] || 0) + amount * article.quantity;
+    });
+  });
+
+  // DEL 5.2/5.3: periode + "faktisk forbruk". Appen har INGEN sporing av innkjøpt
+  // mengde/verdi råvarer per råvare (kun ett manuelt, blandet totaltall for hele
+  // Mat+Deli-bøtta i Lønnsomhetsrapporten, som ikke kan brytes ned per råvare) -
+  // derfor brukes fallback-metoden: sammenlign mot registrert svinnverdi.
+  function monthKeysInRange(from: string, to: string): string[] {
+    if (!from || !to) return [];
+    const [fy, fm] = from.slice(0, 7).split("-").map(Number);
+    const [ty, tm] = to.slice(0, 7).split("-").map(Number);
+    if (!fy || !fm || !ty || !tm) return [];
+    const keys: string[] = [];
+    let y = fy, m = fm, guard = 0;
+    while ((y < ty || (y === ty && m <= tm)) && guard < 60) {
+      keys.push(`${y}-${String(m).padStart(2, "0")}`);
+      m++;
+      if (m > 12) { m = 1; y++; }
+      guard++;
+    }
+    return keys;
+  }
+
+  function isWholeSingleMonth(from: string, to: string): boolean {
+    if (!from || !to) return false;
+    const [y, m] = from.slice(0, 7).split("-").map(Number);
+    if (!y || !m) return false;
+    const lastDay = new Date(y, m, 0).getDate();
+    return from === `${y}-${String(m).padStart(2, "0")}-01` && to === `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  }
+
+  const relevantMonthKeys = monthKeysInRange(periodFrom, periodTo);
+
+  function materialWasteQuantityInPeriod(materialId: string): number {
+    return relevantMonthKeys.reduce((sum, mk) => {
+      const item = data.inventoryCounts?.[mk]?.items?.[materialId] as any;
+      return sum + Number(item?.waste || 0);
+    }, 0);
+  }
+
+  const materialDiffRows = Object.keys(theoreticalConsumption)
+    .map((materialId) => {
+      const material = data.materials.find((m) => m.id === materialId);
+      if (!material) return null;
+      const theoreticalAmount = theoreticalConsumption[materialId];
+      const theoreticalValue = theoreticalAmount * (material.pricePerUnit || 0);
+      const actualWasteQty = materialWasteQuantityInPeriod(materialId);
+      const actualValue = actualWasteQty * (material.pricePerUnit || 0);
+      const diffValue = actualValue - theoreticalValue;
+      const diffPct = theoreticalValue !== 0 ? (diffValue / theoreticalValue) * 100 : (actualValue !== 0 ? 100 : 0);
+      return { materialId, materialName: material.name, unit: material.unit, theoreticalAmount, theoreticalValue, actualValue, diffValue, diffPct };
+    })
+    .filter((r): r is NonNullable<typeof r> => !!r && (r.theoreticalValue !== 0 || r.actualValue !== 0))
+    .sort((a, b) => Math.abs(b.diffValue) - Math.abs(a.diffValue));
+
+  return (
+    <section className="card">
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
+
+      <div style={{ borderLeft: "4px solid #0d9488", paddingLeft: 12 }}>
+        <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Rapporter</h3>
+        <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Last opp Favn-salgsrapport (.xlsx) for å sammenligne salg mot Misemetrics sine egne tall.</p>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <label>
+          Last opp Favn-eksport (.xlsx)<br />
+          <input type="file" accept=".xlsx" onChange={(e) => handleFileUpload(e.target.files?.[0] || null)} />
+        </label>
+      </div>
+      {parsing && <p className="muted">Leser fil...</p>}
+      {fileError && <div className="warning">{fileError}</div>}
+
+      {parsedArticles.length > 0 && (
+        <>
+          <p className="muted" style={{ marginTop: 8 }}>
+            {parsedArticles.length} artikler lest fra rapporten. {matched.length} matchet mot produkter, {unmatched.length} ikke matchet.
+          </p>
+
+          {unmatched.length > 0 && (
+            <div className="soft-box" style={{ marginTop: 12 }}>
+              <h3>Ikke matchet ({unmatched.length})</h3>
+              {unmatched.map((article) => (
+                <div key={article.articleName} className="editable-row">
+                  <div>
+                    <b>{article.articleName}</b>
+                    <br /><small style={{ color: "#64748b" }}>{article.quantity} stk · {currency(article.netto)} netto</small>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <select
+                      value={unmatchedSelections[article.articleName] || ""}
+                      disabled={readOnly}
+                      onChange={(e) => setUnmatchedSelections({ ...unmatchedSelections, [article.articleName]: e.target.value })}
+                    >
+                      <option value="">Velg produkt...</option>
+                      {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <button
+                      className="btn active"
+                      disabled={readOnly || !unmatchedSelections[article.articleName]}
+                      title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                      onClick={() => saveMapping(article.articleName)}
+                    >
+                      Lagre kobling
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <h3>Produktstatistikk</h3>
+            <div style={{ overflow: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Produkt</th>
+                    <th style={{ textAlign: "right" }}>Solgt</th>
+                    <th style={{ textAlign: "right" }}>Omsetning brutto</th>
+                    <th style={{ textAlign: "right" }}>Omsetning netto</th>
+                    <th style={{ textAlign: "right" }}>Forventet varekost</th>
+                    <th style={{ textAlign: "right" }}>Forventet fortjeneste</th>
+                    <th style={{ textAlign: "right" }}>Forventet DG %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productStats.map((r) => (
+                    <tr key={r.productId}>
+                      <td>{r.productName}</td>
+                      <td style={{ textAlign: "right" }}>{r.quantity}</td>
+                      <td style={{ textAlign: "right" }}>{currency(r.brutto)}</td>
+                      <td style={{ textAlign: "right" }}>{currency(r.netto)}</td>
+                      <td style={{ textAlign: "right" }}>{currency(r.expectedCost)}</td>
+                      <td style={{ textAlign: "right" }}>{currency(r.expectedProfit)}</td>
+                      <td style={{ textAlign: "right" }}>{num(r.marginPct, 1)} %</td>
+                    </tr>
+                  ))}
+                  {productStats.length === 0 && <tr><td colSpan={7} className="muted">Ingen matchede produkter ennå.</td></tr>}
+                </tbody>
+                {productStats.length > 0 && (
+                  <tfoot>
+                    <tr style={{ fontWeight: 800 }}>
+                      <td>Totalt</td>
+                      <td style={{ textAlign: "right" }}>{statsTotals.quantity}</td>
+                      <td style={{ textAlign: "right" }}>{currency(statsTotals.brutto)}</td>
+                      <td style={{ textAlign: "right" }}>{currency(statsTotals.netto)}</td>
+                      <td style={{ textAlign: "right" }}>{currency(statsTotals.expectedCost)}</td>
+                      <td style={{ textAlign: "right" }}>{currency(statsTotals.expectedProfit)}</td>
+                      <td style={{ textAlign: "right" }}>{statsTotals.netto > 0 ? num((statsTotals.expectedProfit / statsTotals.netto) * 100, 1) : "0"} %</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <h3>Råvareforbruk-avvik</h3>
+            <div className="form-grid two">
+              <label>Fra dato<input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} /></label>
+              <label>Til dato<input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} /></label>
+            </div>
+            {periodFrom && periodTo && !isWholeSingleMonth(periodFrom, periodTo) && (
+              <div className="warning">
+                For at råvareavviket skal være meningsfullt, bør perioden tilsvare en hel varetellingsmåned. Valgt periode dekker ikke dette nøyaktig.
+              </div>
+            )}
+            <p className="muted" style={{ fontSize: 12 }}>
+              ℹ️ Ingen innkjøpsdata er registrert i appen - denne sammenligningen viser forventet forbruksverdi basert på salg, satt opp mot registrert svinn/verdiendring i Varetelling. Dette er en tilnærming, ikke et eksakt kvantumsavvik, siden innkjøp i perioden ikke kan skilles fra forbruk uten egen innkjøpsregistrering.
+            </p>
+            <div style={{ overflow: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Råvare</th>
+                    <th style={{ textAlign: "right" }}>Teoretisk forbruk (mengde)</th>
+                    <th style={{ textAlign: "right" }}>Teoretisk forbruk (verdi)</th>
+                    <th style={{ textAlign: "right" }}>Faktisk (registrert svinnverdi)</th>
+                    <th style={{ textAlign: "right" }}>Differanse</th>
+                    <th style={{ textAlign: "right" }}>Differanse %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {materialDiffRows.map((r) => {
+                    const overThreshold = Math.abs(r.diffPct) > 15;
+                    return (
+                      <tr key={r.materialId} style={overThreshold ? { background: "#fef2f2", color: "#b91c1c" } : undefined}>
+                        <td>{r.materialName}</td>
+                        <td style={{ textAlign: "right" }}>{formatAmountUnit(r.theoreticalAmount, r.unit, 2)}</td>
+                        <td style={{ textAlign: "right" }}>{currency(r.theoreticalValue)}</td>
+                        <td style={{ textAlign: "right" }}>{currency(r.actualValue)}</td>
+                        <td style={{ textAlign: "right" }}>{currency(r.diffValue)}</td>
+                        <td style={{ textAlign: "right" }}>{num(r.diffPct, 1)} %</td>
+                      </tr>
+                    );
+                  })}
+                  {materialDiffRows.length === 0 && (
+                    <tr><td colSpan={6} className="muted">Ingen råvaredata å vise ennå.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
