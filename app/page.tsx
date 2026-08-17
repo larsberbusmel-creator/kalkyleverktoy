@@ -249,6 +249,7 @@ type InventoryMonthData = {
   waste?: Record<string, number>;
   items: Record<string, InventoryCount>;
   kassasvinn?: number;
+  productWasteFromReport?: number;
   profitability?: ProfitabilityInput;
 };
 
@@ -8765,6 +8766,11 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(true);
   const pageSize = 50;
 
+  const [wasteReportRows, setWasteReportRows] = useState<{ articleName: string; quantity: number; kostpris: number }[]>([]);
+  const [wasteReportError, setWasteReportError] = useState<string | null>(null);
+  const [wasteReportParsing, setWasteReportParsing] = useState(false);
+  const [wasteReportUnmatchedSelections, setWasteReportUnmatchedSelections] = useState<Record<string, string>>({});
+
   React.useEffect(() => {
     const channel = supabase.channel("inventory-presence")
       .subscribe((status) => {
@@ -8816,6 +8822,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   const waste = currentInventory.waste || {};
   const isLocked = !!currentInventory.locked;
   const kassasvinn = currentInventory.kassasvinn || 0;
+  const productWasteFromReport = currentInventory.productWasteFromReport || 0;
   const [year, month] = inventoryMonth.split("-");
 
   // Forrige måned (referanse, uredigerbar)
@@ -8841,6 +8848,116 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   function updateKassasvinn(val: number) {
     updateInventoryRpc(inventoryMonth, { kassasvinn: val });
   }
+
+  // productWasteFromReport lagres via updateData (helhetlig upsert), ikke via
+  // updateInventoryRpc: RPC-en update_inventory_items lever i Supabase-databasen
+  // (utenfor denne kodebasen) og har et fast sett med p_-parametre som ikke kan
+  // utvides herfra uten en egen databasemigrasjon. Import av kastet vare-rapport
+  // er en sjelden, bevisst admin-handling (ikke fortløpende telling), så risikoen
+  // ved helhetlig upsert her er lav sammenlignet med f.eks. samtidig varetelling.
+  function saveProductWasteFromReport(value: number) {
+    updateData({
+      inventoryCounts: {
+        ...(data.inventoryCounts || {}),
+        [inventoryMonth]: { ...currentInventory, productWasteFromReport: value },
+      },
+    });
+  }
+
+  async function handleWasteReportUpload(file: File | null) {
+    if (!file) return;
+    setWasteReportParsing(true);
+    setWasteReportError(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets["Sheet1"];
+      if (!sheet) {
+        setWasteReportError('Fant ikke arket "Sheet1" i filen.');
+        setWasteReportParsing(false);
+        return;
+      }
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+      // Finn header-raden dynamisk (radnummer kan variere mellom eksporter)
+      const headerRowIndex = rows.findIndex((row) => {
+        const cells = row.map((c) => String(c).trim());
+        return cells.includes("Artikkelgruppe") && cells.includes("Undergruppe") && cells.includes("Artikkel") && cells.includes("Antall");
+      });
+      if (headerRowIndex < 0) {
+        setWasteReportError('Fant ikke header-raden (Artikkelgruppe/Undergruppe/Artikkel/.../Antall/.../Kostpris) i "Sheet1".');
+        setWasteReportParsing(false);
+        return;
+      }
+      const header = rows[headerRowIndex].map((c) => String(c).trim());
+      const idxArtikkel = header.indexOf("Artikkel");
+      const idxAntall = header.indexOf("Antall");
+      const idxKostpris = header.indexOf("Kostpris");
+
+      const parsedRows: { articleName: string; quantity: number; kostpris: number }[] = [];
+      for (let i = headerRowIndex + 1; i < rows.length; i++) {
+        const row = rows[i];
+        const articleName = String(row[idxArtikkel] ?? "").trim();
+        if (!articleName) continue;
+        parsedRows.push({
+          articleName,
+          quantity: Number(row[idxAntall]) || 0,
+          // Kostpris i rapporten er en LINJESUM for hele raden, ikke enhetspris -
+          // omregnes til enhetskost per rad lenger ned (kostpris / antall).
+          kostpris: idxKostpris >= 0 ? (Number(row[idxKostpris]) || 0) : 0,
+        });
+      }
+
+      setWasteReportRows(parsedRows);
+      setWasteReportUnmatchedSelections({});
+    } catch (e) {
+      setWasteReportError("Kunne ikke lese filen. Sjekk at det er en gyldig Favn kastet vare-rapport (.xlsx).");
+    } finally {
+      setWasteReportParsing(false);
+    }
+  }
+
+  function saveWasteReportMapping(articleName: string) {
+    const productId = wasteReportUnmatchedSelections[articleName];
+    if (!productId) return;
+    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName, productId };
+    const without = (data.reportArticleMappings || []).filter((m) => m.articleName !== articleName);
+    updateData({ reportArticleMappings: [...without, mapping] });
+  }
+
+  // Matching: gjenbruker EKSAKT samme type/liste/logikk som Rapporter-fanen
+  // (reportArticleMappings), slik at samme artikkelnavn ikke må kobles to steder.
+  const wasteReportMatched: { articleName: string; quantity: number; kostpris: number; product: Product }[] = [];
+  const wasteReportUnmatched: { articleName: string; quantity: number; kostpris: number }[] = [];
+  wasteReportRows.forEach((row) => {
+    const mapping = (data.reportArticleMappings || []).find((m) => m.articleName === row.articleName);
+    let product = mapping ? data.products.find((p) => p.id === mapping.productId) : undefined;
+    if (!product) {
+      product = data.products.find((p) => p.name.trim().toLowerCase() === row.articleName.trim().toLowerCase());
+    }
+    if (product) wasteReportMatched.push({ ...row, product });
+    else wasteReportUnmatched.push(row);
+  });
+
+  // Kun produkter som IKKE allerede har egen linje (product_<id>) i denne månedens
+  // råvaretelling skal telles med, for å unngå dobbelttelling med eksisterende
+  // per-linje egenprodusert-svinn.
+  const wasteReportEligible = wasteReportMatched.filter((row) => !counts[`product_${row.product.id}`]);
+  const wasteReportSkippedAsExisting = wasteReportMatched.length - wasteReportEligible.length;
+
+  const wasteReportCalculated = wasteReportEligible.map((row) => {
+    const ourUnitCost = productUnitCost(row.product);
+    const rowValue = ourUnitCost * row.quantity;
+    const favnUnitCost = row.quantity > 0 ? row.kostpris / row.quantity : 0;
+    const deviationPct = favnUnitCost > 0 && ourUnitCost > 0 ? Math.abs(favnUnitCost - ourUnitCost) / ourUnitCost * 100 : 0;
+    return { ...row, ourUnitCost, rowValue, favnUnitCost, deviationPct };
+  });
+
+  const wasteReportTotal = wasteReportCalculated.reduce((sum, r) => sum + r.rowValue, 0);
+
+  const wasteReportDeviations = wasteReportCalculated
+    .filter((r) => r.favnUnitCost > 0 && r.deviationPct > 15)
+    .sort((a, b) => b.deviationPct - a.deviationPct);
 
   const xlsxColors: Record<string, string> = {
     "Mel og frø": "8BC34A", "Meieri": "FFF176", "Kjøtt": "EF9A9A",
@@ -8882,7 +8999,8 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   function totalWasteValue(): number {
     return data.materials.reduce((sum, m) => sum + materialWasteValue(m), 0)
       + data.products.filter((p) => egenprodusertCategories.includes(p.category)).reduce((sum, p) => sum + productWasteValue(p), 0)
-      + kassasvinn;
+      + kassasvinn
+      + productWasteFromReport;
   }
   function bucketWasteValue(bucket: string): number {
     if (egenprodusertCategories.includes(bucket)) return data.products.filter((p) => p.category === bucket).reduce((sum, p) => sum + productWasteValue(p), 0);
@@ -9524,6 +9642,89 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
         </label>
       </div>
 
+      <div className="soft-box" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <label style={{ fontWeight: 800, fontSize: 14 }}>Importer kastet vare-rapport (Favn)</label>
+          <input type="file" accept=".xlsx" disabled={readOnly || isLocked} onChange={(e) => handleWasteReportUpload(e.target.files?.[0] || null)} />
+        </div>
+        {wasteReportParsing && <p className="muted">Leser fil...</p>}
+        {wasteReportError && <div className="warning">{wasteReportError}</div>}
+
+        {wasteReportRows.length > 0 && (
+          <>
+            <p className="muted" style={{ fontSize: 12 }}>
+              {wasteReportRows.length} rader lest. {wasteReportMatched.length} matchet mot produkter ({wasteReportUnmatched.length} ikke matchet), {wasteReportSkippedAsExisting} hoppet over fordi de allerede har egen linje i råvaretellingen denne måneden.
+            </p>
+
+            {wasteReportUnmatched.length > 0 && (
+              <div className="soft-box" style={{ marginTop: 8 }}>
+                <h4 style={{ marginTop: 0 }}>Ikke matchet ({wasteReportUnmatched.length})</h4>
+                {wasteReportUnmatched.map((row) => (
+                  <div key={row.articleName} className="editable-row">
+                    <div>
+                      <b>{row.articleName}</b>
+                      <br /><small style={{ color: "#64748b" }}>{row.quantity} stk</small>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <select
+                        value={wasteReportUnmatchedSelections[row.articleName] || ""}
+                        disabled={readOnly}
+                        onChange={(e) => setWasteReportUnmatchedSelections({ ...wasteReportUnmatchedSelections, [row.articleName]: e.target.value })}
+                      >
+                        <option value="">Velg produkt...</option>
+                        {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                      <button
+                        className="btn active"
+                        disabled={readOnly || !wasteReportUnmatchedSelections[row.articleName]}
+                        title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                        onClick={() => saveWasteReportMapping(row.articleName)}
+                      >
+                        Lagre kobling
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {wasteReportDeviations.length > 0 && (
+              <div className="warning" style={{ marginTop: 8 }}>
+                <b>Kostavvik oppdaget</b>
+                <p style={{ fontSize: 12, marginTop: 4 }}>
+                  Disse produktene har en kostpris i kassesystemet som avviker mer enn 15% fra det Misemetrics beregner nå - vurder å oppdatere prisen i kassesystemet, siden Misemetrics sine tall brukes i denne rapporten.
+                </p>
+                <table style={{ marginTop: 8 }}>
+                  <thead><tr><th>Produkt</th><th>Kost i Misemetrics</th><th>Kost i Favn</th><th>Avvik</th></tr></thead>
+                  <tbody>
+                    {wasteReportDeviations.map((r) => (
+                      <tr key={r.product.id}>
+                        <td>{r.product.name}</td>
+                        <td>{currency(r.ourUnitCost)}</td>
+                        <td>{currency(r.favnUnitCost)}</td>
+                        <td>{num(r.deviationPct, 1)} %</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <span>Kastet ferdigvare denne importen: <b>{currency(wasteReportTotal)}</b> ({wasteReportEligible.length} av {wasteReportRows.length} rader matchet og talt med)</span>
+              <button
+                className="btn active"
+                disabled={readOnly || isLocked}
+                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                onClick={() => saveProductWasteFromReport(wasteReportTotal)}
+              >
+                Lagre i varetelling for {inventoryMonth}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
       <details className="soft-box" style={{ padding: 0 }}>
         <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Svinn denne måneden <span style={{ fontWeight: 400, color: "#64748b" }}>{currency(totalWasteValue())}</span></span>
@@ -9534,6 +9735,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
             <thead><tr><th>Kategori / Produkt</th><th>Svinn (mengde)</th><th>Svinn (varekost)</th></tr></thead>
             <tbody>
               {kassasvinn > 0 && <tr style={{ background: "#fffbeb" }}><td><b>Igjen ved dagsslutt, måned</b></td><td>-</td><td><b>{currency(kassasvinn)}</b></td></tr>}
+              {productWasteFromReport > 0 && <tr style={{ background: "#fffbeb" }}><td><b>Kastet ferdigvare (importert rapport)</b></td><td>-</td><td><b>{currency(productWasteFromReport)}</b></td></tr>}
               {allMaterialCategories.map((bucket) => { const mw = data.materials.filter((m) => m.category === bucket && getMaterialWaste(m.id) > 0); if (!mw.length) return null; return (<><tr key={`wc-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}><td><b>{bucket}</b></td><td></td><td><b>{currency(bucketWasteValue(bucket))}</b></td></tr>{mw.map((m) => <tr key={`w-${m.id}`}><td style={{ paddingLeft: 24 }}>{m.name}</td><td>{getMaterialWaste(m.id)} {m.unit}</td><td>{currency(materialWasteValue(m))}</td></tr>)}</>); })}
               {egenprodusertCategories.map((bucket) => { const pw = data.products.filter((p) => p.category === bucket && getProductWaste(p.id) > 0); if (!pw.length) return null; return (<><tr key={`wce-${bucket}`} style={{ background: bucketColors[bucket] || "#f8fafc" }}><td><b>{bucket} (egenprodusert)</b></td><td></td><td><b>{currency(bucketWasteValue(bucket))}</b></td></tr>{pw.map((p) => <tr key={`we-${p.id}`}><td style={{ paddingLeft: 24 }}>{p.name}</td><td>{getProductWaste(p.id)} stk</td><td>{currency(productWasteValue(p))}</td></tr>)}</>); })}
               <tr style={{ background: "#0f172a", color: "white" }}><td><b>Total svinn</b></td><td></td><td><b>{currency(totalWasteValue())}</b></td></tr>
