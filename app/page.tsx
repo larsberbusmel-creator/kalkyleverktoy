@@ -785,6 +785,37 @@ export default function Page() {
   const isSavingRef = React.useRef(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [userEmail, setUserEmail] = useState<string>("");
+  const [darkMode, setDarkMode] = useState<boolean | null>(null);
+
+  const DARK_MODE_KEY = "misemetrics-dark-mode";
+
+  useEffect(() => {
+    const stored = localStorage.getItem(DARK_MODE_KEY);
+    if (stored === "on") { setDarkMode(true); return; }
+    if (stored === "off") { setDarkMode(false); return; }
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    setDarkMode(mql.matches);
+    function onSystemChange(e: MediaQueryListEvent) {
+      // Slutt å følge systeminnstillingen automatisk så snart brukeren har
+      // gjort et eksplisitt manuelt valg (lagret i localStorage).
+      if (!localStorage.getItem(DARK_MODE_KEY)) setDarkMode(e.matches);
+    }
+    mql.addEventListener("change", onSystemChange);
+    return () => mql.removeEventListener("change", onSystemChange);
+  }, []);
+
+  useEffect(() => {
+    if (darkMode === null) return;
+    document.documentElement.classList.toggle("dark-mode", darkMode);
+  }, [darkMode]);
+
+  function toggleDarkMode() {
+    setDarkMode((prev) => {
+      const next = !prev;
+      localStorage.setItem(DARK_MODE_KEY, next ? "on" : "off");
+      return next;
+    });
+  }
 
   useEffect(() => {
     async function loadData() {
@@ -1279,6 +1310,10 @@ return (
           ))}
         </nav>
         <div style={{ marginTop: "auto", padding: "16px 8px" }}>
+          <label className="check" style={{ padding: "0 4px 10px" }}>
+            <input type="checkbox" checked={!!darkMode} onChange={toggleDarkMode} />
+            🌙 Mørk modus
+          </label>
           <button
             className="sidebar-btn logout"
             onClick={async () => { await supabase.auth.signOut(); window.location.href = "/login"; }}
@@ -1301,6 +1336,13 @@ return (
             <option key={key} value={key}>{icon} {label}</option>
           ))}
         </select>
+        <button
+          style={{ marginLeft: 8, padding: "8px 12px", borderRadius: 10, border: "1px solid #cbd5e1", background: darkMode ? "#0f172a" : "white", color: darkMode ? "white" : "#0f172a", cursor: "pointer", fontSize: 14 }}
+          onClick={toggleDarkMode}
+          title="Mørk modus"
+        >
+          🌙
+        </button>
         <button
           style={{ marginLeft: 8, padding: "8px 12px", borderRadius: 10, border: "1px solid #fca5a5", background: "#fef2f2", cursor: "pointer", fontSize: 14 }}
           onClick={async () => { await supabase.auth.signOut(); window.location.href = "/login"; }}
@@ -1419,6 +1461,16 @@ return (
   div[style*="display: flex"] {
     max-width: 100vw;
   }
+}
+
+/* ── MØRK MODUS (globalt CSS-filter, ikke egen fargepalett) ── */
+html.dark-mode {
+  filter: invert(1) hue-rotate(180deg);
+}
+html.dark-mode img,
+html.dark-mode svg image,
+html.dark-mode video {
+  filter: invert(1) hue-rotate(180deg);
 }
     `}</style>
   </main>
