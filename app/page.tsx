@@ -497,6 +497,34 @@ function idFromName(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9æøå]+/gi, "-").replace(/^-|-$/g, "") || String(Date.now());
 }
 
+// Favn sine .xlsx-eksporter har ofte en foreldet/feilaktig "!ref"-dimensjon i
+// arkets metadata (f.eks. sier A1:F11 selv om arket faktisk har data til rad
+// 800+). SheetJS sin sheet_to_json stoler på denne oppgitte dimensjonen og
+// kutter parsingen for tidlig. Regn ut arkets FAKTISKE utstrekning fra de
+// virkelige cellenøklene og overskriv "!ref" med dette FØR sheet_to_json
+// kalles, slik at hele arket alltid blir lest - trygt å kjøre alltid, ikke
+// bare som fallback, siden det uansett regner ut riktig område fra cellene.
+function fixSheetRange(sheet: XLSX.WorkSheet) {
+  let maxRow = 0;
+  let maxCol = 0;
+  Object.keys(sheet).forEach((key) => {
+    if (key.startsWith("!")) return;
+    const match = key.match(/^([A-Z]+)(\d+)$/);
+    if (!match) return;
+    const colLetters = match[1];
+    const row = parseInt(match[2], 10);
+    let col = 0;
+    for (let i = 0; i < colLetters.length; i++) {
+      col = col * 26 + (colLetters.charCodeAt(i) - 64);
+    }
+    if (row > maxRow) maxRow = row;
+    if (col > maxCol) maxCol = col;
+  });
+  if (maxRow > 0 && maxCol > 0) {
+    sheet["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow - 1, c: maxCol - 1 } });
+  }
+}
+
 function currency(value: number) {
   return new Intl.NumberFormat("nb-NO", { style: "currency", currency: "NOK", maximumFractionDigits: 2 }).format(Number(value) || 0);
 }
@@ -9080,6 +9108,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
         setWasteReportParsing(false);
         return;
       }
+      fixSheetRange(sheet);
       const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
       // Finn header-raden dynamisk (radnummer kan variere mellom eksporter)
@@ -13513,6 +13542,7 @@ function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, rea
         setParsing(false);
         return;
       }
+      fixSheetRange(sheet);
       const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
       // "Periode"-felt nær toppen av arket, format "DD.MM.ÅÅÅÅ - DD.MM.ÅÅÅÅ"
