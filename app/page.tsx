@@ -169,6 +169,13 @@ type PlacedChair = { id: string; roomId: string; x: number; y: number; rotation:
 type RoomLayoutTemplate = { id: string; name: string; roomId: string; tables: PlacedTable[]; chairs: PlacedChair[] };
 type CoverItem = { id: string; name: string; unit: string; rule: "per_person" | "per_person_per_course" | "per_table"; qtyPerUnit: number; mealType?: "buffet" | "flere_retter"; tableShape?: "rund" | "rektangulær" | "firkantet" };
 
+type StaffTimeEntry = {
+  id: string;
+  name: string;
+  startTime: string; // "HH:MM"
+  endTime: string;   // "HH:MM"
+};
+
 type RentalOffer = {
   id?: string;
   customer: string;
@@ -208,6 +215,7 @@ type RentalOffer = {
   createdBy?: string;
   createdAt?: string;
   editLog?: { by: string; at: string }[];
+  staffTimeLog?: StaffTimeEntry[];
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -473,6 +481,34 @@ function formatDateNo(date: string) {
   if (!date) return "-";
   const [year, month, day] = date.split("-");
   return day && month && year ? `${day}.${month}.${year}` : date;
+}
+
+// Timer for én vakt, korrigert for vakter som går over midnatt (f.eks. 17:00-01:00).
+function staffEntryHours(entry: StaffTimeEntry): number {
+  const [startH, startM] = entry.startTime.split(":").map(Number);
+  const [endH, endM] = entry.endTime.split(":").map(Number);
+  const startMinutes = (startH || 0) * 60 + (startM || 0);
+  let endMinutes = (endH || 0) * 60 + (endM || 0);
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+  return (endMinutes - startMinutes) / 60;
+}
+
+function formatHoursMinutes(hours: number): string {
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}t ${m}min`;
+}
+
+// Faktisk loggførte servitør-timer for et utleietilbud. Returnerer null hvis
+// ingen timeliste er ført ennå, slik at kalleren da faller tilbake på
+// estimat-feltene (waiters/waiterHours) som før.
+function actualStaffHoursAndCount(offer: RentalOffer): { totalHours: number; staffCount: number } | null {
+  const log = offer.staffTimeLog || [];
+  if (!log.length) return null;
+  const totalHours = log.reduce((sum, entry) => sum + staffEntryHours(entry), 0);
+  const uniqueNames = new Set(log.map((entry) => entry.name.trim().toLowerCase()).filter(Boolean));
+  return { totalHours, staffCount: uniqueNames.size };
 }
 
 function num(value: number, digits = 2) {
@@ -9857,9 +9893,15 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
 
   const addonLines = rental.extraLines || [];
   const addonTotal = addonLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
-  const waiterAfterMidnightHours = Number(rental.waiterAfterMidnightHours || 0);
+  // Faktisk loggførte timer (staffTimeLog) overstyrer estimat-feltene
+  // (waiters/waiterHours/waiterAfterMidnightHours) i selve prisberegningen
+  // når de finnes - formelen under er ellers helt uendret.
+  const actualStaff = actualStaffHoursAndCount(rental);
+  const effectiveWaiterCount = actualStaff ? actualStaff.staffCount : rental.waiters;
+  const effectiveWaiterHours = actualStaff ? actualStaff.totalHours : rental.waiterHours;
+  const waiterAfterMidnightHours = actualStaff ? 0 : Number(rental.waiterAfterMidnightHours || 0);
   const food = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0);
-  const waiterCost = rental.waiterHours * data.settings.waiterHourlyRate + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
+  const waiterCost = effectiveWaiterHours * data.settings.waiterHourlyRate + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
   const total = rental.venuePrice + food + waiterCost + addonTotal;
 
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
@@ -11018,6 +11060,19 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
     setRental({ ...rental, customPackingItems: (rental.customPackingItems || []).filter((c) => c.id !== id) });
   }
 
+  const [staffTimeForm, setStaffTimeForm] = useState({ name: "", startTime: "", endTime: "" });
+
+  function addStaffTimeEntry() {
+    if (!staffTimeForm.name.trim() || !staffTimeForm.startTime || !staffTimeForm.endTime) return;
+    const entry: StaffTimeEntry = { id: `staff-${Date.now()}`, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime };
+    setRental({ ...rental, staffTimeLog: [...(rental.staffTimeLog || []), entry] });
+    setStaffTimeForm({ name: "", startTime: "", endTime: "" });
+  }
+
+  function removeStaffTimeEntry(id: string) {
+    setRental({ ...rental, staffTimeLog: (rental.staffTimeLog || []).filter((e) => e.id !== id) });
+  }
+
   function printPackingList(): string {
     const rows = packingListRows();
     const rowsHtml = rows.map((r) => `<tr><td>${escapeHtml(r.name)}</td><td class="right">${r.qty} ${escapeHtml(r.unit)}</td></tr>`).join("");
@@ -11040,10 +11095,10 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPacki
     const addonRows = addonLines.map((line) =>
       `<tr><td>${escapeHtml(line.text)}${line.quantity ? ` × ${line.quantity}` : ""}</td><td></td><td style="text-align:right">${line.quantity ? currency(line.unitPrice || 0) : ""}</td><td style="text-align:right"><b>${currency(line.amount)}</b></td></tr>`
     ).join("");
-    const waiterRow = (rental.waiterHours > 0 || waiterAfterMidnightHours > 0) ? `
-      <tr><td>Servitører (${rental.waiters} pers)<br><small style="color:#64748b">
-        ${rental.waiterHours > 0 ? `${rental.waiterHours}t × ${currency(data.settings.waiterHourlyRate)}/t` : ""}
-        ${rental.waiterHours > 0 && waiterAfterMidnightHours > 0 ? " + " : ""}
+    const waiterRow = (effectiveWaiterHours > 0 || waiterAfterMidnightHours > 0) ? `
+      <tr><td>Servitører (${effectiveWaiterCount} pers)<br><small style="color:#64748b">
+        ${effectiveWaiterHours > 0 ? `${effectiveWaiterHours}t × ${currency(data.settings.waiterHourlyRate)}/t` : ""}
+        ${effectiveWaiterHours > 0 && waiterAfterMidnightHours > 0 ? " + " : ""}
         ${waiterAfterMidnightHours > 0 ? `${waiterAfterMidnightHours}t etter midnatt × ${currency(data.settings.waiterAfterMidnightHourlyRate)}/t` : ""}
       </small></td><td></td><td></td><td style="text-align:right"><b>${currency(waiterCost)}</b></td></tr>
     ` : "";
@@ -11433,6 +11488,44 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                   <label>Timer før midnatt<input type="number" value={rental.waiterHours} disabled={readOnly} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
                   <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} disabled={readOnly} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
                 </div>
+                {!!(rental.staffTimeLog || []).length && (
+                  <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    ℹ️ Faktisk loggførte timer brukes nå i prisberegningen i stedet for estimatet over.
+                  </p>
+                )}
+
+                <details className="soft-box" style={{ padding: 0, marginTop: 8, marginBottom: 14 }}>
+                  <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>
+                      Timeliste servitører (faktisk brukt tid)
+                      {!!(rental.staffTimeLog || []).length && actualStaff && (
+                        <span style={{ fontWeight: 400, color: "#64748b", marginLeft: 8, fontSize: 13 }}>
+                          {formatHoursMinutes(actualStaff.totalHours)}, {actualStaff.staffCount} servitører
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+                  </summary>
+                  <div style={{ padding: "0 16px 16px" }}>
+                    <div className="form-grid four">
+                      <input placeholder="Navn" value={staffTimeForm.name} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, name: e.target.value })} />
+                      <input type="time" value={staffTimeForm.startTime} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, startTime: e.target.value })} />
+                      <input type="time" value={staffTimeForm.endTime} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, endTime: e.target.value })} />
+                      <button type="button" className="btn active" disabled={readOnly} title="Legg til servitør" onClick={addStaffTimeEntry}>+</button>
+                    </div>
+                    {(rental.staffTimeLog || []).map((entry) => (
+                      <div key={entry.id} className="editable-row">
+                        <span>{entry.name}: {entry.startTime}–{entry.endTime} ({formatHoursMinutes(staffEntryHours(entry))})</span>
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffTimeEntry(entry.id)}>Fjern</button>
+                      </div>
+                    ))}
+                    {!!(rental.staffTimeLog || []).length && actualStaff && (
+                      <p style={{ fontWeight: 700, marginTop: 8 }}>
+                        Totalt: {formatHoursMinutes(actualStaff.totalHours)}, {actualStaff.staffCount} servitører
+                      </p>
+                    )}
+                  </div>
+                </details>
 
                 <div style={{ marginTop: 12 }}>
                   <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader</label>
@@ -12196,7 +12289,10 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
         </div>
         {offers.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud funnet.</p>}
         {offers.map((offer) => {
-          const offerWaiterCost = (offer.waiterHours || 0) * data.settings.waiterHourlyRate + (offer.waiterAfterMidnightHours || 0) * data.settings.waiterAfterMidnightHourlyRate;
+          const offerActualStaff = actualStaffHoursAndCount(offer);
+          const offerEffectiveWaiterHours = offerActualStaff ? offerActualStaff.totalHours : (offer.waiterHours || 0);
+          const offerWaiterAfterMidnightHours = offerActualStaff ? 0 : (offer.waiterAfterMidnightHours || 0);
+          const offerWaiterCost = offerEffectiveWaiterHours * data.settings.waiterHourlyRate + offerWaiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
           const offerTotal = offer.venuePrice
             + offer.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
             + offerWaiterCost
