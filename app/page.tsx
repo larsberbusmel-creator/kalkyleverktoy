@@ -500,15 +500,31 @@ function formatHoursMinutes(hours: number): string {
   return `${h}t ${m}min`;
 }
 
+// Splitter én vakt i timer FØR midnatt og timer ETTER midnatt (relativt til
+// når vakten startet), slik at hver del kan prises med riktig sats.
+// F.eks. 17:00-01:00 = 7t før midnatt + 1t etter midnatt.
+function staffEntryMidnightSplit(entry: StaffTimeEntry): { beforeMidnight: number; afterMidnight: number } {
+  const [startH, startM] = (entry.startTime || "00:00").split(":").map(Number);
+  const [endH, endM] = (entry.endTime || "00:00").split(":").map(Number);
+  const startMinutes = (startH || 0) * 60 + (startM || 0);
+  let endMinutes = (endH || 0) * 60 + (endM || 0);
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+  const beforeMidnight = Math.max(0, Math.min(endMinutes, 1440) - startMinutes) / 60;
+  const afterMidnight = Math.max(0, endMinutes - 1440) / 60;
+  return { beforeMidnight, afterMidnight };
+}
+
 // Faktisk loggførte servitør-timer for et utleietilbud. Returnerer null hvis
 // ingen timeliste er ført ennå, slik at kalleren da faller tilbake på
-// estimat-feltene (waiters/waiterHours) som før.
-function actualStaffHoursAndCount(offer: RentalOffer): { totalHours: number; staffCount: number } | null {
+// estimat-feltene (waiters/waiterHours/waiterAfterMidnightHours) som før.
+function actualStaffHoursAndCount(offer: RentalOffer): { totalHours: number; beforeMidnightHours: number; afterMidnightHours: number; staffCount: number } | null {
   const log = offer.staffTimeLog || [];
   if (!log.length) return null;
   const totalHours = log.reduce((sum, entry) => sum + staffEntryHours(entry), 0);
+  const beforeMidnightHours = log.reduce((sum, entry) => sum + staffEntryMidnightSplit(entry).beforeMidnight, 0);
+  const afterMidnightHours = log.reduce((sum, entry) => sum + staffEntryMidnightSplit(entry).afterMidnight, 0);
   const uniqueNames = new Set(log.map((entry) => entry.name.trim().toLowerCase()).filter(Boolean));
-  return { totalHours, staffCount: uniqueNames.size };
+  return { totalHours, beforeMidnightHours, afterMidnightHours, staffCount: uniqueNames.size };
 }
 
 function num(value: number, digits = 2) {
@@ -9898,8 +9914,8 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   // når de finnes - formelen under er ellers helt uendret.
   const actualStaff = actualStaffHoursAndCount(rental);
   const effectiveWaiterCount = actualStaff ? actualStaff.staffCount : rental.waiters;
-  const effectiveWaiterHours = actualStaff ? actualStaff.totalHours : rental.waiterHours;
-  const waiterAfterMidnightHours = actualStaff ? 0 : Number(rental.waiterAfterMidnightHours || 0);
+  const effectiveWaiterHours = actualStaff ? actualStaff.beforeMidnightHours : rental.waiterHours;
+  const waiterAfterMidnightHours = actualStaff ? actualStaff.afterMidnightHours : Number(rental.waiterAfterMidnightHours || 0);
   const food = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0);
   const waiterCost = effectiveWaiterHours * data.settings.waiterHourlyRate + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
   const total = rental.venuePrice + food + waiterCost + addonTotal;
@@ -11061,16 +11077,40 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
   }
 
   const [staffTimeForm, setStaffTimeForm] = useState({ name: "", startTime: "", endTime: "" });
+  const [editingStaffTimeId, setEditingStaffTimeId] = useState<string | null>(null);
 
   function addStaffTimeEntry() {
     if (!staffTimeForm.name.trim() || !staffTimeForm.startTime || !staffTimeForm.endTime) return;
-    const entry: StaffTimeEntry = { id: `staff-${Date.now()}`, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime };
-    setRental({ ...rental, staffTimeLog: [...(rental.staffTimeLog || []), entry] });
+    if (editingStaffTimeId) {
+      setRental({
+        ...rental,
+        staffTimeLog: (rental.staffTimeLog || []).map((e) =>
+          e.id === editingStaffTimeId
+            ? { ...e, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime }
+            : e
+        ),
+      });
+      setEditingStaffTimeId(null);
+    } else {
+      const entry: StaffTimeEntry = { id: `staff-${Date.now()}`, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime };
+      setRental({ ...rental, staffTimeLog: [...(rental.staffTimeLog || []), entry] });
+    }
     setStaffTimeForm({ name: "", startTime: "", endTime: "" });
+  }
+
+  function startEditStaffTimeEntry(entry: StaffTimeEntry) {
+    setStaffTimeForm({ name: entry.name, startTime: entry.startTime, endTime: entry.endTime });
+    setEditingStaffTimeId(entry.id);
+  }
+
+  function cancelEditStaffTimeEntry() {
+    setStaffTimeForm({ name: "", startTime: "", endTime: "" });
+    setEditingStaffTimeId(null);
   }
 
   function removeStaffTimeEntry(id: string) {
     setRental({ ...rental, staffTimeLog: (rental.staffTimeLog || []).filter((e) => e.id !== id) });
+    if (editingStaffTimeId === id) cancelEditStaffTimeEntry();
   }
 
   function printPackingList(): string {
@@ -11511,12 +11551,22 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                       <input placeholder="Navn" value={staffTimeForm.name} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, name: e.target.value })} />
                       <input type="time" value={staffTimeForm.startTime} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, startTime: e.target.value })} />
                       <input type="time" value={staffTimeForm.endTime} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, endTime: e.target.value })} />
-                      <button type="button" className="btn active" disabled={readOnly} title="Legg til servitør" onClick={addStaffTimeEntry}>+</button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button type="button" className="btn active" disabled={readOnly} title={editingStaffTimeId ? "Lagre endring" : "Legg til servitør"} onClick={addStaffTimeEntry}>
+                          {editingStaffTimeId ? "Lagre" : "+"}
+                        </button>
+                        {editingStaffTimeId && (
+                          <button type="button" className="btn" disabled={readOnly} onClick={cancelEditStaffTimeEntry}>Avbryt</button>
+                        )}
+                      </div>
                     </div>
                     {(rental.staffTimeLog || []).map((entry) => (
-                      <div key={entry.id} className="editable-row">
+                      <div key={entry.id} className="editable-row" style={{ background: editingStaffTimeId === entry.id ? "#fef9c3" : undefined, borderRadius: editingStaffTimeId === entry.id ? 8 : undefined }}>
                         <span>{entry.name}: {entry.startTime}–{entry.endTime} ({formatHoursMinutes(staffEntryHours(entry))})</span>
-                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffTimeEntry(entry.id)}>Fjern</button>
+                        <span style={{ display: "flex", gap: 10 }}>
+                          <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => startEditStaffTimeEntry(entry)}>Rediger</button>
+                          <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffTimeEntry(entry.id)}>Fjern</button>
+                        </span>
                       </div>
                     ))}
                     {!!(rental.staffTimeLog || []).length && actualStaff && (
@@ -12290,8 +12340,8 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
         {offers.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud funnet.</p>}
         {offers.map((offer) => {
           const offerActualStaff = actualStaffHoursAndCount(offer);
-          const offerEffectiveWaiterHours = offerActualStaff ? offerActualStaff.totalHours : (offer.waiterHours || 0);
-          const offerWaiterAfterMidnightHours = offerActualStaff ? 0 : (offer.waiterAfterMidnightHours || 0);
+          const offerEffectiveWaiterHours = offerActualStaff ? offerActualStaff.beforeMidnightHours : (offer.waiterHours || 0);
+          const offerWaiterAfterMidnightHours = offerActualStaff ? offerActualStaff.afterMidnightHours : (offer.waiterAfterMidnightHours || 0);
           const offerWaiterCost = offerEffectiveWaiterHours * data.settings.waiterHourlyRate + offerWaiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
           const offerTotal = offer.venuePrice
             + offer.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
