@@ -259,6 +259,20 @@ type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean;
 type PackingListItem = { id: string; label: string };
 type PackingListTemplate = { id: string; name: string; items: PackingListItem[] };
 
+type BarItem = { id: string; name: string; price: number; category?: string };
+
+// Én oppføring PER TRYKK i Kasse-underfanen (Leie av lokale) - append-only,
+// aldri lest+overskrevet som en samlet liste, slik at samtidige trykk fra
+// ulike enheter aldri kan overskrive hverandre (hver har sin egen unike id).
+type BarTallyEntry = {
+  id: string;
+  offerId: string;
+  itemId: string;
+  itemName: string; // "frosset" navn på registreringstidspunktet
+  itemPrice: number; // "frosset" pris på registreringstidspunktet
+  createdAt: string;
+};
+
 type ProductListKind = "bakst" | "catering" | "storkjokken";
 
 type ProductList = {
@@ -469,6 +483,8 @@ type AppData = {
   productionTemplates: ProductionTemplate[];
   reportArticleMappings: ReportArticleMapping[];
   reportSnapshots: ReportSnapshot[];
+  barItems: BarItem[];
+  barTallyEntries: BarTallyEntry[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
 };
@@ -743,6 +759,8 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   productionTemplates: [],
   reportArticleMappings: [],
   reportSnapshots: [],
+  barItems: [],
+  barTallyEntries: [],
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
@@ -849,6 +867,12 @@ reportArticleMappings:
 
 reportSnapshots:
   (raw as any).reportSnapshots || [],
+
+barItems:
+  (raw as any).barItems || [],
+
+barTallyEntries:
+  (raw as any).barTallyEntries || [],
   seenOrderIds: (() => {
   const legacyDates: string[] = (raw as any).seenOrderDates || [];
   const existing: string[] = (raw as any).seenOrderIds || [];
@@ -1206,7 +1230,7 @@ export default function Page() {
     });
   }, []);
 
-  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => {
+  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries", itemsPatch: Record<string, any>) => {
     setData((prev) => {
       const list = (prev as any)[listKey] as any[];
       const next = { ...prev } as any;
@@ -10197,7 +10221,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     </section>
   );
 }
-function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly, userEmail, isSuperadmin }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; userEmail: string; isSuperadmin: boolean }) {
+function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly, userEmail, isSuperadmin }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; userEmail: string; isSuperadmin: boolean }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -10207,7 +10231,7 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   const [showTerms, setShowTerms] = useState(false);
   const [editLogOpen, setEditLogOpen] = useState(false);
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
-  const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan" | "pakkeliste">("forside");
+  const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan" | "pakkeliste" | "kasse">("forside");
     const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
     const [plannerLargeView, setPlannerLargeView] = useState(false);
     const [plannerMargin, setPlannerMargin] = useState(40);
@@ -10261,7 +10285,20 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   const waiterAfterMidnightHours = actualStaff ? actualStaff.afterMidnightHours : Number(rental.waiterAfterMidnightHours || 0);
   const food = rental.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0);
   const waiterCost = effectiveWaiterHours * data.settings.waiterHourlyRate + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
-  const total = rental.venuePrice + food + waiterCost + addonTotal;
+  // Kasse: summen av ALLE bar-registreringer (BarTallyEntry) for dette tilbudet,
+  // hver med sin egen "frosne" pris fra registreringstidspunktet.
+  const barTallyEntriesForOffer = (data.barTallyEntries || []).filter((e) => e.offerId === rental.id);
+  const barTotal = barTallyEntriesForOffer.reduce((sum, e) => sum + e.itemPrice, 0);
+  const barGroups = Object.values(
+    barTallyEntriesForOffer.reduce((acc, e) => {
+      if (!acc[e.itemId]) acc[e.itemId] = { itemId: e.itemId, itemName: e.itemName, count: 0, total: 0, lastPrice: e.itemPrice };
+      acc[e.itemId].count += 1;
+      acc[e.itemId].total += e.itemPrice;
+      acc[e.itemId].lastPrice = e.itemPrice;
+      return acc;
+    }, {} as Record<string, { itemId: string; itemName: string; count: number; total: number; lastPrice: number }>)
+  ).sort((a, b) => a.itemName.localeCompare(b.itemName));
+  const total = rental.venuePrice + food + waiterCost + addonTotal + barTotal;
 
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
   const termsText = `Bodøgaard – kunst & kultur er et privat kulturhus og visningssted for kunst og kulturarv. Stedet viser verker fra Bodøgaardsamlingen, som innehar Nord-Norges største private samling av kunst og kulturgjenstander, i tillegg til temporære utstillinger gjennom året fra nasjonale og internasjonale kunstnere. Bodøgaard har også konserter og andre kulturarrangementer, samt aktiviteter gjennom grafikkverkstedet Den Frie Presse.
@@ -11419,6 +11456,32 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
     setRental({ ...rental, customPackingItems: (rental.customPackingItems || []).filter((c) => c.id !== id) });
   }
 
+  // Kasse: hvert trykk lagres som en egen BarTallyEntry via updateListRpc (append,
+  // aldri les+overskriv hele listen), slik at samtidige trykk fra ulike enheter
+  // aldri kan overskrive hverandre.
+  function addBarTally(item: BarItem) {
+    if (!rental.id) return;
+    const entry: BarTallyEntry = {
+      id: `bar-${rental.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      offerId: rental.id,
+      itemId: item.id,
+      itemName: item.name,
+      itemPrice: item.price,
+      createdAt: new Date().toISOString(),
+    };
+    updateListRpc("barTallyEntries", { [entry.id]: entry });
+  }
+
+  function removeLastBarTally(itemId: string) {
+    if (!rental.id) return;
+    const entries = (data.barTallyEntries || [])
+      .filter((e) => e.offerId === rental.id && e.itemId === itemId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const last = entries[0];
+    if (!last) return;
+    updateData({ barTallyEntries: (data.barTallyEntries || []).filter((e) => e.id !== last.id) });
+  }
+
   const [staffTimeForm, setStaffTimeForm] = useState({ name: "", startTime: "", endTime: "" });
   const [editingStaffTimeId, setEditingStaffTimeId] = useState<string | null>(null);
 
@@ -11488,6 +11551,9 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPacki
     const venueRow = rental.venuePrice > 0
       ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
       : "";
+    const barRow = barTotal > 0
+      ? `<tr><td>Kasse (bar)</td><td></td><td></td><td style="text-align:right"><b>${currency(barTotal)}</b></td></tr>`
+      : "";
     const recipePagesHtml = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
       if (!p) return "";
@@ -11545,7 +11611,7 @@ ${shoppingRowsR ? `<h2 style="margin-top:20px">Varebestilling</h2>${shoppingRows
 ${opts.tilbud ? `<div class="page-break"></div><h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
-  <tbody>${venueRow}${productRows}${waiterRow}${addonRows}</tbody>
+  <tbody>${venueRow}${productRows}${waiterRow}${addonRows}${barRow}</tbody>
   <tfoot><tr class="total-row"><td colspan="3">Total inkl. mva</td><td style="text-align:right">${currency(total)}</td></tr></tfoot>
 </table>
 ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
@@ -11807,6 +11873,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                 { key: "vilkar", label: "Vilkår" },
                 { key: "bordplan", label: "Bordplan" },
                 { key: "pakkeliste", label: "Pakkeliste" },
+                { key: "kasse", label: "Kasse" },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -12223,6 +12290,72 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               </>
             )}
 
+            {rentalSubTab === "kasse" && (
+              <>
+                {!rental.id ? (
+                  <p className="muted">Lagre tilbudet før du registrerer bar-salg.</p>
+                ) : (data.barItems || []).length === 0 ? (
+                  <p className="muted">Ingen bar-varer definert ennå – gå til Innstillinger → Bar-varer for å legge dem inn.</p>
+                ) : (
+                  <>
+                    <h3>Registrer salg</h3>
+                    <div className="bar-item-grid">
+                      {(data.barItems || []).map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="bar-item-btn"
+                          disabled={readOnly}
+                          title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                          onClick={() => addBarTally(item)}
+                        >
+                          <span className="bar-item-name">{item.name}</span>
+                          <span className="bar-item-price">{currency(item.price)}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <h3 style={{ marginTop: 20 }}>Telling</h3>
+                    {barGroups.length === 0 ? (
+                      <p className="muted">Ingen registreringer ennå.</p>
+                    ) : (
+                      <div style={{ marginTop: 8 }}>
+                        {barGroups.map((g) => (
+                          <div key={g.itemId} className="editable-row bar-tally-row">
+                            <span>{g.itemName}: {g.count} stk × {currency(g.count ? g.total / g.count : 0)} = <b>{currency(g.total)}</b></span>
+                            <span className="bar-adjust-group">
+                              <button
+                                type="button"
+                                className="bar-adjust-btn"
+                                disabled={readOnly}
+                                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                                onClick={() => removeLastBarTally(g.itemId)}
+                              >
+                                −1
+                              </button>
+                              <button
+                                type="button"
+                                className="bar-adjust-btn"
+                                disabled={readOnly}
+                                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                                onClick={() => {
+                                  const item = (data.barItems || []).find((b) => b.id === g.itemId);
+                                  if (item) addBarTally(item);
+                                }}
+                              >
+                                +1
+                              </button>
+                            </span>
+                          </div>
+                        ))}
+                        <p style={{ marginTop: 12, fontSize: 16 }}>Sum bar: <b>{currency(barTotal)}</b></p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
             {rentalSubTab === "vilkar" && (
               <div className="soft-box">
                 <label className="check">
@@ -12601,6 +12734,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
             <p>Mat/produkter: <b>{currency(food)}</b></p>
             <p>Servitører: <b>{currency(waiterCost)}</b></p>
             <p>Tillegg: <b>{currency(addonTotal)}</b></p>
+            {barTotal > 0 && <p>Kasse (bar): <b>{currency(barTotal)}</b></p>}
             {addonLines.length > 0 && (
               <table>
                 <thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead>
@@ -12777,6 +12911,25 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
           )
         )}
       </div>
+
+      <style jsx global>{`
+        .bar-item-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .bar-item-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 12px 8px; border: 1px solid #c4b5fd; background: #ede9fe; border-radius: 12px; cursor: pointer; min-height: 64px; }
+        .bar-item-btn:hover { background: #ddd6fe; }
+        .bar-item-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .bar-item-name { font-weight: 700; color: #5b21b6; text-align: center; }
+        .bar-item-price { color: #6d28d9; font-size: 13px; }
+        .bar-tally-row .bar-adjust-group { display: flex; gap: 6px; }
+        .bar-adjust-btn { min-width: 36px; min-height: 32px; border-radius: 8px; border: 1px solid #cbd5e1; background: white; cursor: pointer; font-weight: 700; }
+        .bar-adjust-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        @media (max-width: 768px) {
+          .bar-item-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+          .bar-item-btn { min-height: 56px; padding: 10px 6px; }
+          .bar-item-name { font-size: 14px; }
+          .bar-item-price { font-size: 13px; }
+          .bar-adjust-btn { min-width: 40px; min-height: 40px; font-size: 16px; }
+        }
+      `}</style>
     </section>
   );
 }
@@ -14076,6 +14229,7 @@ const SettingsTab = React.memo(function SettingsTab({
   const [newVenue, setNewVenue] = useState({ name: "", price: "0" });
   const [newPackaging, setNewPackaging] = useState({ name: "", price: "0" });
 const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", perUnit: false });
+const [newBarItem, setNewBarItem] = useState({ name: "", price: "0" });
 const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null);
 const [addonPackingForm, setAddonPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
 const [newNotifyEmail, setNewNotifyEmail] = useState("");
@@ -14146,6 +14300,7 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
   const [localVenues, setLocalVenues] = useState(data.venues);
   const [localPackaging, setLocalPackaging] = useState(data.packaging);
   const [localRentalAddons, setLocalRentalAddons] = useState(data.rentalAddons);
+  const [localBarItems, setLocalBarItems] = useState(data.barItems || []);
   const [localPackingListTemplates, setLocalPackingListTemplates] = useState(data.packingListTemplates);
 
   const Section = useCallback(({ id, title, children }: { id: string; title: string; children: React.ReactNode }) =>
@@ -14366,6 +14521,49 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
     setNewRentalAddon({ name: "", price: "0", perUnit: false });
   }}>Legg til</button>
 </div>
+      </Section>
+
+      <Section id="barItems" title="Bar-varer (Kasse)">
+        <p className="muted" style={{ fontSize: 12 }}>
+          Varer som kan registreres i Kasse-underfanen på Leie av lokale. Endret pris her påvirker kun nye registreringer, ikke tidligere talte salg.
+        </p>
+        <div>
+          {localBarItems.map((item, i) => (
+            <div key={item.id} className="editable-row">
+              <input
+                value={item.name}
+                onChange={(e) => setLocalBarItems(localBarItems.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                onBlur={() => updateData({ barItems: localBarItems })}
+                style={{ flex: "2 1 240px", minWidth: 160 }}
+                disabled={readOnly}
+              />
+              <input
+                type="number"
+                value={item.price}
+                onChange={(e) => setLocalBarItems(localBarItems.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
+                onBlur={() => updateData({ barItems: localBarItems })}
+                style={{ flex: "0 0 100px", width: 100 }}
+                disabled={readOnly}
+              />
+              <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
+                const next = localBarItems.filter((x) => x.id !== item.id);
+                setLocalBarItems(next);
+                updateData({ barItems: next });
+              }}>Slett</button>
+            </div>
+          ))}
+        </div>
+        <div className="form-grid three">
+          <input placeholder="Ny bar-vare (f.eks. Glass vin husets)" value={newBarItem.name} onChange={(e) => setNewBarItem({ ...newBarItem, name: e.target.value })} disabled={readOnly} />
+          <input type="number" placeholder="Pris" value={newBarItem.price} onChange={(e) => setNewBarItem({ ...newBarItem, price: e.target.value })} disabled={readOnly} />
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
+            if (!newBarItem.name.trim()) return;
+            const next = [...localBarItems, { id: `${idFromName(newBarItem.name)}-${Date.now()}`, name: newBarItem.name.trim(), price: Number(newBarItem.price) || 0 }];
+            setLocalBarItems(next);
+            updateData({ barItems: next });
+            setNewBarItem({ name: "", price: "0" });
+          }}>Legg til</button>
+        </div>
       </Section>
 
       <Section id="packingListTemplates" title="Pakkelistemaler">
