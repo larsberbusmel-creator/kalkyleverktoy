@@ -279,6 +279,7 @@ type BarTallyEntry = {
   itemName: string; // "frosset" navn på registreringstidspunktet
   itemPrice: number; // "frosset" pris på registreringstidspunktet
   createdAt: string;
+  deletedAt?: string; // myk sletting - unngår full-blob-overskriving ved fjerning
   // Satt på alle NYE oppføringer (fra og med ad-hoc-søk-funksjonen) slik at
   // "+1" kan bygge en ny oppføring direkte uten å slå opp i barTemplates -
   // dette gjør "+1" pålitelig også for ad-hoc-registrerte varer som aldri
@@ -10349,7 +10350,7 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   const waiterCost = effectiveWaiterHours * data.settings.waiterHourlyRate + waiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
   // Kasse: summen av ALLE bar-registreringer (BarTallyEntry) for dette tilbudet,
   // hver med sin egen "frosne" pris fra registreringstidspunktet.
-  const barTallyEntriesForOffer = (data.barTallyEntries || []).filter((e) => e.offerId === rental.id);
+    const barTallyEntriesForOffer = (data.barTallyEntries || []).filter((e) => e.offerId === rental.id && !e.deletedAt);
   const barTotal = barTallyEntriesForOffer.reduce((sum, e) => sum + e.itemPrice, 0);
   const barGroups = Object.values(
     barTallyEntriesForOffer.reduce((acc, e) => {
@@ -11553,14 +11554,18 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
     addBarTally({ id: `adhoc-${itemType}-${refId}`, itemType, refId });
   }
 
-  function removeLastBarTally(itemId: string) {
+    function removeLastBarTally(itemId: string) {
     if (!rental.id) return;
     const entries = (data.barTallyEntries || [])
-      .filter((e) => e.offerId === rental.id && e.itemId === itemId)
+      .filter((e) => e.offerId === rental.id && e.itemId === itemId && !e.deletedAt)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const last = entries[0];
     if (!last) return;
-    updateData({ barTallyEntries: (data.barTallyEntries || []).filter((e) => e.id !== last.id) });
+    // Myk sletting (samme mønster som slettede ordre) via updateListRpc,
+    // IKKE updateData - unngår at hele barTallyEntries-listen skrives over
+    // med en potensielt utdatert lokal kopi fra denne enheten, som ville
+    // kunne slette nylige registreringer gjort fra en annen enhet.
+    updateListRpc("barTallyEntries", { [last.id]: { ...last, deletedAt: new Date().toISOString() } });
   }
 
   const adhocBarResults = (() => {
