@@ -5509,9 +5509,17 @@ prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPa
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
 const twoColHtml = productionTwoColumnHtml(expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections));          return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
         }).join("");
-        const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
+                const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
           const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-          const html = scaledRecipeHtmlForOrder(product, Number(line.quantity) || 0, line.menuSelections);
+          // Samme batch-justering (unitWeightKg/recipeYieldAmount) som Produksjonsgrunnlag og
+          // Varebestilling allerede bruker - uten denne bruker "Oppskrifter"-seksjonen rå bestilt
+          // antall i stedet for faktisk antall batcher, og gir feil (for høye) mengder for
+          // underprodukter (produkt-i-produkt-linjer).
+          const qty = Number(line.quantity) || 0;
+          const scaledQty = product.unitWeightKg && product.recipeYieldAmount
+            ? (qty * product.unitWeightKg) / product.recipeYieldAmount
+            : qty;
+          const html = scaledRecipeHtmlForOrder(product, scaledQty, line.menuSelections);
           if (!html) return "";
           return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
         }).join("");
