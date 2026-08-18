@@ -279,6 +279,13 @@ type BarTallyEntry = {
   itemName: string; // "frosset" navn på registreringstidspunktet
   itemPrice: number; // "frosset" pris på registreringstidspunktet
   createdAt: string;
+  // Satt på alle NYE oppføringer (fra og med ad-hoc-søk-funksjonen) slik at
+  // "+1" kan bygge en ny oppføring direkte uten å slå opp i barTemplates -
+  // dette gjør "+1" pålitelig også for ad-hoc-registrerte varer som aldri
+  // var del av noen mal. Eldre oppføringer fra før denne endringen mangler
+  // disse to feltene - "+1" faller da tilbake til gammel oppslag-i-mal-metode.
+  itemType?: "product" | "material";
+  refId?: string;
 };
 
 type ProductListKind = "bakst" | "catering" | "storkjokken";
@@ -10264,6 +10271,24 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   const [editLogOpen, setEditLogOpen] = useState(false);
   const [runSheetForm, setRunSheetForm] = useState({ task: "", responsible: "", time: "", groupLabel: "", newGroupLabel: "" });
   const [rentalSubTab, setRentalSubTab] = useState<"forside" | "meny" | "tillegg" | "kjoreplan" | "vilkar" | "bordplan" | "pakkeliste" | "kasse">("forside");
+  const [kasseFullscreen, setKasseFullscreen] = useState(false);
+  const [adhocBarSearch, setAdhocBarSearch] = useState("");
+
+  useEffect(() => {
+    if (!kasseFullscreen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setKasseFullscreen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [kasseFullscreen]);
+
+  useEffect(() => {
+    if (!kasseFullscreen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, [kasseFullscreen]);
     const [plannerActiveRoomId, setPlannerActiveRoomId] = useState("");
     const [plannerLargeView, setPlannerLargeView] = useState(false);
     const [plannerMargin, setPlannerMargin] = useState(40);
@@ -10323,12 +10348,15 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
   const barTotal = barTallyEntriesForOffer.reduce((sum, e) => sum + e.itemPrice, 0);
   const barGroups = Object.values(
     barTallyEntriesForOffer.reduce((acc, e) => {
-      if (!acc[e.itemId]) acc[e.itemId] = { itemId: e.itemId, itemName: e.itemName, count: 0, total: 0, lastPrice: e.itemPrice };
+      if (!acc[e.itemId]) acc[e.itemId] = { itemId: e.itemId, itemName: e.itemName, count: 0, total: 0, lastPrice: e.itemPrice, itemType: e.itemType, refId: e.refId };
       acc[e.itemId].count += 1;
       acc[e.itemId].total += e.itemPrice;
       acc[e.itemId].lastPrice = e.itemPrice;
+      // Nyeste oppføring sin itemType/refId vinner (relevant kun for eldre
+      // grupper som mangler dette - nye grupper er alltid konsistente per itemId).
+      if (e.itemType && e.refId) { acc[e.itemId].itemType = e.itemType; acc[e.itemId].refId = e.refId; }
       return acc;
-    }, {} as Record<string, { itemId: string; itemName: string; count: number; total: number; lastPrice: number }>)
+    }, {} as Record<string, { itemId: string; itemName: string; count: number; total: number; lastPrice: number; itemType?: "product" | "material"; refId?: string }>)
   ).sort((a, b) => a.itemName.localeCompare(b.itemName));
   const barTemplate = (data.barTemplates || []).find((t) => t.id === rental.selectedBarTemplateId);
   const total = rental.venuePrice + food + waiterCost + addonTotal + barTotal;
@@ -11499,6 +11527,7 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
       alert("Denne varen finnes ikke lenger i Produkter/Råvarer og kan ikke registreres.");
       return;
     }
+    const legacy = barItemIsLegacy(item);
     const entry: BarTallyEntry = {
       id: `bar-${rental.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       offerId: rental.id,
@@ -11506,8 +11535,17 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
       itemName: display.name,
       itemPrice: display.price,
       createdAt: new Date().toISOString(),
+      itemType: legacy ? undefined : item.itemType,
+      refId: legacy ? undefined : item.refId,
     };
     updateListRpc("barTallyEntries", { [entry.id]: entry });
+  }
+
+  // Registrerer ett salg av et produkt/råvare som ikke ligger i noen bar-mal
+  // (ad-hoc, fra søkefeltet i Kasse). itemId er deterministisk per itemType+refId
+  // slik at gjentatte ad-hoc-registreringer av samme vare grupperes sammen i Telling.
+  function addAdhocBarTally(itemType: "product" | "material", refId: string) {
+    addBarTally({ id: `adhoc-${itemType}-${refId}`, itemType, refId });
   }
 
   function removeLastBarTally(itemId: string) {
@@ -11519,6 +11557,178 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
     if (!last) return;
     updateData({ barTallyEntries: (data.barTallyEntries || []).filter((e) => e.id !== last.id) });
   }
+
+  const adhocBarResults = (() => {
+    const q = adhocBarSearch.trim().toLowerCase();
+    if (!q) return [];
+    const productResults = data.products
+      .filter((p) => !!p.productNumber && (p.name.toLowerCase().includes(q) || p.productNumber.toLowerCase().includes(q)))
+      .map((p) => ({ key: `product:${p.id}`, itemType: "product" as const, refId: p.id, productNumber: p.productNumber, name: p.name, price: p.customerPrice || 0 }));
+    const materialResults = data.materials
+      .filter((m) => !!m.productNumber && (m.name.toLowerCase().includes(q) || (m.productNumber || "").toLowerCase().includes(q)))
+      .map((m) => ({ key: `material:${m.id}`, itemType: "material" as const, refId: m.id, productNumber: m.productNumber || "", name: m.name, price: m.retailPrice ?? m.pricePerUnit ?? 0 }));
+    return [...productResults, ...materialResults].slice(0, 10);
+  })();
+
+  const renderKasseContent = () => (
+    <>
+      <div className="between">
+        <h3 style={{ margin: 0 }}>Registrer salg</h3>
+        <button className={kasseFullscreen ? "btn active" : "btn"} onClick={() => setKasseFullscreen(!kasseFullscreen)}>
+          {kasseFullscreen ? "🗗 Avslutt fullskjerm" : "⛶ Fullskjerm"}
+        </button>
+      </div>
+
+      {!rental.id ? (
+        <p className="muted">Lagre tilbudet før du registrerer bar-salg.</p>
+      ) : (
+        <>
+          <div className="form-grid two" style={{ marginTop: 12 }}>
+            <label>Bar-mal
+              <select
+                value={rental.selectedBarTemplateId || ""}
+                disabled={readOnly}
+                onChange={(e) => setRental({ ...rental, selectedBarTemplateId: e.target.value || undefined })}
+              >
+                <option value="">Velg mal...</option>
+                {(data.barTemplates || []).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>Tak for åpen bar (valgfritt, kr)
+              <input
+                type="number"
+                value={rental.barSpendingCap ?? ""}
+                disabled={readOnly}
+                onChange={(e) => setRental({ ...rental, barSpendingCap: e.target.value === "" ? undefined : Number(e.target.value) || 0 })}
+              />
+            </label>
+          </div>
+
+          {!!rental.barSpendingCap && (() => {
+            const pct = (barTotal / rental.barSpendingCap!) * 100;
+            const color = pct >= 100 ? "#b91c1c" : pct >= 80 ? "#b45309" : "#166534";
+            const bg = pct >= 100 ? "#fee2e2" : pct >= 80 ? "#fef3c7" : "#dcfce7";
+            return (
+              <p style={{ marginTop: 8, fontWeight: 700, color, background: bg, display: "inline-block", padding: "4px 10px", borderRadius: 8 }}>
+                {currency(barTotal)} av {currency(rental.barSpendingCap!)} ({pct.toFixed(0)}%)
+              </p>
+            );
+          })()}
+
+          <div className="search-picker" style={{ marginTop: 16, maxWidth: 420 }}>
+            <input
+              value={adhocBarSearch}
+              disabled={readOnly}
+              onChange={(e) => setAdhocBarSearch(e.target.value)}
+              placeholder="Søk etter annen vare å registrere..."
+            />
+            {adhocBarSearch.trim() && (
+              <div className="search-dropdown inline">
+                {adhocBarResults.length === 0 ? (
+                  <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>
+                ) : (
+                  adhocBarResults.map((r) => (
+                    <button
+                      key={r.key}
+                      type="button"
+                      className="search-result"
+                      disabled={readOnly}
+                      onClick={() => {
+                        addAdhocBarTally(r.itemType, r.refId);
+                        setAdhocBarSearch("");
+                      }}
+                    >
+                      <b>{r.productNumber} - {r.name} ({currency(r.price)})</b>
+                      <small>{r.itemType === "product" ? "Produkt" : "Råvare"}</small>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {(data.barTemplates || []).length === 0 ? (
+            <p className="muted" style={{ marginTop: 12 }}>Ingen bar-maler opprettet ennå – gå til Innstillinger → Bar-maler for å legge dem inn, eller bruk søket over.</p>
+          ) : !barTemplate ? (
+            <p className="muted" style={{ marginTop: 12 }}>Velg en bar-mal over for å registrere salg fra griden, eller bruk søket over.</p>
+          ) : (barTemplate.items || []).length === 0 ? (
+            <p className="muted" style={{ marginTop: 12 }}>Malen "{barTemplate.name}" har ingen varer ennå – legg dem til i Innstillinger → Bar-maler.</p>
+          ) : (
+            <div className="bar-item-grid" style={{ marginTop: 16 }}>
+              {barTemplate.items.map((item) => {
+                const display = barItemDisplay(item, data);
+                if (!display) return (
+                  <div key={item.id} className="bar-item-btn" style={{ opacity: 0.5, cursor: "default" }}>
+                    <span className="bar-item-name">Utilgjengelig</span>
+                  </div>
+                );
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="bar-item-btn"
+                    style={item.color ? { background: item.color, borderColor: item.color } : undefined}
+                    disabled={readOnly}
+                    title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                    onClick={() => addBarTally(item)}
+                  >
+                    <span className="bar-item-name">{display.name}</span>
+                    <span className="bar-item-price">{currency(display.price)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <h3 style={{ marginTop: 20 }}>Telling</h3>
+          {barGroups.length === 0 ? (
+            <p className="muted">Ingen registreringer ennå.</p>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              {barGroups.map((g) => (
+                <div key={g.itemId} className="editable-row bar-tally-row">
+                  <span>{g.itemName}: {g.count} stk × {currency(g.count ? g.total / g.count : 0)} = <b>{currency(g.total)}</b></span>
+                  <span className="bar-adjust-group">
+                    <button
+                      type="button"
+                      className="bar-adjust-btn"
+                      disabled={readOnly}
+                      title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                      onClick={() => removeLastBarTally(g.itemId)}
+                    >
+                      −1
+                    </button>
+                    <button
+                      type="button"
+                      className="bar-adjust-btn"
+                      disabled={readOnly}
+                      title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                      onClick={() => {
+                        if (g.itemType && g.refId) {
+                          // Bygg ny oppføring direkte fra gruppens lagrede itemType+refId -
+                          // fungerer for BÅDE mal-varer og ad-hoc-registrerte varer.
+                          addBarTally({ id: g.itemId, itemType: g.itemType, refId: g.refId });
+                        } else {
+                          // Eldre oppføring uten itemType/refId - fall tilbake til oppslag i barTemplates.
+                          const item = (data.barTemplates || []).flatMap((t) => t.items).find((b) => b.id === g.itemId);
+                          if (item) addBarTally(item);
+                        }
+                      }}
+                    >
+                      +1
+                    </button>
+                  </span>
+                </div>
+              ))}
+              <p style={{ marginTop: 12, fontSize: 16 }}>Totalt: <b>{currency(barTotal)}</b></p>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
 
   const [staffTimeForm, setStaffTimeForm] = useState({ name: "", startTime: "", endTime: "" });
   const [editingStaffTimeId, setEditingStaffTimeId] = useState<string | null>(null);
@@ -12328,121 +12538,15 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               </>
             )}
 
-            {rentalSubTab === "kasse" && (
-              <>
-                {!rental.id ? (
-                  <p className="muted">Lagre tilbudet før du registrerer bar-salg.</p>
-                ) : (data.barTemplates || []).length === 0 ? (
-                  <p className="muted">Ingen bar-maler opprettet ennå – gå til Innstillinger → Bar-maler for å legge dem inn.</p>
-                ) : (
-                  <>
-                    <div className="form-grid two">
-                      <label>Bar-mal
-                        <select
-                          value={rental.selectedBarTemplateId || ""}
-                          disabled={readOnly}
-                          onChange={(e) => setRental({ ...rental, selectedBarTemplateId: e.target.value || undefined })}
-                        >
-                          <option value="">Velg mal...</option>
-                          {(data.barTemplates || []).map((t) => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>Tak for åpen bar (valgfritt, kr)
-                        <input
-                          type="number"
-                          value={rental.barSpendingCap ?? ""}
-                          disabled={readOnly}
-                          onChange={(e) => setRental({ ...rental, barSpendingCap: e.target.value === "" ? undefined : Number(e.target.value) || 0 })}
-                        />
-                      </label>
-                    </div>
+            {rentalSubTab === "kasse" && !kasseFullscreen && renderKasseContent()}
 
-                    {!!rental.barSpendingCap && (() => {
-                      const pct = (barTotal / rental.barSpendingCap!) * 100;
-                      const color = pct >= 100 ? "#b91c1c" : pct >= 80 ? "#b45309" : "#166534";
-                      const bg = pct >= 100 ? "#fee2e2" : pct >= 80 ? "#fef3c7" : "#dcfce7";
-                      return (
-                        <p style={{ marginTop: 8, fontWeight: 700, color, background: bg, display: "inline-block", padding: "4px 10px", borderRadius: 8 }}>
-                          {currency(barTotal)} av {currency(rental.barSpendingCap!)} ({pct.toFixed(0)}%)
-                        </p>
-                      );
-                    })()}
-
-                    {!barTemplate ? (
-                      <p className="muted" style={{ marginTop: 12 }}>Velg en bar-mal over for å registrere salg.</p>
-                    ) : (barTemplate.items || []).length === 0 ? (
-                      <p className="muted" style={{ marginTop: 12 }}>Malen "{barTemplate.name}" har ingen varer ennå – legg dem til i Innstillinger → Bar-maler.</p>
-                    ) : (
-                      <>
-                        <h3 style={{ marginTop: 20 }}>Registrer salg</h3>
-                        <div className="bar-item-grid">
-                          {barTemplate.items.map((item) => {
-                            const display = barItemDisplay(item, data);
-                            if (!display) return (
-                              <div key={item.id} className="bar-item-btn" style={{ opacity: 0.5, cursor: "default" }}>
-                                <span className="bar-item-name">Utilgjengelig</span>
-                              </div>
-                            );
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                className="bar-item-btn"
-                                style={item.color ? { background: item.color, borderColor: item.color } : undefined}
-                                disabled={readOnly}
-                                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                                onClick={() => addBarTally(item)}
-                              >
-                                <span className="bar-item-name">{display.name}</span>
-                                <span className="bar-item-price">{currency(display.price)}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </>
-                    )}
-
-                    <h3 style={{ marginTop: 20 }}>Telling</h3>
-                    {barGroups.length === 0 ? (
-                      <p className="muted">Ingen registreringer ennå.</p>
-                    ) : (
-                      <div style={{ marginTop: 8 }}>
-                        {barGroups.map((g) => (
-                          <div key={g.itemId} className="editable-row bar-tally-row">
-                            <span>{g.itemName}: {g.count} stk × {currency(g.count ? g.total / g.count : 0)} = <b>{currency(g.total)}</b></span>
-                            <span className="bar-adjust-group">
-                              <button
-                                type="button"
-                                className="bar-adjust-btn"
-                                disabled={readOnly}
-                                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                                onClick={() => removeLastBarTally(g.itemId)}
-                              >
-                                −1
-                              </button>
-                              <button
-                                type="button"
-                                className="bar-adjust-btn"
-                                disabled={readOnly}
-                                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                                onClick={() => {
-                                  const item = (data.barTemplates || []).flatMap((t) => t.items).find((b) => b.id === g.itemId);
-                                  if (item) addBarTally(item);
-                                }}
-                              >
-                                +1
-                              </button>
-                            </span>
-                          </div>
-                        ))}
-                        <p style={{ marginTop: 12, fontSize: 16 }}>Totalt: <b>{currency(barTotal)}</b></p>
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
+            {rentalSubTab === "kasse" && kasseFullscreen && (
+              <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, background: "white", padding: 16, overflow: "auto" }}>
+                <div style={{ position: "sticky", top: 0, zIndex: 1, background: "white", paddingBottom: 12, display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn danger" onClick={() => setKasseFullscreen(false)}>✕ Lukk fullskjerm</button>
+                </div>
+                {renderKasseContent()}
+              </div>
             )}
 
             {rentalSubTab === "vilkar" && (
@@ -13002,17 +13106,17 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
       </div>
 
       <style jsx global>{`
-        .bar-item-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-        .bar-item-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 12px 8px; border: 1px solid #c4b5fd; background: #ede9fe; border-radius: 12px; cursor: pointer; min-height: 64px; }
+        .bar-item-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .bar-item-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 12px 8px; border: 1px solid #c4b5fd; background: #ede9fe; border-radius: 12px; cursor: pointer; min-height: 64px; overflow: hidden; }
         .bar-item-btn:hover { background: #ddd6fe; }
         .bar-item-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .bar-item-name { font-weight: 700; color: #5b21b6; text-align: center; }
+        .bar-item-name { font-weight: 700; color: #5b21b6; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
         .bar-item-price { color: #6d28d9; font-size: 13px; }
         .bar-tally-row .bar-adjust-group { display: flex; gap: 6px; }
         .bar-adjust-btn { min-width: 36px; min-height: 32px; border-radius: 8px; border: 1px solid #cbd5e1; background: white; cursor: pointer; font-weight: 700; }
         .bar-adjust-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        @media (max-width: 768px) {
-          .bar-item-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        @media (max-width: 1180px) {
+          .bar-item-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
           .bar-item-btn { min-height: 56px; padding: 10px 6px; }
           .bar-item-name { font-size: 14px; }
           .bar-item-price { font-size: 13px; }
