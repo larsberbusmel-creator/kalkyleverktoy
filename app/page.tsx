@@ -1035,15 +1035,30 @@ export default function Page() {
         { event: "UPDATE", schema: "public", table: "app_data", filter: "id=eq.main" },
         (payload) => {
           console.log("Realtime mottatt:", new Date().toISOString(), payload?.new?.updated_at);
-          if (payload.new?.data) {
+                    if (payload.new?.data) {
             setData((prev) => {
               const incoming = migrateData(payload.new.data);
+              // barTallyEntries er en append-only liste skrevet via målrettede RPC-
+              // oppdateringer, ofte fra flere enheter samtidig (Kasse-funksjonen). Et
+              // sanntids-varsel kan i sjeldne tilfeller komme inn før akkurat vår egen,
+              // helt ferske rad har rukket å bli med i den innkommende versjonen -
+              // derfor SLÅS listene sammen (union på id) i stedet for at den ene
+              // overskriver den andre, slik at ingen fersk lokal rad noensinne går tapt,
+              // samtidig som andre enheters rader fortsatt kommer med.
+              const mergedBarTallyMap = new Map<string, BarTallyEntry>();
+              (incoming.barTallyEntries || []).forEach((e) => mergedBarTallyMap.set(e.id, e));
+              (prev.barTallyEntries || []).forEach((e) => {
+                if (!mergedBarTallyMap.has(e.id)) mergedBarTallyMap.set(e.id, e);
+              });
+              const barTallyEntries = Array.from(mergedBarTallyMap.values());
+
               if (isSavingRef.current) {
                 // Vi holder på å lagre selv – behold lokal state for alt,
                 // men hent inventoryCounts fra databasen siden RPC alltid er autoritativ der
                 return {
                   ...prev,
                   inventoryCounts: incoming.inventoryCounts,
+                  barTallyEntries,
                 };
               }
               // Ikke i ferd med å lagre – ta inn alt fra databasen, men behold lokal inventoryCounts
@@ -1051,6 +1066,7 @@ export default function Page() {
               return {
                 ...incoming,
                 inventoryCounts: prev.inventoryCounts,
+                barTallyEntries,
               };
             });
           }
