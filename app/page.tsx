@@ -217,6 +217,8 @@ type RentalOffer = {
   createdAt?: string;
   editLog?: { by: string; at: string }[];
   staffTimeLog?: StaffTimeEntry[];
+  selectedBarTemplateId?: string;
+  barSpendingCap?: number;
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -259,7 +261,8 @@ type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean;
 type PackingListItem = { id: string; label: string };
 type PackingListTemplate = { id: string; name: string; items: PackingListItem[] };
 
-type BarItem = { id: string; name: string; price: number; category?: string };
+type BarItem = { id: string; name: string; price: number; color?: string };
+type BarTemplate = { id: string; name: string; items: BarItem[] };
 
 // Én oppføring PER TRYKK i Kasse-underfanen (Leie av lokale) - append-only,
 // aldri lest+overskrevet som en samlet liste, slik at samtidige trykk fra
@@ -483,7 +486,7 @@ type AppData = {
   productionTemplates: ProductionTemplate[];
   reportArticleMappings: ReportArticleMapping[];
   reportSnapshots: ReportSnapshot[];
-  barItems: BarItem[];
+  barTemplates: BarTemplate[];
   barTallyEntries: BarTallyEntry[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
@@ -759,7 +762,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   productionTemplates: [],
   reportArticleMappings: [],
   reportSnapshots: [],
-  barItems: [],
+  barTemplates: [],
   barTallyEntries: [],
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
@@ -868,8 +871,8 @@ reportArticleMappings:
 reportSnapshots:
   (raw as any).reportSnapshots || [],
 
-barItems:
-  (raw as any).barItems || [],
+barTemplates:
+  (raw as any).barTemplates || [],
 
 barTallyEntries:
   (raw as any).barTallyEntries || [],
@@ -10298,6 +10301,7 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
       return acc;
     }, {} as Record<string, { itemId: string; itemName: string; count: number; total: number; lastPrice: number }>)
   ).sort((a, b) => a.itemName.localeCompare(b.itemName));
+  const barTemplate = (data.barTemplates || []).find((t) => t.id === rental.selectedBarTemplateId);
   const total = rental.venuePrice + food + waiterCost + addonTotal + barTotal;
 
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
@@ -11552,7 +11556,7 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPacki
       ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
       : "";
     const barRow = barTotal > 0
-      ? `<tr><td>Kasse (bar)</td><td></td><td></td><td style="text-align:right"><b>${currency(barTotal)}</b></td></tr>`
+      ? `<tr><td>Bar/servering</td><td></td><td></td><td style="text-align:right"><b>${currency(barTotal)}</b></td></tr>`
       : "";
     const recipePagesHtml = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
@@ -12294,26 +12298,69 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               <>
                 {!rental.id ? (
                   <p className="muted">Lagre tilbudet før du registrerer bar-salg.</p>
-                ) : (data.barItems || []).length === 0 ? (
-                  <p className="muted">Ingen bar-varer definert ennå – gå til Innstillinger → Bar-varer for å legge dem inn.</p>
+                ) : (data.barTemplates || []).length === 0 ? (
+                  <p className="muted">Ingen bar-maler opprettet ennå – gå til Innstillinger → Bar-maler for å legge dem inn.</p>
                 ) : (
                   <>
-                    <h3>Registrer salg</h3>
-                    <div className="bar-item-grid">
-                      {(data.barItems || []).map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="bar-item-btn"
+                    <div className="form-grid two">
+                      <label>Bar-mal
+                        <select
+                          value={rental.selectedBarTemplateId || ""}
                           disabled={readOnly}
-                          title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                          onClick={() => addBarTally(item)}
+                          onChange={(e) => setRental({ ...rental, selectedBarTemplateId: e.target.value || undefined })}
                         >
-                          <span className="bar-item-name">{item.name}</span>
-                          <span className="bar-item-price">{currency(item.price)}</span>
-                        </button>
-                      ))}
+                          <option value="">Velg mal...</option>
+                          {(data.barTemplates || []).map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>Tak for åpen bar (valgfritt, kr)
+                        <input
+                          type="number"
+                          value={rental.barSpendingCap ?? ""}
+                          disabled={readOnly}
+                          onChange={(e) => setRental({ ...rental, barSpendingCap: e.target.value === "" ? undefined : Number(e.target.value) || 0 })}
+                        />
+                      </label>
                     </div>
+
+                    {!!rental.barSpendingCap && (() => {
+                      const pct = (barTotal / rental.barSpendingCap!) * 100;
+                      const color = pct >= 100 ? "#b91c1c" : pct >= 80 ? "#b45309" : "#166534";
+                      const bg = pct >= 100 ? "#fee2e2" : pct >= 80 ? "#fef3c7" : "#dcfce7";
+                      return (
+                        <p style={{ marginTop: 8, fontWeight: 700, color, background: bg, display: "inline-block", padding: "4px 10px", borderRadius: 8 }}>
+                          {currency(barTotal)} av {currency(rental.barSpendingCap!)} ({pct.toFixed(0)}%)
+                        </p>
+                      );
+                    })()}
+
+                    {!barTemplate ? (
+                      <p className="muted" style={{ marginTop: 12 }}>Velg en bar-mal over for å registrere salg.</p>
+                    ) : (barTemplate.items || []).length === 0 ? (
+                      <p className="muted" style={{ marginTop: 12 }}>Malen "{barTemplate.name}" har ingen varer ennå – legg dem til i Innstillinger → Bar-maler.</p>
+                    ) : (
+                      <>
+                        <h3 style={{ marginTop: 20 }}>Registrer salg</h3>
+                        <div className="bar-item-grid">
+                          {barTemplate.items.map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className="bar-item-btn"
+                              style={item.color ? { background: item.color, borderColor: item.color } : undefined}
+                              disabled={readOnly}
+                              title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                              onClick={() => addBarTally(item)}
+                            >
+                              <span className="bar-item-name">{item.name}</span>
+                              <span className="bar-item-price">{currency(item.price)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
 
                     <h3 style={{ marginTop: 20 }}>Telling</h3>
                     {barGroups.length === 0 ? (
@@ -12339,7 +12386,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                                 disabled={readOnly}
                                 title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
                                 onClick={() => {
-                                  const item = (data.barItems || []).find((b) => b.id === g.itemId);
+                                  const item = (data.barTemplates || []).flatMap((t) => t.items).find((b) => b.id === g.itemId);
                                   if (item) addBarTally(item);
                                 }}
                               >
@@ -12348,7 +12395,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                             </span>
                           </div>
                         ))}
-                        <p style={{ marginTop: 12, fontSize: 16 }}>Sum bar: <b>{currency(barTotal)}</b></p>
+                        <p style={{ marginTop: 12, fontSize: 16 }}>Totalt: <b>{currency(barTotal)}</b></p>
                       </div>
                     )}
                   </>
@@ -12734,7 +12781,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
             <p>Mat/produkter: <b>{currency(food)}</b></p>
             <p>Servitører: <b>{currency(waiterCost)}</b></p>
             <p>Tillegg: <b>{currency(addonTotal)}</b></p>
-            {barTotal > 0 && <p>Kasse (bar): <b>{currency(barTotal)}</b></p>}
+            {barTotal > 0 && <p>Bar/servering: <b>{currency(barTotal)}</b></p>}
             {addonLines.length > 0 && (
               <table>
                 <thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead>
@@ -14229,7 +14276,9 @@ const SettingsTab = React.memo(function SettingsTab({
   const [newVenue, setNewVenue] = useState({ name: "", price: "0" });
   const [newPackaging, setNewPackaging] = useState({ name: "", price: "0" });
 const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", perUnit: false });
-const [newBarItem, setNewBarItem] = useState({ name: "", price: "0" });
+const [newBarTemplateName, setNewBarTemplateName] = useState("");
+const [expandedBarTemplateId, setExpandedBarTemplateId] = useState<string | null>(null);
+const [newBarTemplateItem, setNewBarTemplateItem] = useState({ name: "", price: "0", color: "" });
 const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null);
 const [addonPackingForm, setAddonPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
 const [newNotifyEmail, setNewNotifyEmail] = useState("");
@@ -14296,11 +14345,41 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
   updateData({ packingListTemplates: next });
 }
 
+function addBarTemplate() {
+  if (!newBarTemplateName.trim()) return;
+  const next = [...localBarTemplates, { id: `bart-${Date.now()}`, name: newBarTemplateName.trim(), items: [] }];
+  setLocalBarTemplates(next);
+  updateData({ barTemplates: next });
+  setNewBarTemplateName("");
+}
+
+function removeBarTemplate(templateId: string) {
+  const next = localBarTemplates.filter((t) => t.id !== templateId);
+  setLocalBarTemplates(next);
+  updateData({ barTemplates: next });
+}
+
+function addBarTemplateItem(templateId: string) {
+  if (!newBarTemplateItem.name.trim()) return;
+  const next = localBarTemplates.map((t) => t.id === templateId
+    ? { ...t, items: [...t.items, { id: `bi-${Date.now()}`, name: newBarTemplateItem.name.trim(), price: Number(newBarTemplateItem.price) || 0, color: newBarTemplateItem.color || undefined }] }
+    : t);
+  setLocalBarTemplates(next);
+  updateData({ barTemplates: next });
+  setNewBarTemplateItem({ name: "", price: "0", color: "" });
+}
+
+function removeBarTemplateItem(templateId: string, itemId: string) {
+  const next = localBarTemplates.map((t) => t.id === templateId ? { ...t, items: t.items.filter((i) => i.id !== itemId) } : t);
+  setLocalBarTemplates(next);
+  updateData({ barTemplates: next });
+}
+
   const [localSettings, setLocalSettings] = useState(data.settings);
   const [localVenues, setLocalVenues] = useState(data.venues);
   const [localPackaging, setLocalPackaging] = useState(data.packaging);
   const [localRentalAddons, setLocalRentalAddons] = useState(data.rentalAddons);
-  const [localBarItems, setLocalBarItems] = useState(data.barItems || []);
+  const [localBarTemplates, setLocalBarTemplates] = useState(data.barTemplates || []);
   const [localPackingListTemplates, setLocalPackingListTemplates] = useState(data.packingListTemplates);
 
   const Section = useCallback(({ id, title, children }: { id: string; title: string; children: React.ReactNode }) =>
@@ -14523,46 +14602,48 @@ function removePackingTemplateItem(templateId: string, itemId: string) {
 </div>
       </Section>
 
-      <Section id="barItems" title="Bar-varer (Kasse)">
+      <Section id="barTemplates" title="Bar-maler (Kasse)">
         <p className="muted" style={{ fontSize: 12 }}>
-          Varer som kan registreres i Kasse-underfanen på Leie av lokale. Endret pris her påvirker kun nye registreringer, ikke tidligere talte salg.
+          Gjenbrukbare bar-maler (f.eks. "Standard bar", "Vinbar") som kan velges per utleietilbud i Kasse-underfanen. Endret pris på en vare her påvirker kun nye registreringer, ikke tidligere talte salg.
         </p>
         <div>
-          {localBarItems.map((item, i) => (
-            <div key={item.id} className="editable-row">
-              <input
-                value={item.name}
-                onChange={(e) => setLocalBarItems(localBarItems.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
-                onBlur={() => updateData({ barItems: localBarItems })}
-                style={{ flex: "2 1 240px", minWidth: 160 }}
-                disabled={readOnly}
-              />
-              <input
-                type="number"
-                value={item.price}
-                onChange={(e) => setLocalBarItems(localBarItems.map((x, ix) => ix === i ? { ...x, price: Number(e.target.value) || 0 } : x))}
-                onBlur={() => updateData({ barItems: localBarItems })}
-                style={{ flex: "0 0 100px", width: 100 }}
-                disabled={readOnly}
-              />
-              <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
-                const next = localBarItems.filter((x) => x.id !== item.id);
-                setLocalBarItems(next);
-                updateData({ barItems: next });
-              }}>Slett</button>
-            </div>
+          {localBarTemplates.map((template, i) => (
+            <React.Fragment key={template.id}>
+              <div className="editable-row">
+                <input
+                  value={template.name}
+                  onChange={(e) => setLocalBarTemplates(localBarTemplates.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                  onBlur={() => updateData({ barTemplates: localBarTemplates })}
+                  style={{ flex: "2 1 240px", minWidth: 160 }}
+                  disabled={readOnly}
+                />
+                <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeBarTemplate(template.id)}>Slett</button>
+                <button className="link" onClick={() => setExpandedBarTemplateId(expandedBarTemplateId === template.id ? null : template.id)}>
+                  Varer ({template.items.length})
+                </button>
+              </div>
+              {expandedBarTemplateId === template.id && (
+                <div className="soft-box" style={{ marginTop: -8, marginBottom: 8 }}>
+                  {template.items.map((item) => (
+                    <div key={item.id} className="editable-row">
+                      <span>{item.color && <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 4, background: item.color, marginRight: 6, verticalAlign: "middle" }} />}{item.name} · {currency(item.price)}</span>
+                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeBarTemplateItem(template.id, item.id)}>Slett</button>
+                    </div>
+                  ))}
+                  <div className="form-grid four" style={{ marginTop: 8 }}>
+                    <input placeholder="Navn (f.eks. Glass vin husets)" value={newBarTemplateItem.name} onChange={(e) => setNewBarTemplateItem({ ...newBarTemplateItem, name: e.target.value })} disabled={readOnly} />
+                    <input type="number" placeholder="Pris" value={newBarTemplateItem.price} onChange={(e) => setNewBarTemplateItem({ ...newBarTemplateItem, price: e.target.value })} disabled={readOnly} />
+                    <input type="color" value={newBarTemplateItem.color || "#ede9fe"} onChange={(e) => setNewBarTemplateItem({ ...newBarTemplateItem, color: e.target.value })} disabled={readOnly} style={{ padding: 2, height: 38 }} />
+                    <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addBarTemplateItem(template.id)}>Legg til vare</button>
+                  </div>
+                </div>
+              )}
+            </React.Fragment>
           ))}
         </div>
-        <div className="form-grid three">
-          <input placeholder="Ny bar-vare (f.eks. Glass vin husets)" value={newBarItem.name} onChange={(e) => setNewBarItem({ ...newBarItem, name: e.target.value })} disabled={readOnly} />
-          <input type="number" placeholder="Pris" value={newBarItem.price} onChange={(e) => setNewBarItem({ ...newBarItem, price: e.target.value })} disabled={readOnly} />
-          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => {
-            if (!newBarItem.name.trim()) return;
-            const next = [...localBarItems, { id: `${idFromName(newBarItem.name)}-${Date.now()}`, name: newBarItem.name.trim(), price: Number(newBarItem.price) || 0 }];
-            setLocalBarItems(next);
-            updateData({ barItems: next });
-            setNewBarItem({ name: "", price: "0" });
-          }}>Legg til</button>
+        <div className="form-grid two">
+          <input placeholder="Ny mal (f.eks. Standard bar)" value={newBarTemplateName} onChange={(e) => setNewBarTemplateName(e.target.value)} disabled={readOnly} />
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addBarTemplate}>+ Ny mal</button>
         </div>
       </Section>
 
