@@ -261,7 +261,12 @@ type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean;
 type PackingListItem = { id: string; label: string };
 type PackingListTemplate = { id: string; name: string; items: PackingListItem[] };
 
-type BarItem = { id: string; name: string; price: number; color?: string };
+// itemType/refId peker til et Product eller Material - navn/pris hentes ALLTID
+// live derfra ved rendering (se barItemDisplay), aldri lagret på selve BarItem.
+// Eldre BarItem-oppføringer (fra før denne ombyggingen) manglet itemType/refId
+// og hadde name/price direkte - disse leses fortsatt trygt for visning via
+// barItemDisplay sin legacy-fallback, men nye varer opprettes aldri slik lenger.
+type BarItem = { id: string; itemType: "product" | "material"; refId: string; color?: string };
 type BarTemplate = { id: string; name: string; items: BarItem[] };
 
 // Én oppføring PER TRYKK i Kasse-underfanen (Leie av lokale) - append-only,
@@ -514,6 +519,30 @@ function today() {
 
 function idFromName(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9æøå]+/gi, "-").replace(/^-|-$/g, "") || String(Date.now());
+}
+
+// Eldre BarItem-format (før produkt-/råvarekobling) manglet itemType/refId.
+function barItemIsLegacy(item: BarItem): boolean {
+  return !item.itemType || !item.refId;
+}
+
+// Slår opp ferskt navn+pris for et BarItem live fra Produkter/Råvarer, slik at
+// bar-mal-knappene alltid viser gjeldende pris. Returnerer null hvis produktet/
+// råvaren er slettet i mellomtiden (knappen skal da skjules, ikke krasje).
+function barItemDisplay(item: BarItem, data: AppData): { name: string; price: number } | null {
+  if (barItemIsLegacy(item)) {
+    const legacy = item as unknown as { name?: string; price?: number };
+    if (!legacy.name) return null;
+    return { name: legacy.name, price: legacy.price || 0 };
+  }
+  if (item.itemType === "product") {
+    const p = data.products.find((x) => x.id === item.refId);
+    if (!p) return null;
+    return { name: p.name, price: p.customerPrice || 0 };
+  }
+  const m = data.materials.find((x) => x.id === item.refId);
+  if (!m) return null;
+  return { name: m.name, price: m.retailPrice ?? m.pricePerUnit ?? 0 };
 }
 
 // Favn sine .xlsx-eksporter har ofte en foreldet/feilaktig "!ref"-dimensjon i
@@ -11465,12 +11494,17 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
   // aldri kan overskrive hverandre.
   function addBarTally(item: BarItem) {
     if (!rental.id) return;
+    const display = barItemDisplay(item, data);
+    if (!display) {
+      alert("Denne varen finnes ikke lenger i Produkter/Råvarer og kan ikke registreres.");
+      return;
+    }
     const entry: BarTallyEntry = {
       id: `bar-${rental.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       offerId: rental.id,
       itemId: item.id,
-      itemName: item.name,
-      itemPrice: item.price,
+      itemName: display.name,
+      itemPrice: display.price,
       createdAt: new Date().toISOString(),
     };
     updateListRpc("barTallyEntries", { [entry.id]: entry });
@@ -12344,20 +12378,28 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                       <>
                         <h3 style={{ marginTop: 20 }}>Registrer salg</h3>
                         <div className="bar-item-grid">
-                          {barTemplate.items.map((item) => (
-                            <button
-                              key={item.id}
-                              type="button"
-                              className="bar-item-btn"
-                              style={item.color ? { background: item.color, borderColor: item.color } : undefined}
-                              disabled={readOnly}
-                              title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                              onClick={() => addBarTally(item)}
-                            >
-                              <span className="bar-item-name">{item.name}</span>
-                              <span className="bar-item-price">{currency(item.price)}</span>
-                            </button>
-                          ))}
+                          {barTemplate.items.map((item) => {
+                            const display = barItemDisplay(item, data);
+                            if (!display) return (
+                              <div key={item.id} className="bar-item-btn" style={{ opacity: 0.5, cursor: "default" }}>
+                                <span className="bar-item-name">Utilgjengelig</span>
+                              </div>
+                            );
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                className="bar-item-btn"
+                                style={item.color ? { background: item.color, borderColor: item.color } : undefined}
+                                disabled={readOnly}
+                                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                                onClick={() => addBarTally(item)}
+                              >
+                                <span className="bar-item-name">{display.name}</span>
+                                <span className="bar-item-price">{currency(display.price)}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </>
                     )}
@@ -14278,7 +14320,8 @@ const SettingsTab = React.memo(function SettingsTab({
 const [newRentalAddon, setNewRentalAddon] = useState({ name: "", price: "0", perUnit: false });
 const [newBarTemplateName, setNewBarTemplateName] = useState("");
 const [expandedBarTemplateId, setExpandedBarTemplateId] = useState<string | null>(null);
-const [newBarTemplateItem, setNewBarTemplateItem] = useState({ name: "", price: "0", color: "" });
+const [newBarTemplateItemSelection, setNewBarTemplateItemSelection] = useState(""); // format "product:<id>" eller "material:<id>"
+const [newBarTemplateItemColor, setNewBarTemplateItemColor] = useState("");
 const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null);
 const [addonPackingForm, setAddonPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
 const [newNotifyEmail, setNewNotifyEmail] = useState("");
@@ -14360,13 +14403,15 @@ function removeBarTemplate(templateId: string) {
 }
 
 function addBarTemplateItem(templateId: string) {
-  if (!newBarTemplateItem.name.trim()) return;
+  const [itemType, refId] = newBarTemplateItemSelection.split(":") as ["product" | "material", string];
+  if (!itemType || !refId) return;
   const next = localBarTemplates.map((t) => t.id === templateId
-    ? { ...t, items: [...t.items, { id: `bi-${Date.now()}`, name: newBarTemplateItem.name.trim(), price: Number(newBarTemplateItem.price) || 0, color: newBarTemplateItem.color || undefined }] }
+    ? { ...t, items: [...t.items, { id: `bi-${Date.now()}`, itemType, refId, color: newBarTemplateItemColor || undefined }] }
     : t);
   setLocalBarTemplates(next);
   updateData({ barTemplates: next });
-  setNewBarTemplateItem({ name: "", price: "0", color: "" });
+  setNewBarTemplateItemSelection("");
+  setNewBarTemplateItemColor("");
 }
 
 function removeBarTemplateItem(templateId: string, itemId: string) {
@@ -14624,18 +14669,56 @@ function removeBarTemplateItem(templateId: string, itemId: string) {
               </div>
               {expandedBarTemplateId === template.id && (
                 <div className="soft-box" style={{ marginTop: -8, marginBottom: 8 }}>
-                  {template.items.map((item) => (
-                    <div key={item.id} className="editable-row">
-                      <span>{item.color && <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 4, background: item.color, marginRight: 6, verticalAlign: "middle" }} />}{item.name} · {currency(item.price)}</span>
-                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeBarTemplateItem(template.id, item.id)}>Slett</button>
-                    </div>
-                  ))}
-                  <div className="form-grid four" style={{ marginTop: 8 }}>
-                    <input placeholder="Navn (f.eks. Glass vin husets)" value={newBarTemplateItem.name} onChange={(e) => setNewBarTemplateItem({ ...newBarTemplateItem, name: e.target.value })} disabled={readOnly} />
-                    <input type="number" placeholder="Pris" value={newBarTemplateItem.price} onChange={(e) => setNewBarTemplateItem({ ...newBarTemplateItem, price: e.target.value })} disabled={readOnly} />
-                    <input type="color" value={newBarTemplateItem.color || "#ede9fe"} onChange={(e) => setNewBarTemplateItem({ ...newBarTemplateItem, color: e.target.value })} disabled={readOnly} style={{ padding: 2, height: 38 }} />
-                    <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addBarTemplateItem(template.id)}>Legg til vare</button>
-                  </div>
+                  {template.items.map((item) => {
+                    const isLegacy = barItemIsLegacy(item);
+                    const display = barItemDisplay(item, data);
+                    return (
+                      <div key={item.id} className="editable-row">
+                        <span>
+                          {item.color && <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 4, background: item.color, marginRight: 6, verticalAlign: "middle" }} />}
+                          {isLegacy ? (
+                            <span style={{ color: "#b45309" }}>
+                              ⚠ {display ? display.name : "Ukjent vare"} {display ? `· ${currency(display.price)}` : ""} - denne varen bruker gammelt format og må fjernes og legges til på nytt fra produkt-/råvarelisten
+                            </span>
+                          ) : display ? (
+                            <>{display.name} · {currency(display.price)}</>
+                          ) : (
+                            <span style={{ color: "#b91c1c" }}>⚠ Produktet/råvaren finnes ikke lenger</span>
+                          )}
+                        </span>
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeBarTemplateItem(template.id, item.id)}>
+                          {isLegacy || !display ? "Fjern" : "Slett"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {(() => {
+                    const selected = newBarTemplateItemSelection ? newBarTemplateItemSelection.split(":") : null;
+                    const previewItem: BarItem | null = selected ? { id: "", itemType: selected[0] as "product" | "material", refId: selected[1], color: undefined } : null;
+                    const preview = previewItem ? barItemDisplay(previewItem, data) : null;
+                    return (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="form-grid three">
+                          <select value={newBarTemplateItemSelection} onChange={(e) => setNewBarTemplateItemSelection(e.target.value)} disabled={readOnly}>
+                            <option value="">Velg produkt/råvare...</option>
+                            <optgroup label="Produkter">
+                              {data.products.filter((p) => !!p.productNumber).map((p) => (
+                                <option key={`product:${p.id}`} value={`product:${p.id}`}>{p.productNumber} - {p.name}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Råvarer">
+                              {data.materials.filter((m) => !!m.productNumber).map((m) => (
+                                <option key={`material:${m.id}`} value={`material:${m.id}`}>{m.productNumber} - {m.name}</option>
+                              ))}
+                            </optgroup>
+                          </select>
+                          <input type="color" value={newBarTemplateItemColor || "#ede9fe"} onChange={(e) => setNewBarTemplateItemColor(e.target.value)} disabled={readOnly} style={{ padding: 2, height: 38 }} />
+                          <button className="btn active" disabled={readOnly || !newBarTemplateItemSelection} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addBarTemplateItem(template.id)}>Legg til vare</button>
+                        </div>
+                        {preview && <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Pris som brukes: <b>{currency(preview.price)}</b></p>}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </React.Fragment>
