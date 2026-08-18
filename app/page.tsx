@@ -5348,9 +5348,14 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
         if (rl.itemType === "recipe") expandRecipe(rl.itemId, amt, [...path, recipeId]);
       });
     }
-    function expandProduct(product: Product, multiplier: number, path: string[]) {
+        function expandProduct(product: Product, multiplier: number, path: string[], isPieceCount = true) {
       if (path.includes(product.id) || bakeryNoExpand.includes(product.category)) return;
-      const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
+      // unitWeightKg skal KUN ganges inn når multiplier faktisk er et antall STYKK
+      // (toppnivå ordrelinjer). For underprodukter brukt som ingrediens i et annet
+      // produkt er multiplier allerede en vektmengde (regnet ut av kalleren via
+      // amt / subYield), og skal IKKE ganges med unitWeightKg på nytt - det gir
+      // en dobbel skalering og feil (for lav/høy) mengde i varebestillingen.
+      const batchMultiplier = isPieceCount && product.unitWeightKg && product.recipeYieldAmount
         ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
         : multiplier;
       product.lines.forEach((pl) => {
@@ -5361,7 +5366,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
           const sub = data.products.find((x) => x.id === pl.itemId);
           if (sub) {
             const subYield = Number(sub.recipeYieldAmount || sub.yieldAmount || 1) || 1;
-            expandProduct(sub, amt / subYield, [...path, product.id]);
+            expandProduct(sub, amt / subYield, [...path, product.id], false);
           }
         }
       });
