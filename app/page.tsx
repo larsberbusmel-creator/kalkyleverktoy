@@ -10841,7 +10841,9 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
       const base = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
       const scale = totalAmount / Math.max(base, 1);
       recipe.lines.forEach((rl) => {
-        const amt = Number(rl.amount || 0) * scale;
+        const rawAmt = Number(rl.amount || 0) * scale;
+        const waste = Math.min(Number(rl.wastePercent || 0), 95) / 100;
+        const amt = waste > 0 ? rawAmt / (1 - waste) : rawAmt;
         if (rl.itemType === "material") addMaterial(rl.itemId, amt, recipe.yieldUnit);
         if (rl.itemType === "recipe") expandRecipe(rl.itemId, amt, [...path, recipeId]);
       });
@@ -10859,7 +10861,9 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
         : multiplier;
       product.lines.forEach((pl) => {
-        const amt = Number(pl.amount || 0) * batchMultiplier;
+        const rawAmt = Number(pl.amount || 0) * batchMultiplier;
+        const wasteP = Math.min(Number(pl.wastePercent || 0), 95) / 100;
+        const amt = wasteP > 0 ? rawAmt / (1 - wasteP) : rawAmt;
         if (pl.itemType === "material") addMaterial(pl.itemId, amt, pl.unit);
         if (pl.itemType === "recipe") expandRecipe(pl.itemId, amt, []);
         if (pl.itemType === "product") {
@@ -11918,9 +11922,10 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPacki
   <p><b>Allergier:</b> ${escapeHtml(rentalAllergensText)}</p>
 </div>
 ${rentalAllergenWarningHtml}
+<div style="line-height:1.15;font-size:10px">
 ${productionHtml}
-${recipePagesHtml ? `<h2 style="margin-top:20px">Oppskrifter</h2>${recipePagesHtml}` : ""}
-${shoppingRowsR ? `<h2 style="margin-top:20px">Varebestilling</h2>${shoppingRowsR}` : ""}`;
+${shoppingRowsR ? `<h2 style="margin-top:20px">Varebestilling</h2>${shoppingRowsR}` : ""}
+</div>`;
     return `<div class="print-offer">
 <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
 <div class="header">
