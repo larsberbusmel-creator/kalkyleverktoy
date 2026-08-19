@@ -2609,8 +2609,13 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   }
 
   function renameGroup(oldLabel: string, newLabel: string) {
-    const trimmed = newLabel.trim();
-    setDraftLines((prev) => prev.map((l) => (l.groupLabel === oldLabel ? { ...l, groupLabel: trimmed || undefined } : l)));
+    setDraftLines((prev) => prev.map((l) => (l.groupLabel === oldLabel ? { ...l, groupLabel: newLabel || undefined } : l)));
+  }
+
+  function trimGroupLabel(label: string) {
+    const trimmed = label.trim();
+    if (trimmed === label) return;
+    setDraftLines((prev) => prev.map((l) => (l.groupLabel === label ? { ...l, groupLabel: trimmed || undefined } : l)));
   }
 
   function moveGroup(index: number, direction: -1 | 1) {
@@ -2799,6 +2804,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
                         value={l.groupLabel}
                         disabled={readOnly}
                         onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
+                        onBlur={(e) => trimGroupLabel(e.target.value)}
                         style={{ fontWeight: 700, fontSize: 14, border: "none", background: "transparent", width: "100%", outline: "none" }}
                         placeholder="Gruppenavn"
                       />
@@ -3378,8 +3384,13 @@ unitWeightKg: "1",
   }
 
   function renameGroup(oldLabel: string, newLabel: string) {
-    const trimmed = newLabel.trim();
-    setDraftLines((prev) => prev.map((l) => (l.groupLabel === oldLabel ? { ...l, groupLabel: trimmed || undefined } : l)));
+    setDraftLines((prev) => prev.map((l) => (l.groupLabel === oldLabel ? { ...l, groupLabel: newLabel || undefined } : l)));
+  }
+
+  function trimGroupLabel(label: string) {
+    const trimmed = label.trim();
+    if (trimmed === label) return;
+    setDraftLines((prev) => prev.map((l) => (l.groupLabel === label ? { ...l, groupLabel: trimmed || undefined } : l)));
   }
 
   function moveGroup(index: number, direction: -1 | 1) {
@@ -4283,6 +4294,7 @@ th{background:#f3f4f6}
                         value={l.groupLabel}
                         disabled={readOnly}
                         onChange={(e) => renameGroup(l.groupLabel!, e.target.value)}
+                        onBlur={(e) => trimGroupLabel(e.target.value)}
                         style={{ fontWeight: 700, fontSize: 14, border: "none", background: "transparent", width: "100%", outline: "none" }}
                         placeholder="Gruppenavn"
                       />
