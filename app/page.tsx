@@ -219,6 +219,9 @@ type RentalOffer = {
   staffTimeLog?: StaffTimeEntry[];
   selectedBarTemplateId?: string;
   barSpendingCap?: number;
+  barLocked?: boolean;
+  barLockedTotal?: number; // "frosset" barTotal på låsetidspunktet
+  barLockedAt?: string;
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -10401,7 +10404,11 @@ function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendi
     }, {} as Record<string, { itemId: string; itemName: string; count: number; total: number; lastPrice: number; itemType?: "product" | "material"; refId?: string }>)
   ).sort((a, b) => a.itemName.localeCompare(b.itemName));
   const barTemplate = (data.barTemplates || []).find((t) => t.id === rental.selectedBarTemplateId);
-  const total = rental.venuePrice + food + waiterCost + addonTotal + barTotal;
+  // Låst kasseregning: totalprisen bruker det frosne beløpet fra låsetidspunktet,
+  // ikke den løpende barTotal - nye registreringer etter låsing endrer altså
+  // ikke totalprisen før man eventuelt låser opp igjen.
+  const effectiveBarTotal = rental.barLocked ? (rental.barLockedTotal || 0) : barTotal;
+  const total = rental.venuePrice + food + waiterCost + addonTotal + effectiveBarTotal;
 
   const includedText = "Prisen inkluderer dekketøy, hvite duker, hvite papirservietter (Dunilin), kaffe og te og rengjøring av lokalene. Leier kan ta med egne kaker inkludert i prisen.";
   const termsText = `Bodøgaard – kunst & kultur er et privat kulturhus og visningssted for kunst og kulturarv. Stedet viser verker fra Bodøgaardsamlingen, som innehar Nord-Norges største private samling av kunst og kulturgjenstander, i tillegg til temporære utstillinger gjennom året fra nasjonale og internasjonale kunstnere. Bodøgaard har også konserter og andre kulturarrangementer, samt aktiviteter gjennom grafikkverkstedet Den Frie Presse.
@@ -11604,6 +11611,18 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
     updateListRpc("barTallyEntries", { [last.id]: { ...last, deletedAt: new Date().toISOString() } });
   }
 
+  // Fryser (eller løser opp) bar-summens bidrag til totalprisen. Selve
+  // registreringen (griden/+1/-1) fortsetter å fungere som normalt etter
+  // låsing - kun hvilket tall som telles inn i totalprisen fryses.
+  function toggleBarLock() {
+    if (!rental.id) return;
+    const updated: RentalOffer = rental.barLocked
+      ? { ...rental, barLocked: false }
+      : { ...rental, barLocked: true, barLockedTotal: barTotal, barLockedAt: new Date().toISOString() };
+    updateListRpc("rentalOffers", { [rental.id]: updated });
+    setRental(updated);
+  }
+
   const adhocBarResults = (() => {
     const q = adhocBarSearch.trim().toLowerCase();
     if (!q) return [];
@@ -11768,7 +11787,23 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
                   </span>
                 </div>
               ))}
-              <p style={{ marginTop: 12, fontSize: 16 }}>Totalt: <b>{currency(barTotal)}</b></p>
+              <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <p style={{ margin: 0, fontSize: 16 }}>Totalt: <b>{currency(barTotal)}</b></p>
+                <button
+                  className={rental.barLocked ? "btn active" : "btn"}
+                  style={rental.barLocked && !readOnly ? { background: "#16a34a", borderColor: "#16a34a", color: "white" } : undefined}
+                  disabled={readOnly}
+                  title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                  onClick={toggleBarLock}
+                >
+                  {rental.barLocked ? "🔓 Lås opp" : "🔒 Lås kasseregning"}
+                </button>
+              </div>
+              {rental.barLocked && (
+                <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                  🔒 Låst {rental.barLockedAt ? formatDateNo(rental.barLockedAt.slice(0, 10)) : ""} {rental.barLockedAt ? new Date(rental.barLockedAt).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" }) : ""} - {currency(rental.barLockedTotal || 0)} teller inn i totalprisen. Nye registreringer etter låsing påvirker ikke totalsummen.
+                </p>
+              )}
             </div>
           )}
         </>
@@ -11845,8 +11880,8 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPacki
     const venueRow = rental.venuePrice > 0
       ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
       : "";
-    const barRow = barTotal > 0
-      ? `<tr><td>Bar/servering</td><td></td><td></td><td style="text-align:right"><b>${currency(barTotal)}</b></td></tr>`
+    const barRow = effectiveBarTotal > 0
+      ? `<tr><td>Bar/servering</td><td></td><td></td><td style="text-align:right"><b>${currency(effectiveBarTotal)}</b></td></tr>`
       : "";
     const recipePagesHtml = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
@@ -12973,7 +13008,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
             <p>Mat/produkter: <b>{currency(food)}</b></p>
             <p>Servitører: <b>{currency(waiterCost)}</b></p>
             <p>Tillegg: <b>{currency(addonTotal)}</b></p>
-            {barTotal > 0 && <p>Bar/servering: <b>{currency(barTotal)}</b></p>}
+            {effectiveBarTotal > 0 && <p>Bar/servering: <b>{currency(effectiveBarTotal)}</b></p>}
             {addonLines.length > 0 && (
               <table>
                 <thead><tr><th>Tillegg</th><th>Antall</th><th>Pris</th></tr></thead>
