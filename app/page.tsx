@@ -5955,17 +5955,17 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                 <option value="storkjokken">Storkjøkken</option>
               </select>
             </label>
+                        <label>Tid<input value={form.time} disabled={readOnly} onChange={(e) => setForm({ ...form, time: e.target.value })} onBlur={(e) => setForm({ ...form, time: formatTimeInput(e.target.value) })} placeholder="f.eks. 1015" /></label>
+            <label>Dato<input type="date" value={form.date} disabled={readOnly} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
             <label>Kundetype
               <select value={form.customerType} disabled={readOnly} onChange={(e) => setForm({ ...form, customerType: e.target.value as Order["customerType"] })}>
                 <option value="privat">Privat</option><option value="bedrift">Bedrift</option><option value="storkjokken">Storkjøkken</option>
               </select>
             </label>
-            <label>Dato<input type="date" value={form.date} disabled={readOnly} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-            <label>Tid<input value={form.time} disabled={readOnly} onChange={(e) => setForm({ ...form, time: e.target.value })} onBlur={(e) => setForm({ ...form, time: formatTimeInput(e.target.value) })} placeholder="f.eks. 1015" /></label>
           </div>
           {form.customerType === "bedrift" || form.customerType === "storkjokken" ? (
             <div className="form-grid four">
-              <label>Bedriftsnavn<input value={form.companyName || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, companyName: e.target.value })} /></label>
+                            <label>Bedriftsnavn<input value={form.companyName || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, companyName: e.target.value })} style={{ background: "#f0fdf4" }} /></label>
               <label>Orgnr<input value={form.orgNumber || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} /></label>
               <label>Bedriftsadresse<input value={form.companyAddress || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, companyAddress: e.target.value })} /></label>
               <label>Kontaktperson
@@ -5983,7 +5983,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
             </div>
           ) : (
             <div className="form-grid four">
-              <label>Kundenavn
+                            <label>Kundenavn
                 <div className="search-picker">
                   <input
                     value={form.customer}
@@ -5992,6 +5992,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                     onFocus={() => setCustomerSuggestOpen(true)}
                     onBlur={() => { setCustomerSuggestOpen(false); applyExactCustomerMatchOnBlur(); }}
                     placeholder="Kunde"
+                    style={{ background: "#f0fdf4" }}
                   />
                   <CustomerAutofillDropdown />
                 </div>
