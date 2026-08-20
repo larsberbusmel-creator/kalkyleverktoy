@@ -5245,11 +5245,11 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   // Kundebibliotek: bygges automatisk opp av hver ordre-lagring, ingen egen
   // admin-side. Match på navn (case-insensitive, trimmet) - nyeste ordre
   // vinner og oppdaterer den lagrede oppføringen.
-  function upsertCustomerDirectoryEntry(order: Order) {
+  function buildCustomerDirectoryEntry(order: Order, existingList: CustomerDirectoryEntry[]): CustomerDirectoryEntry | null {
     const name = order.customer.trim();
-    if (!name) return;
-    const existing = (data.customerDirectory || []).find((c) => c.name.trim().toLowerCase() === name.toLowerCase());
-    const entry: CustomerDirectoryEntry = {
+    if (!name) return null;
+    const existing = existingList.find((c) => c.name.trim().toLowerCase() === name.toLowerCase());
+    return {
       id: existing?.id || `cust-${idFromName(name)}-${Date.now()}`,
       name,
       phone: order.phone || undefined,
@@ -5260,7 +5260,31 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
       customerType: order.customerType,
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  function upsertCustomerDirectoryEntry(order: Order) {
+    const entry = buildCustomerDirectoryEntry(order, data.customerDirectory || []);
+    if (!entry) return;
     updateListRpc("customerDirectory", { [entry.id]: entry });
+  }
+
+  // Engangsverktøy: bakoverfyller kundebiblioteket fra ALLE eksisterende ordre
+  // (biblioteket bygges ellers kun fremover via upsertCustomerDirectoryEntry i
+  // saveOrder). Bygger hele lista lokalt og skriver den med ÉN updateData,
+  // i stedet for ett updateListRpc-kall per historisk ordre.
+  function backfillCustomerDirectory() {
+    const relevantOrders = data.orders
+      .filter((o) => !o.deletedAt && o.customer.trim())
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    let list = [...(data.customerDirectory || [])];
+    relevantOrders.forEach((order) => {
+      const entry = buildCustomerDirectoryEntry(order, list);
+      if (!entry) return;
+      const idx = list.findIndex((c) => c.id === entry.id);
+      list = idx >= 0 ? list.map((c, i) => (i === idx ? entry : c)) : [...list, entry];
+    });
+    updateData({ customerDirectory: list });
+    alert(`Kundebibliotek oppdatert: ${list.length} kunder funnet fra ${relevantOrders.length} ordre.`);
   }
 
   function editOrder(order: Order) {
@@ -5889,6 +5913,9 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           </button>
           <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { if (showNewOrder) { setShowNewOrder(false); } else { startNewOrder(); } setShowWebshopImport(false); }}>
             {showNewOrder ? "Skjul skjema" : "Ny ordre"}
+          </button>
+          <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={backfillCustomerDirectory}>
+            Bygg kundebibliotek fra eksisterende ordre
           </button>
         </div>
       </div>
