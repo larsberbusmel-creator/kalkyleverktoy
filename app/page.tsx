@@ -238,6 +238,7 @@ type RentalOffer = {
   barLocked?: boolean;
   barLockedTotal?: number; // "frosset" barTotal på låsetidspunktet
   barLockedAt?: string;
+  packingListChecked?: Record<string, boolean>;
 };
 
 type Venue = { id: string; name: string; price: number; roomIds?: string[] };
@@ -678,18 +679,18 @@ function escapeHtml(value: string) {
 // Delt hjelpefunksjon for å bygge sjekklisteseksjonen fra valgte pakkelistemaler,
 // brukt av print-funksjonene for både Leie av lokale og Ordre. Selvstendige inline-
 // stiler, siden funksjonen limes inn i forskjellige print-vinduer med ulike <style>.
-function packingListTemplatesHtml(templates: PackingListTemplate[], selectedIds: string[] | undefined, extraItems?: string[]): string {
+function packingListTemplatesHtml(templates: PackingListTemplate[], selectedIds: string[] | undefined, extraItems?: string[], isChecked?: (id: string) => boolean): string {
   const selected = templates.filter((t) => (selectedIds || []).includes(t.id));
   const extras = (extraItems || []).filter(Boolean);
   if (!selected.length && !extras.length) return "";
   const blocks = selected.map((t) => {
     const rows = t.items.length
-      ? t.items.map((item) => `<div style="padding:3px 0">☐ ${escapeHtml(item.label)}</div>`).join("")
+      ? t.items.map((item) => `<div style="padding:3px 0">${isChecked?.(`template:${item.id}`) ? "☑" : "☐"} ${escapeHtml(item.label)}</div>`).join("")
       : `<div style="color:#94a3b8">Ingen punkter i denne malen.</div>`;
     return `<div style="margin:10px 0"><h3 style="margin:0 0 4px">${escapeHtml(t.name)}</h3>${rows}</div>`;
   }).join("");
   const extraBlock = extras.length
-    ? `<div style="margin:10px 0"><h3 style="margin:0 0 4px">Andre punkter</h3>${extras.map((label) => `<div style="padding:3px 0">☐ ${escapeHtml(label)}</div>`).join("")}</div>`
+    ? `<div style="margin:10px 0"><h3 style="margin:0 0 4px">Andre punkter</h3>${extras.map((label) => `<div style="padding:3px 0">${isChecked?.(`extra:${label}`) ? "☑" : "☐"} ${escapeHtml(label)}</div>`).join("")}</div>`
     : "";
   return `<h2 style="margin:18px 0 4px">Sjekkliste</h2>${blocks}${extraBlock}`;
 }
@@ -11710,7 +11711,11 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
     return `<div class="print-guest">${pages}</div>`;
   }
 
-  function packingListRows(): { name: string; unit: string; qty: number }[] {
+  // Hver rad får en stabil id prefikset med kilden ("custom:"/"cover:"/"addon:"),
+  // slik at avkrysning (packingListChecked) kan knyttes til nøyaktig én rad -
+  // derfor slås IKKE lenger tillegg-pakkepunkter med likt navn sammen på tvers
+  // av ulike tillegg (hver RentalAddonPackingItem beholder sin egen rad/id).
+  function packingListRows(): { id: string; name: string; unit: string; qty: number }[] {
     const guests = rental.guestCount || 0;
     const courses = rental.courseCount || 1;
     const tablesAll = rental.floorPlanTables || [];
@@ -11727,20 +11732,48 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
         if (item.rule === "per_person") qty = guests * item.qtyPerUnit;
         if (item.rule === "per_person_per_course") qty = guests * courses * item.qtyPerUnit;
         if (item.rule === "per_table") qty = tableCountForShape(item.tableShape) * item.qtyPerUnit;
-        return { name: item.name, unit: item.unit, qty: Math.ceil(qty) };
+        return { id: `cover:${item.id}`, name: item.name, unit: item.unit, qty: Math.ceil(qty) };
       });
-    const selectedAddonNames = new Set((rental.extraLines || []).map((l) => l.text));
-    const addonRowsMap: Record<string, { name: string; unit: string; qty: number }> = {};
+    const addonLinesForPacking = rental.extraLines || [];
+    const addonRows: { id: string; name: string; unit: string; qty: number }[] = [];
     (data.rentalAddons || []).forEach((addon) => {
-      if (!selectedAddonNames.has(addon.name)) return;
+      const line = addonLinesForPacking.find((l) => l.text === addon.name);
+      if (!line) return;
+      // For antalls-baserte tillegg (perUnit) skal pakkelisten skalere med det
+      // faktisk VALGTE antallet (f.eks. 55 av 80 gjester valgte tøyservietter),
+      // ikke bare telle varen én gang uansett hvor mange som er valgt.
+      const multiplier = line.quantity && line.quantity > 0 ? line.quantity : 1;
       (addon.packingItems || []).forEach((pi) => {
-        const key = `${pi.name}__${pi.unit}`;
-        if (!addonRowsMap[key]) addonRowsMap[key] = { name: pi.name, unit: pi.unit, qty: 0 };
-        addonRowsMap[key].qty += pi.qty;
+        addonRows.push({ id: `addon:${pi.id}`, name: pi.name, unit: pi.unit, qty: pi.qty * multiplier });
       });
     });
-    const customRows = (rental.customPackingItems || []).map((c) => ({ name: c.name, unit: c.unit, qty: c.qty }));
-    return [...customRows, ...coverRows, ...Object.values(addonRowsMap)];
+    const customRows = (rental.customPackingItems || []).map((c) => ({ id: `custom:${c.id}`, name: c.name, unit: c.unit, qty: c.qty }));
+    return [...customRows, ...coverRows, ...addonRows];
+  }
+
+  // Slår sammen ALLE fire kilder (auto-beregnede/tillegg/egne artikler fra
+  // packingListRows, valgte pakkelistemaler, og frittstående fritekst-punkter)
+  // til ÉN flat, avkrysningsbar liste. extraPackingListItems har ingen egen id
+  // (lagret som string[] - IKKE endret her, se migrateData-passthrough), så vi
+  // bruker selve teksten som nøkkel (prefikset "extra:") - eneste praktiske
+  // konsekvens er at to identiske fritekst-linjer på SAMME utleie ville delt
+  // avkrysningsstatus, en akseptabel avveining fremfor å migrere datamodellen.
+  function packingChecklistRows(): { id: string; label: string }[] {
+    const rows = packingListRows().map((r) => ({ id: r.id, label: `${r.name} · ${r.qty} ${r.unit}` }));
+    (data.packingListTemplates || [])
+      .filter((t) => (rental.selectedPackingListTemplateIds || []).includes(t.id))
+      .forEach((t) => t.items.forEach((item) => rows.push({ id: `template:${item.id}`, label: item.label })));
+    (rental.extraPackingListItems || []).forEach((label) => rows.push({ id: `extra:${label}`, label }));
+    return rows;
+  }
+
+  function togglePackingListChecked(id: string) {
+    if (!rental.id) return;
+    const next = { ...(rental.packingListChecked || {}) };
+    next[id] = !next[id];
+    const updated: RentalOffer = { ...rental, packingListChecked: next };
+    setRental(updated);
+    updateListRpc("rentalOffers", { [rental.id]: updated });
   }
 
   const [customPackingForm, setCustomPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
@@ -12051,13 +12084,14 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
   }
 
   function printPackingList(): string {
+    const isChecked = (id: string) => !!(rental.packingListChecked || {})[id];
     const rows = packingListRows();
-    const rowsHtml = rows.map((r) => `<tr><td>${escapeHtml(r.name)}</td><td class="right">${r.qty} ${escapeHtml(r.unit)}</td></tr>`).join("");
+    const rowsHtml = rows.map((r) => `<tr><td>${isChecked(r.id) ? "☑" : "☐"} ${escapeHtml(r.name)}</td><td class="right">${r.qty} ${escapeHtml(r.unit)}</td></tr>`).join("");
     return `<div class="print-packing">
 <h1>Pakkeliste</h1>
 <p>${escapeHtml(rental.customer)} · ${rental.guestCount || 0} gjester · ${rental.courseCount || 1} retter · ${rental.mealType === "buffet" ? "Buffet" : "Flere retter"}</p>
 <table><thead><tr><th>Artikkel</th><th class="right">Antall</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPackingListTemplateIds, rental.extraPackingListItems)}
+${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPackingListTemplateIds, rental.extraPackingListItems, isChecked)}
 </div>`;
   }
 
@@ -12797,7 +12831,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                         {(data.packingListTemplates || []).filter((t) => (rental.selectedPackingListTemplateIds || []).includes(t.id)).map((t) => (
                           <div key={t.id} style={{ marginBottom: 8 }}>
                             <b>{t.name}</b>
-                            {t.items.map((item) => <div key={item.id} style={{ fontSize: 13 }}>☐ {item.label}</div>)}
+                            {t.items.map((item) => <div key={item.id} style={{ fontSize: 13 }}>• {item.label}</div>)}
                           </div>
                         ))}
                       </div>
@@ -12805,32 +12839,59 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                     <h4 style={{ marginTop: 12, marginBottom: 4 }}>Ekstra punkter (kun for denne utleien)</h4>
                     {(rental.extraPackingListItems || []).map((label, i) => (
                       <div key={i} className="editable-row">
-                        <span>☐ {label}</span>
+                        <span>{label}</span>
                         <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeExtraPackingListItem(i)}>Slett</button>
                       </div>
                     ))}
                     <div className="form-grid two" style={{ marginTop: 8 }}>
-                      <input placeholder="F.eks. Ekstra kull" value={newExtraPackingItem} disabled={readOnly} onChange={(e) => setNewExtraPackingItem(e.target.value)} />
+                      <input
+                        placeholder="F.eks. Ekstra kull"
+                        value={newExtraPackingItem}
+                        disabled={readOnly}
+                        onChange={(e) => setNewExtraPackingItem(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            addExtraPackingListItem();
+                          }
+                        }}
+                      />
                       <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addExtraPackingListItem}>Legg til</button>
                     </div>
                   </div>
                 )}
 
-                {(data.coverItems || []).length === 0 && !(rental.customPackingItems || []).length && !(rental.selectedPackingListTemplateIds || []).length ? (
-                  <p className="muted">Ingen kuvertartikler definert ennå – gå til Innstillinger → Rombibliotek → Kuvertartikler for å legge dem inn.</p>
-                ) : (
-                  <>
-                    <table style={{ marginTop: 12 }}>
-                      <thead><tr><th>Artikkel</th><th style={{ textAlign: "right" }}>Antall</th></tr></thead>
-                      <tbody>
-                        {packingListRows().map((r, i) => (
-                          <tr key={i}><td>{r.name}</td><td style={{ textAlign: "right" }}>{r.qty} {r.unit}</td></tr>
+                {(() => {
+                  const checklistRows = packingChecklistRows();
+                  const checkedMap = rental.packingListChecked || {};
+                  const checkedCount = checklistRows.filter((r) => checkedMap[r.id]).length;
+                  if (!checklistRows.length) {
+                    return <p className="muted">Ingen kuvertartikler definert ennå – gå til Innstillinger → Rombibliotek → Kuvertartikler for å legge dem inn.</p>;
+                  }
+                  return (
+                    <>
+                      <div className="between" style={{ marginTop: 16 }}>
+                        <h3 style={{ margin: 0 }}>Sjekkliste</h3>
+                        <span className="muted">{checkedCount} av {checklistRows.length} huket av</span>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        {checklistRows.map((r) => (
+                          <div key={r.id} className="editable-row">
+                            <label className="check">
+                              <input
+                                type="checkbox"
+                                checked={!!checkedMap[r.id]}
+                                disabled={readOnly || !rental.id}
+                                onChange={() => togglePackingListChecked(r.id)}
+                              />
+                              {r.label}
+                            </label>
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
-                    <button className="btn" style={{ marginTop: 12 }} onClick={printPackingList}>Skriv ut pakkeliste</button>
-                  </>
-                )}
+                      </div>
+                    </>
+                  );
+                })()}
               </>
             )}
 
