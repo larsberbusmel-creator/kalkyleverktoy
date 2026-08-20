@@ -985,6 +985,39 @@ export default function Page() {
   const [wantsNewOrder, setWantsNewOrder] = useState(false);
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
+
+  // Nettleser-historikk på fane-nivå: hvert fanebytte (setTab) skal kunne
+  // navigeres med nettleserens Tilbake/Frem-knapper (og Android sin
+  // maskinvare-/gesture-tilbakeknapp, som trigger samme popstate-hendelse).
+  // Dekker KUN hovedfaner - underliggende tilstander (f.eks. en spesifikk
+  // ordre/utleietilbud åpent for redigering inni en fane) får ikke sin egen
+  // historikk-tilstand her.
+  const isPopStateRef = React.useRef(false);
+  const isFirstTabEffectRef = React.useRef(true);
+
+  useEffect(() => {
+    if (isFirstTabEffectRef.current) {
+      isFirstTabEffectRef.current = false;
+      window.history.replaceState({ tab }, "", `#${tab}`);
+      return;
+    }
+    if (isPopStateRef.current) {
+      isPopStateRef.current = false;
+      return;
+    }
+    window.history.pushState({ tab }, "", `#${tab}`);
+  }, [tab]);
+
+  useEffect(() => {
+    function onPopState(e: PopStateEvent) {
+      const nextTab = (e.state?.tab as Tab | undefined) || (window.location.hash.slice(1) as Tab);
+      if (!nextTab) return;
+      isPopStateRef.current = true;
+      setTab(nextTab);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [userEmail, setUserEmail] = useState<string>("");
   const [darkMode, setDarkMode] = useState<boolean | null>(null);
@@ -5268,25 +5301,6 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     updateListRpc("customerDirectory", { [entry.id]: entry });
   }
 
-  // Engangsverktøy: bakoverfyller kundebiblioteket fra ALLE eksisterende ordre
-  // (biblioteket bygges ellers kun fremover via upsertCustomerDirectoryEntry i
-  // saveOrder). Bygger hele lista lokalt og skriver den med ÉN updateData,
-  // i stedet for ett updateListRpc-kall per historisk ordre.
-  function backfillCustomerDirectory() {
-    const relevantOrders = data.orders
-      .filter((o) => !o.deletedAt && o.customer.trim())
-      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    let list = [...(data.customerDirectory || [])];
-    relevantOrders.forEach((order) => {
-      const entry = buildCustomerDirectoryEntry(order, list);
-      if (!entry) return;
-      const idx = list.findIndex((c) => c.id === entry.id);
-      list = idx >= 0 ? list.map((c, i) => (i === idx ? entry : c)) : [...list, entry];
-    });
-    updateData({ customerDirectory: list });
-    alert(`Kundebibliotek oppdatert: ${list.length} kunder funnet fra ${relevantOrders.length} ordre.`);
-  }
-
   function editOrder(order: Order) {
     if (order.id.startsWith("rental-order-")) {
       setRentalOfferToOpen(order.id.replace("rental-order-", ""));
@@ -5914,9 +5928,6 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { if (showNewOrder) { setShowNewOrder(false); } else { startNewOrder(); } setShowWebshopImport(false); }}>
             {showNewOrder ? "Skjul skjema" : "Ny ordre"}
           </button>
-          <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={backfillCustomerDirectory}>
-            Bygg kundebibliotek fra eksisterende ordre
-          </button>
         </div>
       </div>
 
@@ -5972,7 +5983,21 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
 
       {showNewOrder && (
         <div className="soft-box full-width">
-          <h3>{editingOrderId ? "Rediger ordre" : "Ny ordre"}</h3>
+          <div className="between">
+            <h3>{editingOrderId ? "Rediger ordre" : "Ny ordre"}</h3>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn" onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt</button>
+              <button
+                className="btn active"
+                style={{ background: "#16a34a", borderColor: "#16a34a", color: "white" }}
+                disabled={readOnly}
+                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                onClick={saveOrder}
+              >
+                Lagre
+              </button>
+            </div>
+          </div>
           <div className="form-grid four">
             <label>Ordrenr<input value={form.orderNumber || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, orderNumber: e.target.value })} placeholder="F.eks. 686488" /></label>
             <label>Ordretype
@@ -6233,8 +6258,6 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
             <Metric label="Sum inkl. mva" value={currency(orderTotalIncVat(form))} dark />
             <Metric label="Sum eks. mva" value={currency(exVatFromIncVat(orderTotalIncVat(form), data.settings.foodVat))} />
           </div>
-          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveOrder}>{editingOrderId ? "Lagre endringer" : "Lagre ordre"}</button>
-          {editingOrderId && <button className="btn" style={{ marginLeft: 8 }} onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt redigering</button>}
         </div>
       )}
 
