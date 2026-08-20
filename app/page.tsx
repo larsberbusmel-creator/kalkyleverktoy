@@ -129,6 +129,7 @@ type Order = {
   companyName?: string;
   orgNumber?: string;
   companyAddress?: string;
+  reference?: string;
   phone: string;
   deliveryAddress: string;
   date: string;
@@ -156,6 +157,21 @@ note?: string;
   createdBy?: string;
   createdAt?: string;
   editLog?: { by: string; at: string }[];
+};
+
+// Bygges automatisk opp fra order.customer ved hver ordre-lagring (se saveOrder
+// i OrdersTab) - ingen egen admin-side. Brukes til autofyll når samme kundenavn
+// skrives inn på nytt ved opprettelse av en NY ordre.
+type CustomerDirectoryEntry = {
+  id: string;
+  name: string; // lagres normalisert (trim), men vis/match case-insensitivt
+  phone?: string;
+  deliveryAddress?: string;
+  companyName?: string;
+  orgNumber?: string;
+  companyAddress?: string;
+  customerType?: "privat" | "bedrift" | "storkjokken";
+  updatedAt: string;
 };
 
 type RentalExtraLine = { text: string; amount: number; quantity?: number; unitPrice?: number };
@@ -504,6 +520,7 @@ type AppData = {
   reportSnapshots: ReportSnapshot[];
   barTemplates: BarTemplate[];
   barTallyEntries: BarTallyEntry[];
+  customerDirectory: CustomerDirectoryEntry[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
 };
@@ -804,6 +821,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   reportSnapshots: [],
   barTemplates: [],
   barTallyEntries: [],
+  customerDirectory: [],
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
@@ -916,6 +934,8 @@ barTemplates:
 
 barTallyEntries:
   (raw as any).barTallyEntries || [],
+  customerDirectory:
+    (raw as any).customerDirectory || [],
   seenOrderIds: (() => {
   const legacyDates: string[] = (raw as any).seenOrderDates || [];
   const existing: string[] = (raw as any).seenOrderIds || [];
@@ -961,6 +981,8 @@ export default function Page() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [rentalOfferToOpen, setRentalOfferToOpen] = useState<string | null>(null);
   const [orderToOpen, setOrderToOpen] = useState<string | null>(null);
+  const [productionDateToOpen, setProductionDateToOpen] = useState<string | null>(null);
+  const [wantsNewOrder, setWantsNewOrder] = useState(false);
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -1289,7 +1311,7 @@ export default function Page() {
     });
   }, []);
 
-  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries", itemsPatch: Record<string, any>) => {
+  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries" | "customerDirectory", itemsPatch: Record<string, any>) => {
     setData((prev) => {
       const list = (prev as any)[listKey] as any[];
       const next = { ...prev } as any;
@@ -1551,12 +1573,12 @@ return (
       {/* ── INNHOLD ── */}
       <div className="main-content">
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
-        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} />}
+        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
-        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} readOnly={!canEdit("production")} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
         {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
@@ -1686,11 +1708,15 @@ function CalendarDashboard({
   updateData,
   setTab,
   setOrderToOpen,
+  setProductionDateToOpen,
+  setWantsNewOrder,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   setTab: (tab: Tab) => void;
   setOrderToOpen: (id: string | null) => void;
+  setProductionDateToOpen: (date: string | null) => void;
+  setWantsNewOrder: (v: boolean) => void;
 }) {
   const todayDate = today();
   const [view, setView] = useState<"month" | "day">("month");
@@ -1794,7 +1820,6 @@ function CalendarDashboard({
 
   const selectedOrders = dayOrders(selectedDate);
   const selectedNotes = dayNotes(selectedDate);
-  const selectedProduction = data.bakeryProductionDays?.[selectedDate];
 
   function handleDayClick(date: string) {
     setSelectedDate(date);
@@ -1996,13 +2021,16 @@ const bg = isToday ? "#dcfce7"
             <div className="grid two">
               <div className="soft-box">
                 <h3>Produksjon</h3>
-                {selectedProduction
-                  ? <button className="btn active" onClick={() => setTab("production")}>Åpne dagens produksjon</button>
-                  : <p style={{ color: "#64748b" }}>Ingen produksjonsordre registrert denne dagen.</p>}
+                <button className="btn active" onClick={() => { setProductionDateToOpen(selectedDate); setTab("production"); }}>
+                  Gå til produksjon for {formatDateNo(selectedDate)}
+                </button>
               </div>
 
               <div className="soft-box">
-                <h3>Ordre</h3>
+                <div className="between">
+                  <h3>Ordre</h3>
+                  <button className="btn active" onClick={() => { setWantsNewOrder(true); setTab("orders"); }}>+ Ny ordre</button>
+                </div>
                 {selectedOrders.length ? (
                   <table>
                     <tbody>
@@ -4918,8 +4946,8 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, pendingOrderId, clearPendingOrderId, readOnly, userEmail, isSuperadmin }: {
-  updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers", itemsPatch: Record<string, any>) => void;
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin }: {
+  updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "customerDirectory", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productAllergens: (p: Product, visited?: string[]) => string[];
@@ -4928,6 +4956,8 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   setRentalOfferToOpen: (id: string | null) => void;
   pendingOrderId?: string | null;
   clearPendingOrderId?: () => void;
+  pendingNewOrder?: boolean;
+  clearPendingNewOrder?: () => void;
   readOnly: boolean;
   userEmail: string;
   isSuperadmin: boolean;
@@ -4947,6 +4977,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
 
   const [form, setForm] = useState<Order>(emptyOrder());
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [customerSuggestOpen, setCustomerSuggestOpen] = useState(false);
   const [lineToAdd, setLineToAdd] = useState({ productId: "", quantity: 1 });
   const [addProductSearch, setAddProductSearch] = useState("");
   const [menuSelectionDraft, setMenuSelectionDraft] = useState<Record<string, { productId: string; guestCount: number }[]>>({});
@@ -5207,7 +5238,29 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
       savedOrder.editLog = [];
     }
     updateListRpc("orders", { [savedOrder.id]: savedOrder });
+    upsertCustomerDirectoryEntry(savedOrder);
     setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false);
+  }
+
+  // Kundebibliotek: bygges automatisk opp av hver ordre-lagring, ingen egen
+  // admin-side. Match på navn (case-insensitive, trimmet) - nyeste ordre
+  // vinner og oppdaterer den lagrede oppføringen.
+  function upsertCustomerDirectoryEntry(order: Order) {
+    const name = order.customer.trim();
+    if (!name) return;
+    const existing = (data.customerDirectory || []).find((c) => c.name.trim().toLowerCase() === name.toLowerCase());
+    const entry: CustomerDirectoryEntry = {
+      id: existing?.id || `cust-${idFromName(name)}-${Date.now()}`,
+      name,
+      phone: order.phone || undefined,
+      deliveryAddress: order.deliveryAddress || undefined,
+      companyName: order.companyName || undefined,
+      orgNumber: order.orgNumber || undefined,
+      companyAddress: order.companyAddress || undefined,
+      customerType: order.customerType,
+      updatedAt: new Date().toISOString(),
+    };
+    updateListRpc("customerDirectory", { [entry.id]: entry });
   }
 
   function editOrder(order: Order) {
@@ -5229,6 +5282,65 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     if (order) editOrder(order);
     clearPendingOrderId?.();
   }, [pendingOrderId]);
+
+  function startNewOrder() {
+    setForm(emptyOrder());
+    setEditingOrderId(null);
+    setShowNewOrder(true);
+    setLineToAdd({ productId: "", quantity: 1 });
+  }
+
+  // Autofyll fra kundebiblioteket - kun ved opprettelse av NY ordre, og kun
+  // inn i felt som står tomme fra før (overskriver aldri noe brukeren
+  // allerede har skrevet inn manuelt for denne spesifikke ordren).
+  function applyCustomerDirectoryEntry(entry: CustomerDirectoryEntry) {
+    setForm((f) => ({
+      ...f,
+      customer: entry.name,
+      phone: f.phone ? f.phone : entry.phone || f.phone,
+      deliveryAddress: f.deliveryAddress ? f.deliveryAddress : entry.deliveryAddress || f.deliveryAddress,
+      companyName: f.companyName ? f.companyName : entry.companyName,
+      orgNumber: f.orgNumber ? f.orgNumber : entry.orgNumber,
+      companyAddress: f.companyAddress ? f.companyAddress : entry.companyAddress,
+      customerType: f.customerType === "privat" && entry.customerType ? entry.customerType : f.customerType,
+    }));
+  }
+
+  function applyExactCustomerMatchOnBlur() {
+    if (editingOrderId) return;
+    const exact = (data.customerDirectory || []).find((c) => c.name.toLowerCase() === form.customer.trim().toLowerCase());
+    if (exact) applyCustomerDirectoryEntry(exact);
+  }
+
+  const customerDirectoryMatches = (!editingOrderId && customerSuggestOpen && form.customer.trim())
+    ? (data.customerDirectory || []).filter((c) => c.name.toLowerCase().includes(form.customer.trim().toLowerCase())).slice(0, 8)
+    : [];
+
+  function CustomerAutofillDropdown() {
+    if (!customerDirectoryMatches.length) return null;
+    return (
+      <div className="search-dropdown inline">
+        {customerDirectoryMatches.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            className="search-result"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { applyCustomerDirectoryEntry(c); setCustomerSuggestOpen(false); }}
+          >
+            <b>{c.name}</b>
+            <small>{c.companyName || c.phone || c.deliveryAddress || ""}</small>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  useEffect(() => {
+    if (!pendingNewOrder) return;
+    startNewOrder();
+    clearPendingNewOrder?.();
+  }, [pendingNewOrder]);
 
   function softDeleteOrder(id: string) {
     if (!confirm("Flytte ordren til papirkurv?")) return;
@@ -5556,7 +5668,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
       ? `<div class="page-break"></div>${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackingListTemplateIds, order.extraPackingListItems)}`
       : "";
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${packingListSection}</body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.reference ? `<p>Referanse: ${escapeHtml(order.reference)}</p>` : ""}${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${packingListSection}</body></html>`);
     w.document.close(); w.focus();
   }
 
@@ -5775,7 +5887,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
           }}>
             📅 Kopier kalender-URL
           </button>
-          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { setShowNewOrder(!showNewOrder); setShowWebshopImport(false); }}>
+          <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { if (showNewOrder) { setShowNewOrder(false); } else { startNewOrder(); } setShowWebshopImport(false); }}>
             {showNewOrder ? "Skjul skjema" : "Ny ordre"}
           </button>
         </div>
@@ -5856,17 +5968,41 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
               <label>Bedriftsnavn<input value={form.companyName || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, companyName: e.target.value })} /></label>
               <label>Orgnr<input value={form.orgNumber || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, orgNumber: e.target.value })} /></label>
               <label>Bedriftsadresse<input value={form.companyAddress || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, companyAddress: e.target.value })} /></label>
-              <label>Kontaktperson<input value={form.customer} disabled={readOnly} onChange={(e) => setForm({ ...form, customer: e.target.value })} /></label>
+              <label>Kontaktperson
+                <div className="search-picker">
+                  <input
+                    value={form.customer}
+                    disabled={readOnly}
+                    onChange={(e) => { setForm({ ...form, customer: e.target.value }); setCustomerSuggestOpen(true); }}
+                    onFocus={() => setCustomerSuggestOpen(true)}
+                    onBlur={() => { setCustomerSuggestOpen(false); applyExactCustomerMatchOnBlur(); }}
+                  />
+                  <CustomerAutofillDropdown />
+                </div>
+              </label>
             </div>
           ) : (
             <div className="form-grid four">
-              <label>Kundenavn<input value={form.customer} disabled={readOnly} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Kunde" /></label>
+              <label>Kundenavn
+                <div className="search-picker">
+                  <input
+                    value={form.customer}
+                    disabled={readOnly}
+                    onChange={(e) => { setForm({ ...form, customer: e.target.value }); setCustomerSuggestOpen(true); }}
+                    onFocus={() => setCustomerSuggestOpen(true)}
+                    onBlur={() => { setCustomerSuggestOpen(false); applyExactCustomerMatchOnBlur(); }}
+                    placeholder="Kunde"
+                  />
+                  <CustomerAutofillDropdown />
+                </div>
+              </label>
             </div>
           )}
           <div className="form-grid four">
             <label>Telefon<input value={form.phone} disabled={readOnly} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
             <label>Leveringsadresse<input value={form.deliveryAddress} disabled={readOnly} onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })} /></label>
             <label>Betalingsinfo<input value={form.paymentInfo || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, paymentInfo: e.target.value })} placeholder="F.eks. Betalt på nett" /></label>
+            <label>Referanse<input value={form.reference || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="F.eks. rekvisisjonsnr" /></label>
             <label style={{ gridColumn: "1 / -1" }}>Notat
               <textarea className="textarea" value={form.note || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Fritekst, beskjed, info osv." />
             </label>
@@ -6231,6 +6367,7 @@ prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div clas
                     <p><b>Telefon:</b> {o.phone || "-"}</p>
                     <p><b>Levering:</b> {o.deliveryAddress || "-"}</p>
                     <p><b>Betaling:</b> {o.paymentInfo || "-"}</p>
+                    {o.reference && <p><b>Referanse:</b> {o.reference}</p>}
                     {o.note && <p style={{ whiteSpace: "pre-wrap" }}><b>Notat:</b><br />{o.note}</p>}
                   </div>
                   <div>
@@ -6355,11 +6492,15 @@ function ProductionTab({
   data,
   updateData,
   productAllergens,
+  pendingDate,
+  clearPendingDate,
   readOnly,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productAllergens: (p: Product) => string[];
+  pendingDate?: string | null;
+  clearPendingDate?: () => void;
   readOnly: boolean;
 }) {
   const productionCategories: { id: ProductionCategory; name: string }[] = [
@@ -6370,6 +6511,12 @@ function ProductionTab({
   ];
 
   const [activeDate, setActiveDate] = useState(today());
+
+  useEffect(() => {
+    if (!pendingDate) return;
+    setActiveDate(pendingDate);
+    clearPendingDate?.();
+  }, [pendingDate]);
   const [mainPanel, setMainPanel] = useState<"bakeri" | "catering">("bakeri");
   const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice" | "stats">("day");
   const [categoryFilter, setCategoryFilter] = useState<"alle" | ProductionCategory>("alle");
@@ -11884,8 +12031,11 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPacki
     const venueRow = rental.venuePrice > 0
       ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
       : "";
+        const barSpecHtml = barGroups.length
+      ? `<br><small style="color:#64748b">${barGroups.map((g) => `${g.count} × ${escapeHtml(g.itemName)}: ${currency(g.total)}`).join("<br>")}</small>`
+      : "";
     const barRow = effectiveBarTotal > 0
-      ? `<tr><td>Bar/servering</td><td></td><td></td><td style="text-align:right"><b>${currency(effectiveBarTotal)}</b></td></tr>`
+      ? `<tr><td>Bar/servering${barSpecHtml}</td><td></td><td></td><td style="text-align:right"><b>${currency(effectiveBarTotal)}</b></td></tr>`
       : "";
     const recipePagesHtml = rental.productLines.map((l) => {
       const p = data.products.find((x) => x.id === l.productId);
@@ -12121,7 +12271,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
           <div className="card">
             <div className="between">
               <h2>{editingOfferId ? "Rediger tilbud" : "Nytt tilbud"}</h2>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {rental.rungInName && (
                   <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
                     ✓ Slått inn {formatDateNo(rental.rungInAt!.slice(0, 10))} ({rental.rungInName})
@@ -12139,6 +12289,15 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                   </button>
                 )}
                 <button className="btn" onClick={cancelEdit}>Avbryt</button>
+                <button
+                  className="btn active"
+                  style={{ background: "#16a34a", borderColor: "#16a34a", color: "white" }}
+                  disabled={readOnly}
+                  title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                  onClick={saveOffer}
+                >
+                  Lagre
+                </button>
               </div>
             </div>
 
@@ -13068,13 +13227,9 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                 </label>
               </div>
             )}
-            <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
+                        <h2 style={{ marginTop: 16 }}>Total: {currency(total)}</h2>
             <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-              <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveOffer}>
-                {editingOfferId ? "Lagre endringer" : "Lagre tilbud"}{rental.date ? " og legg i kalender" : ""}
-              </button>
               <button className="btn" onClick={printSelectedDocuments}>Skriv ut</button>
-              <button className="btn" onClick={cancelEdit}>Avbryt</button>
             </div>
           </div>
         </div>
