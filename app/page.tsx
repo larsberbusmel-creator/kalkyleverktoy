@@ -13664,9 +13664,11 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
 
   let estimatedRevenueIncVat = 0;
   let estimatedCogs = 0;
+  let estimatedStaffMealCost = 0;
   let estimatedUnits = 0;
   let actualRevenueIncVat = 0;
   let actualCogs = 0;
+  let actualStaffMealCost = 0;
   let actualUnits = 0;
 
   lines.forEach((l) => {
@@ -13674,15 +13676,18 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
     const price = priceFor(l, product);
     const cost = product ? productUnitCost(product) : 0;
     const mealQty = Number(l.staffMealQty) || 0;
+    const mealCost = cost * mealQty;
 
     const estQty = Number(l.estimatedQty) || 0;
     estimatedRevenueIncVat += price * estQty;
-    estimatedCogs += cost * (estQty + mealQty);
+    estimatedCogs += cost * estQty + mealCost;
+    estimatedStaffMealCost += mealCost;
     estimatedUnits += estQty;
 
     const actQty = Number(l.actualQty ?? l.estimatedQty) || 0;
     actualRevenueIncVat += price * actQty;
-    actualCogs += cost * (actQty + mealQty);
+    actualCogs += cost * actQty + mealCost;
+    actualStaffMealCost += mealCost;
     actualUnits += actQty;
   });
 
@@ -13702,8 +13707,8 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
   const actualProfit = actualRevenue - actualCogs - actualStaffCost - actualOtherCosts;
 
   return {
-    estimated: { revenue: estimatedRevenue, cogs: estimatedCogs, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit },
-    actual: { revenue: actualRevenue, cogs: actualCogs, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit },
+    estimated: { revenue: estimatedRevenue, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit },
+    actual: { revenue: actualRevenue, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit },
     hasActualData: (event.productLines || []).some((l) => l.actualQty != null) || hasStaffLog,
   };
 }
@@ -13984,8 +13989,10 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
                   const product = data.products.find((p) => p.id === l.productId);
                   const cost = product ? productUnitCost(product) : 0;
                   const suggested = product ? recommendedPriceIncVat(cost, Number(marginDraft[l.id] || 0)) : 0;
+                  const mealQty = Number(l.staffMealQty) || 0;
                   return (
-                    <tr key={l.id}>
+                    <React.Fragment key={l.id}>
+                    <tr>
                       <td>{product?.name || "Ukjent produkt"}</td>
                       <td style={{ textAlign: "right" }}>
                         <input type="number" style={{ width: 80, textAlign: "right" }} value={l.estimatedQty} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { estimatedQty: Number(e.target.value) || 0 })} />
@@ -14011,6 +14018,14 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
                       </td>
                       <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeProductLine(l.id)}>Slett</button></td>
                     </tr>
+                    {mealQty > 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ fontSize: 12, color: "#64748b", paddingLeft: 20 }}>
+                          Personalmat: {mealQty} stk × {currency(cost)} = {currency(mealQty * cost)} (kostnad, ingen omsetning)
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -14086,6 +14101,9 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
               <tbody>
                 <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenue)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenue)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.revenue, calc.actual.revenue)}</td></tr>
                 <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.cogs, calc.actual.cogs)}</td></tr>
+                {(calc.estimated.staffMealCost > 0 || calc.actual.staffMealCost > 0) && (
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav personalmat</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffMealCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffMealCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffMealCost, calc.actual.staffMealCost)}</td></tr>
+                )}
                 <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
                 <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.otherCosts, calc.actual.otherCosts)}</td></tr>
                 <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
