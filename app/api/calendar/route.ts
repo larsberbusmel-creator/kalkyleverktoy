@@ -63,6 +63,57 @@ function buildDescription(groups: string[][]): string {
     .join("\\n\\n");                  // dobbelt iCal-newline mellom seksjoner
 }
 
+// Gjenskaper packingChecklistRows()/packingListRows() fra RentalTab (app/page.tsx)
+// i ren JS/TS uten React-avhengigheter, siden denne ruta kun har tilgang til
+// rådataene fra Supabase-raden, ikke klientkodens funksjoner. Se page.tsx for
+// den kanoniske versjonen - hold disse i sync ved endring der.
+function tableTypeById(tableTypes: any[], id: string) {
+  return (tableTypes || []).find((t: any) => t.id === id);
+}
+
+function packingListRowsForOffer(offer: any, coverItems: any[], rentalAddons: any[], tableTypes: any[]) {
+  const guests = offer.guestCount || 0;
+  const courses = offer.courseCount || 1;
+  const tablesAll = offer.floorPlanTables || [];
+  function tableCountForShape(shape: any) {
+    return tablesAll.filter((t: any) => {
+      const tt = tableTypeById(tableTypes, t.tableTypeId);
+      return tt && (!shape || tt.shape === shape);
+    }).length;
+  }
+  const coverRows = (coverItems || [])
+    .filter((item: any) => !item.mealType || item.mealType === offer.mealType)
+    .map((item: any) => {
+      let qty = 0;
+      if (item.rule === "per_person") qty = guests * item.qtyPerUnit;
+      if (item.rule === "per_person_per_course") qty = guests * courses * item.qtyPerUnit;
+      if (item.rule === "per_table") qty = tableCountForShape(item.tableShape) * item.qtyPerUnit;
+      return { id: `cover:${item.id}`, name: item.name, unit: item.unit, qty: Math.ceil(qty) };
+    });
+  const addonLines = offer.extraLines || [];
+  const addonRows: { id: string; name: string; unit: string; qty: number }[] = [];
+  (rentalAddons || []).forEach((addon: any) => {
+    const line = addonLines.find((l: any) => l.text === addon.name);
+    if (!line) return;
+    const multiplier = line.quantity && line.quantity > 0 ? line.quantity : 1;
+    (addon.packingItems || []).forEach((pi: any) => {
+      addonRows.push({ id: `addon:${pi.id}`, name: pi.name, unit: pi.unit, qty: pi.qty * multiplier });
+    });
+  });
+  const customRows = (offer.customPackingItems || []).map((c: any) => ({ id: `custom:${c.id}`, name: c.name, unit: c.unit, qty: c.qty }));
+  return [...customRows, ...coverRows, ...addonRows];
+}
+
+function packingChecklistRowsForOffer(offer: any, packingListTemplates: any[], coverItems: any[], rentalAddons: any[], tableTypes: any[]) {
+  const rows = packingListRowsForOffer(offer, coverItems, rentalAddons, tableTypes)
+    .map((r: any) => ({ id: r.id, label: `${r.name} · ${r.qty} ${r.unit}` }));
+  (packingListTemplates || [])
+    .filter((t: any) => (offer.selectedPackingListTemplateIds || []).includes(t.id))
+    .forEach((t: any) => t.items.forEach((item: any) => rows.push({ id: `template:${item.id}`, label: item.label })));
+  (offer.extraPackingListItems || []).forEach((label: string) => rows.push({ id: `extra:${label}`, label }));
+  return rows;
+}
+
 export async function GET() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -78,6 +129,10 @@ export async function GET() {
   const orders = (row?.data?.orders || []).filter((o: any) => !o.deletedAt);
   const products = row?.data?.products || [];
   const rentalOffers = row?.data?.rentalOffers || [];
+  const packingListTemplates = row?.data?.packingListTemplates || [];
+  const coverItems = row?.data?.coverItems || [];
+  const rentalAddons = row?.data?.rentalAddons || [];
+  const tableTypes = row?.data?.tableTypes || [];
 
   const now =
     new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
@@ -199,7 +254,48 @@ export async function GET() {
     })
     .join("\r\n");
 
-  const events = [orderEvents, teardownEvents].filter(Boolean).join("\r\n");
+  // Pakking-hendelser: egne VEVENT-blokker for hvert rentalOffer som har minst
+  // ett punkt i den sammenslåtte pakkelisten (samme fire-kilder-logikk som
+  // packingChecklistRows() i RentalTab). Heldagshendelse på offer.date (første
+  // dag ved flerdagers-arrangement) - en påminnelse for pakkedagen, ikke et
+  // tidsbestemt tidspunkt, så ingen VALARM her (i motsetning til nedrigg).
+  const packingEvents = rentalOffers
+    .map((offer: any) => {
+      if (!offer.date) return "";
+      const checklistRows = packingChecklistRowsForOffer(offer, packingListTemplates, coverItems, rentalAddons, tableTypes);
+      if (!checklistRows.length) return "";
+
+      const dtstart = `DTSTART;VALUE=DATE:${toIcalDate(offer.date, "")}`;
+      const dtend = `DTEND;VALUE=DATE:${toIcalDate(offer.date, "")}`;
+
+      const venueName = offer.venueExternal
+        ? (offer.venueExternalName || "Eksternt lokale")
+        : offer.venue;
+      const summary = escapeIcal(`📦 Pakking, ${offer.customer}, ${venueName}`);
+
+      const checklistLines = checklistRows.map((r: any) => (offer.packingListChecked?.[r.id] ? "☑ " : "☐ ") + r.label);
+      const description = buildDescription([checklistLines]);
+
+      const lines = [
+        "BEGIN:VEVENT",
+        `UID:misemetrics-packing-${offer.id}@berbusmel.no`,
+        `DTSTAMP:${now}`,
+        dtstart,
+        dtend,
+        `SUMMARY:${summary}`,
+        `DESCRIPTION:${description}`,
+        "END:VEVENT",
+      ]
+        .filter(Boolean)
+        .map(foldLine)
+        .join("\r\n");
+
+      return lines;
+    })
+    .filter(Boolean)
+    .join("\r\n");
+
+  const events = [orderEvents, teardownEvents, packingEvents].filter(Boolean).join("\r\n");
 
   const ical = [
     "BEGIN:VCALENDAR",
