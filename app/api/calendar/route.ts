@@ -170,7 +170,11 @@ export async function GET() {
     }
 
     // SUMMARY: type-prefiks + kundenavn + evt. bedrift i parentes
-    const typePrefix = String(o.id).startsWith("rental-order-") ? "Leie av lokale // " : "Bakeriet // ";
+    const typePrefix = String(o.id).startsWith("rental-order-")
+      ? "Leie av lokale // "
+      : String(o.id).startsWith("event-order-")
+      ? "Eventkalkyle // "
+      : "Bakeriet // ";
     const companyPart =
       o.companyName && o.companyName !== customerName
         ? ` (${o.companyName})`

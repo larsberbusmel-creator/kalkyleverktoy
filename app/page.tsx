@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "reports" | "settings" | "rombibliotek" | "users";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "reports" | "settings" | "rombibliotek" | "users" | "eventkalkyle";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert" | "selskapsmeny";
@@ -191,6 +191,60 @@ type StaffTimeEntry = {
   name: string;
   startTime: string; // "HH:MM"
   endTime: string;   // "HH:MM"
+};
+
+// Eventkalkyle: lønnsomhetskalkyle (prognose + faktisk) for et salgsevent
+// (marked, festival, standplass osv.) - gjenbruker mye av samme arkitektur
+// som RentalOffer (dato/endDate, staffTimeLog-mønster, editLog).
+type EventProductLine = {
+  id: string;
+  productId: string;
+  estimatedQty: number;
+  actualQty?: number;           // fylles inn ETTER eventet, separat fra estimat
+  staffMealQty?: number;        // "personalmat" av dette produktet - IKKE solgt,
+                                 // men telles med i varekost
+  priceOverride?: number;       // valgfri egen pris for dette eventet (inkl. mva),
+                                 // faller tilbake til product.customerPrice hvis tom
+};
+
+// Samme form som StaffTimeEntry (navn+start+slutt), men med et PÅKREVD
+// date-felt siden hver oppføring skal knyttes til en spesifikk dag i et
+// flerdagers-event, og et sensitivt hourlyWage-felt (se canSeeWages).
+type EventStaffTimeEntry = {
+  id: string;
+  name: string;
+  date: string;       // "YYYY-MM-DD"
+  startTime: string;  // "HH:MM"
+  endTime: string;    // "HH:MM"
+  hourlyWage?: number; // SENSITIVT FELT - tilgangsstyrt via canSeeWages
+};
+
+type EventCustomCostLine = {
+  id: string;
+  label: string;         // f.eks. "Standplass", "Strøm", "Leie kassapunkt"
+  amount: number;        // beløp EKS. MVA
+  vatRate: 15 | 25;
+  mode: "flat" | "per_unit"; // per_unit = ganges med totalt antall solgte
+                              // enheter på tvers av alle produktlinjer
+};
+
+type EventCalculation = {
+  id: string;
+  eventName: string;
+  location: string;
+  date: string;
+  endDate?: string;              // flerdagers, samme mønster som RentalOffer
+  productLines: EventProductLine[];
+  staffTimeLog: EventStaffTimeEntry[];
+  estimatedStaffCount?: number;  // forhåndsestimat, FØR navngitt timeliste finnes
+  estimatedStaffHours?: number;
+  estimatedHourlyWage?: number;  // generelt lønnsestimat brukt KUN i prognosen,
+                                  // før faktiske, navngitte lønninger er kjent
+  customCostLines: EventCustomCostLine[];
+  note?: string;
+  createdBy?: string;
+  createdAt?: string;
+  editLog?: { by: string; at: string; fields?: string[] }[];
 };
 
 type RentalOffer = {
@@ -477,6 +531,7 @@ type UserAccessEntry = {
   name?: string;
   role: "superadmin" | "user";
   permissions: Partial<Record<Tab, TabPermission>>;
+  canSeeWages?: boolean; // atskilt fra fane-rettigheter - se lønnsdata i Eventkalkyle
   createdAt?: string;
   authUserId?: string;
 };
@@ -523,6 +578,7 @@ type AppData = {
   barTemplates: BarTemplate[];
   barTallyEntries: BarTallyEntry[];
   customerDirectory: CustomerDirectoryEntry[];
+  eventCalculations: EventCalculation[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
 };
@@ -824,6 +880,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   barTemplates: [],
   barTallyEntries: [],
   customerDirectory: [],
+  eventCalculations: [],
   seenOrderIds: [],
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
@@ -938,6 +995,8 @@ barTallyEntries:
   (raw as any).barTallyEntries || [],
   customerDirectory:
     (raw as any).customerDirectory || [],
+  eventCalculations:
+    (raw as any).eventCalculations || [],
   seenOrderIds: (() => {
   const legacyDates: string[] = (raw as any).seenOrderDates || [];
   const existing: string[] = (raw as any).seenOrderIds || [];
@@ -985,6 +1044,7 @@ export default function Page() {
   const [orderToOpen, setOrderToOpen] = useState<string | null>(null);
   const [productionDateToOpen, setProductionDateToOpen] = useState<string | null>(null);
   const [wantsNewOrder, setWantsNewOrder] = useState(false);
+  const [eventCalculationToOpen, setEventCalculationToOpen] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
 
@@ -1346,7 +1406,7 @@ export default function Page() {
     });
   }, []);
 
-  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries" | "customerDirectory", itemsPatch: Record<string, any>) => {
+  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries" | "customerDirectory" | "eventCalculations", itemsPatch: Record<string, any>) => {
     setData((prev) => {
       const list = (prev as any)[listKey] as any[];
       const next = { ...prev } as any;
@@ -1527,6 +1587,7 @@ function productCost(product: Product, visited: string[] = []) {
   { key: "production", label: "Produksjon",         icon: "🥖", color: "#ea580c" },
   { key: "inventory",  label: "Varetelling",        icon: "📦", color: "#0891b2" },
   { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
+  { key: "eventkalkyle", label: "Eventkalkyle",     icon: "🎪", color: "#c026d3" },
   { key: "reports",    label: "Rapporter",          icon: "📊", color: "#0d9488" },
   { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
   { key: "users",      label: "Brukere",            icon: "🔑", color: "#9333ea" },
@@ -1612,10 +1673,11 @@ return (
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
+        {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
         {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
@@ -4981,7 +5043,7 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, setEventCalculationToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "customerDirectory", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -4989,6 +5051,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   recipeAllergens: (r: Recipe) => string[];
   setTab: (t: Tab) => void;
   setRentalOfferToOpen: (id: string | null) => void;
+  setEventCalculationToOpen: (id: string | null) => void;
   pendingOrderId?: string | null;
   clearPendingOrderId?: () => void;
   pendingNewOrder?: boolean;
@@ -5307,6 +5370,11 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     if (order.id.startsWith("rental-order-")) {
       setRentalOfferToOpen(order.id.replace("rental-order-", ""));
       setTab("rental");
+      return;
+    }
+    if (order.id.startsWith("event-order-")) {
+      setEventCalculationToOpen(order.id.replace("event-order-", ""));
+      setTab("eventkalkyle");
       return;
     }
     setForm({ ...emptyOrder(), ...order });
@@ -13546,6 +13614,517 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
   );
 }
 
+// Norsk visningsnavn for de viktigste EventCalculation-feltene, brukt til å
+// vise HVA som ble endret i endringsloggen (samme idé som
+// RENTAL_FIELD_SECTIONS for Leie av lokale, men uten seksjoner siden
+// Eventkalkyle er én enkelt side, ikke flere underfaner).
+const EVENT_FIELD_LABELS: Record<string, string> = {
+  eventName: "Navn på event",
+  location: "Sted",
+  date: "Dato",
+  endDate: "Til dato",
+  productLines: "Produkter",
+  staffTimeLog: "Timeliste",
+  estimatedStaffCount: "Estimert antall ansatte",
+  estimatedStaffHours: "Estimerte timer",
+  estimatedHourlyWage: "Estimert timelønn",
+  customCostLines: "Andre kostnader",
+  note: "Notat",
+};
+
+function diffEventFields(oldEvent: EventCalculation | undefined, newEvent: EventCalculation): string[] {
+  if (!oldEvent) return [];
+  const changed: string[] = [];
+  Object.keys(EVENT_FIELD_LABELS).forEach((key) => {
+    const oldVal = JSON.stringify((oldEvent as any)[key] ?? null);
+    const newVal = JSON.stringify((newEvent as any)[key] ?? null);
+    if (oldVal !== newVal) changed.push(EVENT_FIELD_LABELS[key]);
+  });
+  return changed;
+}
+
+// Beregner Prognose (estimerte tall) og Faktisk (faktiske/registrerte tall,
+// med fallback til estimat der faktisk ikke er fylt ut ennå) for en
+// eventkalkyle. Alle beløp regnes EKS. MVA internt (samme konvensjon som
+// Lønnsomhetsrapporten i Varetelling) - mva legges kun på for visning.
+function computeEventCalculation(event: EventCalculation, data: AppData, productUnitCost: (p: Product) => number) {
+  const vatRate = data.settings.foodVat;
+  const lines = event.productLines || [];
+
+  function priceFor(line: EventProductLine, product: Product | undefined) {
+    return line.priceOverride || product?.customerPrice || 0;
+  }
+
+  function otherCosts(totalUnits: number) {
+    return (event.customCostLines || []).reduce((sum, c) => {
+      const amt = Number(c.amount) || 0;
+      return sum + (c.mode === "per_unit" ? amt * totalUnits : amt);
+    }, 0);
+  }
+
+  let estimatedRevenueIncVat = 0;
+  let estimatedCogs = 0;
+  let estimatedUnits = 0;
+  let actualRevenueIncVat = 0;
+  let actualCogs = 0;
+  let actualUnits = 0;
+
+  lines.forEach((l) => {
+    const product = data.products.find((p) => p.id === l.productId);
+    const price = priceFor(l, product);
+    const cost = product ? productUnitCost(product) : 0;
+    const mealQty = Number(l.staffMealQty) || 0;
+
+    const estQty = Number(l.estimatedQty) || 0;
+    estimatedRevenueIncVat += price * estQty;
+    estimatedCogs += cost * (estQty + mealQty);
+    estimatedUnits += estQty;
+
+    const actQty = Number(l.actualQty ?? l.estimatedQty) || 0;
+    actualRevenueIncVat += price * actQty;
+    actualCogs += cost * (actQty + mealQty);
+    actualUnits += actQty;
+  });
+
+  const estimatedRevenue = exVatFromIncVat(estimatedRevenueIncVat, vatRate);
+  const actualRevenue = exVatFromIncVat(actualRevenueIncVat, vatRate);
+
+  const estimatedStaffCost = (Number(event.estimatedStaffCount) || 0) * (Number(event.estimatedStaffHours) || 0) * (Number(event.estimatedHourlyWage) || 0);
+  const hasStaffLog = (event.staffTimeLog || []).length > 0;
+  const actualStaffCost = hasStaffLog
+    ? (event.staffTimeLog || []).reduce((sum, e) => sum + staffEntryHours(e) * (Number(e.hourlyWage) || 0), 0)
+    : estimatedStaffCost;
+
+  const estimatedOtherCosts = otherCosts(estimatedUnits);
+  const actualOtherCosts = otherCosts(actualUnits);
+
+  const estimatedProfit = estimatedRevenue - estimatedCogs - estimatedStaffCost - estimatedOtherCosts;
+  const actualProfit = actualRevenue - actualCogs - actualStaffCost - actualOtherCosts;
+
+  return {
+    estimated: { revenue: estimatedRevenue, cogs: estimatedCogs, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit },
+    actual: { revenue: actualRevenue, cogs: actualCogs, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit },
+    hasActualData: (event.productLines || []).some((l) => l.actualQty != null) || hasStaffLog,
+  };
+}
+
+function EventTab({ data, updateData, updateListRpc, productUnitCost, recommendedPriceIncVat, pendingEventId, clearPendingEventId, readOnly, userEmail, canSeeWages }: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries" | "customerDirectory" | "eventCalculations", itemsPatch: Record<string, any>) => void;
+  productUnitCost: (p: Product) => number;
+  recommendedPriceIncVat: (costExVat: number, marginPercent: number) => number;
+  pendingEventId?: string | null;
+  clearPendingEventId?: () => void;
+  readOnly: boolean;
+  userEmail: string;
+  canSeeWages: boolean;
+}) {
+  const emptyEvent = (): EventCalculation => ({
+    id: "",
+    eventName: "",
+    location: "",
+    date: today(),
+    productLines: [],
+    staffTimeLog: [],
+    customCostLines: [],
+  });
+
+  const [event, setEvent] = useState<EventCalculation>(emptyEvent());
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [showNewEvent, setShowNewEvent] = useState(false);
+  const [eventSearch, setEventSearch] = useState("");
+  const [productSearch, setProductSearch] = useState("");
+  const [newCustomCost, setNewCustomCost] = useState({ label: "", amount: "0", vatRate: "25" as "15" | "25", mode: "flat" as "flat" | "per_unit" });
+  const [newStaffTime, setNewStaffTime] = useState({ name: "", date: "", startTime: "", endTime: "", hourlyWage: "" });
+  const [marginDraft, setMarginDraft] = useState<Record<string, string>>({});
+  const [editLogOpen, setEditLogOpen] = useState(false);
+
+  const events = data.eventCalculations || [];
+
+  function loadEvent(ev: EventCalculation) {
+    setEvent(ev);
+    setEditingEventId(ev.id || null);
+    setShowNewEvent(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function startNewEvent() {
+    setEvent(emptyEvent());
+    setEditingEventId(null);
+    setShowNewEvent(true);
+  }
+
+  function cancelEdit() {
+    setEvent(emptyEvent());
+    setEditingEventId(null);
+    setShowNewEvent(false);
+  }
+
+  useEffect(() => {
+    if (!pendingEventId) return;
+    const ev = events.find((e) => e.id === pendingEventId);
+    if (ev) loadEvent(ev);
+    clearPendingEventId?.();
+  }, [pendingEventId]);
+
+  function saveEvent() {
+    if (!event.eventName.trim()) return alert("Legg inn navn på eventet.");
+    if (event.endDate && event.date && event.endDate < event.date) return alert("Til dato kan ikke være før fra-dato.");
+    const eventId = event.id || `event-${Date.now()}`;
+    const saved: EventCalculation = { ...event, id: eventId };
+    if (editingEventId) {
+      const previous = events.find((e) => e.id === eventId);
+      saved.editLog = [...(event.editLog || []), { by: userEmail, at: new Date().toISOString(), fields: diffEventFields(previous, saved) }].slice(-20);
+    } else {
+      saved.createdBy = userEmail;
+      saved.createdAt = new Date().toISOString();
+      saved.editLog = [];
+    }
+    updateListRpc("eventCalculations", { [eventId]: saved });
+
+    if (saved.date) {
+      const linkedOrder = {
+        id: `event-order-${eventId}`,
+        orderNumber: saved.id,
+        type: "catering" as const,
+        customerType: "bedrift" as const,
+        customer: saved.eventName,
+        companyName: saved.eventName,
+        orgNumber: "", companyAddress: "", phone: "",
+        deliveryAddress: saved.location || "",
+        date: saved.date, endDate: saved.endDate, time: "", note: saved.note || "", paymentInfo: "",
+        guests: 0,
+        productId: saved.productLines[0]?.productId || "",
+        orderLines: saved.productLines.filter((l) => l.productId).map((l) => ({ productId: l.productId, quantity: l.estimatedQty })),
+        discountPercent: 0, isRecurring: false, recurringDays: [],
+        recurringNote: `Eventkalkyle: ${saved.eventName}`,
+        allergens: {},
+      };
+      updateListRpc("orders", { [linkedOrder.id]: linkedOrder });
+    }
+
+    setEditingEventId(eventId);
+    setEvent(saved);
+    alert("Eventkalkyle lagret!");
+  }
+
+  function deleteEvent(id: string) {
+    if (!confirm("Slette denne eventkalkylen?")) return;
+    updateData({ eventCalculations: events.filter((e) => e.id !== id) } as any);
+    updateData({ orders: data.orders.filter((o) => o.id !== `event-order-${id}`) });
+    if (editingEventId === id) cancelEdit();
+  }
+
+  function addProductLine(productId: string) {
+    if (!productId) return;
+    const line: EventProductLine = { id: `epl-${Date.now()}`, productId, estimatedQty: 0 };
+    setEvent({ ...event, productLines: [...event.productLines, line] });
+    setProductSearch("");
+  }
+
+  function updateProductLine(id: string, patch: Partial<EventProductLine>) {
+    setEvent({ ...event, productLines: event.productLines.map((l) => (l.id === id ? { ...l, ...patch } : l)) });
+  }
+
+  function removeProductLine(id: string) {
+    setEvent({ ...event, productLines: event.productLines.filter((l) => l.id !== id) });
+  }
+
+  function applySuggestedPrice(line: EventProductLine, product: Product) {
+    const margin = Number(marginDraft[line.id] || 0);
+    const cost = productUnitCost(product);
+    const suggested = recommendedPriceIncVat(cost, margin);
+    updateProductLine(line.id, { priceOverride: suggested });
+  }
+
+  function addStaffTimeEntry() {
+    if (!newStaffTime.name.trim() || !newStaffTime.date || !newStaffTime.startTime || !newStaffTime.endTime) return;
+    const entry: EventStaffTimeEntry = {
+      id: `est-${Date.now()}`,
+      name: newStaffTime.name.trim(),
+      date: newStaffTime.date,
+      startTime: newStaffTime.startTime,
+      endTime: newStaffTime.endTime,
+      hourlyWage: newStaffTime.hourlyWage ? Number(newStaffTime.hourlyWage) : undefined,
+    };
+    setEvent({ ...event, staffTimeLog: [...event.staffTimeLog, entry] });
+    setNewStaffTime({ name: "", date: newStaffTime.date, startTime: "", endTime: "", hourlyWage: "" });
+  }
+
+  function removeStaffTimeEntry(id: string) {
+    setEvent({ ...event, staffTimeLog: event.staffTimeLog.filter((e) => e.id !== id) });
+  }
+
+  function addCustomCostLine() {
+    if (!newCustomCost.label.trim()) return;
+    const line: EventCustomCostLine = {
+      id: `ecc-${Date.now()}`,
+      label: newCustomCost.label.trim(),
+      amount: Number(newCustomCost.amount) || 0,
+      vatRate: Number(newCustomCost.vatRate) as 15 | 25,
+      mode: newCustomCost.mode,
+    };
+    setEvent({ ...event, customCostLines: [...event.customCostLines, line] });
+    setNewCustomCost({ label: "", amount: "0", vatRate: "25", mode: "flat" });
+  }
+
+  function removeCustomCostLine(id: string) {
+    setEvent({ ...event, customCostLines: event.customCostLines.filter((c) => c.id !== id) });
+  }
+
+  const filteredProducts = productSearch
+    ? data.products.filter((p) => p.name.toLowerCase().includes(productSearch.toLowerCase())).slice(0, 12)
+    : [];
+
+  const filteredEvents = events.filter((e) => e.eventName.toLowerCase().includes(eventSearch.toLowerCase()));
+
+  const calc = computeEventCalculation(event, data, productUnitCost);
+
+  function diffLine(estimatedVal: number, actualVal: number) {
+    const diff = actualVal - estimatedVal;
+    const pct = estimatedVal !== 0 ? (diff / Math.abs(estimatedVal)) * 100 : 0;
+    const sign = diff > 0 ? "+" : "";
+    return `${sign}${currency(diff)} (${sign}${pct.toFixed(0)}%)`;
+  }
+
+  return (
+    <section className="card">
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
+
+      {!showNewEvent && (
+        <>
+          <div className="between" style={{ justifyContent: "flex-end", gap: 8 }}>
+            <input placeholder="Søk eventkalkyle..." value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} style={{ maxWidth: 240 }} />
+            <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={startNewEvent}>+ Ny eventkalkyle</button>
+          </div>
+
+          {filteredEvents.length === 0 ? (
+            <p className="muted" style={{ marginTop: 16 }}>Ingen eventkalkyler registrert ennå.</p>
+          ) : (
+            <table style={{ marginTop: 16 }}>
+              <thead><tr><th>Event</th><th>Sted</th><th>Dato</th><th style={{ textAlign: "right" }}>Prognose overskudd</th><th></th></tr></thead>
+              <tbody>
+                {filteredEvents.map((ev) => {
+                  const c = computeEventCalculation(ev, data, productUnitCost);
+                  return (
+                    <tr key={ev.id} className="click-row" onClick={() => loadEvent(ev)}>
+                      <td>{ev.eventName}</td>
+                      <td>{ev.location || "-"}</td>
+                      <td>{ev.endDate && ev.endDate !== ev.date ? `${formatDateNo(ev.date)} – ${formatDateNo(ev.endDate)}` : formatDateNo(ev.date)}</td>
+                      <td style={{ textAlign: "right" }}>{currency(c.estimated.profit)}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteEvent(ev.id)}>Slett</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {showNewEvent && (
+        <>
+          <div className="between">
+            <h2>{editingEventId ? "Rediger eventkalkyle" : "Ny eventkalkyle"}</h2>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn" onClick={cancelEdit}>Avbryt</button>
+              <button
+                className="btn active"
+                style={{ background: "#16a34a", borderColor: "#16a34a", color: "white" }}
+                disabled={readOnly}
+                title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                onClick={saveEvent}
+              >
+                Lagre
+              </button>
+            </div>
+          </div>
+
+          <div className="form-grid two">
+            <label>Navn på event<input value={event.eventName} disabled={readOnly} onChange={(e) => setEvent({ ...event, eventName: e.target.value })} placeholder="F.eks. Julemarked Bodø" /></label>
+            <label>Sted<input value={event.location} disabled={readOnly} onChange={(e) => setEvent({ ...event, location: e.target.value })} placeholder="F.eks. Rådhusplassen" /></label>
+            <label>Dato<input type="date" value={event.date} disabled={readOnly} onChange={(e) => setEvent({ ...event, date: e.target.value })} /></label>
+            <label>Til dato (valgfritt - flerdagers)<input type="date" value={event.endDate || ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, endDate: e.target.value || undefined })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 16 }}>Produkter</h3>
+          <div className="search-picker" style={{ maxWidth: 360 }}>
+            <input value={productSearch} disabled={readOnly} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk og legg til produkt..." />
+            {productSearch && (
+              <div className="search-dropdown inline">
+                {filteredProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+                {filteredProducts.map((p) => (
+                  <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => addProductLine(p.id)}>
+                    <b>{p.name}</b>
+                    <small>{p.productNumber} · {currency(p.customerPrice)}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {event.productLines.length > 0 && (
+            <table style={{ marginTop: 12 }}>
+              <thead>
+                <tr>
+                  <th>Produkt</th>
+                  <th style={{ textAlign: "right" }}>Estimert antall</th>
+                  <th style={{ textAlign: "right" }}>Faktisk antall</th>
+                  <th style={{ textAlign: "right" }}>Personalmat</th>
+                  <th style={{ textAlign: "right" }}>Pris (inkl. mva)</th>
+                  <th>Prisforslag</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {event.productLines.map((l) => {
+                  const product = data.products.find((p) => p.id === l.productId);
+                  const cost = product ? productUnitCost(product) : 0;
+                  const suggested = product ? recommendedPriceIncVat(cost, Number(marginDraft[l.id] || 0)) : 0;
+                  return (
+                    <tr key={l.id}>
+                      <td>{product?.name || "Ukjent produkt"}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <input type="number" style={{ width: 80, textAlign: "right" }} value={l.estimatedQty} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { estimatedQty: Number(e.target.value) || 0 })} />
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <input type="number" style={{ width: 80, textAlign: "right" }} placeholder="-" value={l.actualQty ?? ""} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { actualQty: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <input type="number" style={{ width: 70, textAlign: "right" }} value={l.staffMealQty ?? ""} placeholder="0" disabled={readOnly} onChange={(e) => updateProductLine(l.id, { staffMealQty: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <input type="number" style={{ width: 90, textAlign: "right" }} placeholder={String(product?.customerPrice || 0)} value={l.priceOverride ?? ""} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { priceOverride: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                          <input type="number" style={{ width: 55 }} placeholder="Margin %" disabled={readOnly} value={marginDraft[l.id] || ""} onChange={(e) => setMarginDraft({ ...marginDraft, [l.id]: e.target.value })} />
+                          {marginDraft[l.id] && product && (
+                            <button type="button" className="link" disabled={readOnly} onClick={() => applySuggestedPrice(l, product)} title={`Foreslått: ${currency(suggested)}`}>
+                              Bruk {currency(suggested)}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeProductLine(l.id)}>Slett</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          <h3 style={{ marginTop: 16 }}>Bemanning - prognose</h3>
+          <div className="form-grid three">
+            <label>Estimert antall ansatte<input type="number" value={event.estimatedStaffCount ?? ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, estimatedStaffCount: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} /></label>
+            <label>Estimerte timer (per ansatt)<input type="number" value={event.estimatedStaffHours ?? ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, estimatedStaffHours: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} /></label>
+            <label>Estimert timelønn
+              {canSeeWages ? (
+                <input type="number" value={event.estimatedHourlyWage ?? ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, estimatedHourlyWage: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+              ) : (
+                <input value="•••" disabled title="Du har ikke tilgang til å se lønnsdata" />
+              )}
+            </label>
+          </div>
+
+          <h3 style={{ marginTop: 16 }}>Bemanning - timeliste (faktisk)</h3>
+          {event.staffTimeLog.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              {event.staffTimeLog.map((entry) => (
+                <div key={entry.id} className="editable-row">
+                  <span>{entry.name} · {formatDateNo(entry.date)} · {entry.startTime}–{entry.endTime} ({formatHoursMinutes(staffEntryHours(entry))}){canSeeWages && entry.hourlyWage != null ? ` · ${currency(entry.hourlyWage)}/t` : canSeeWages ? "" : " · •••"}</span>
+                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffTimeEntry(entry.id)}>Slett</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="form-grid five" style={{ marginTop: 8 }}>
+            <input placeholder="Navn" value={newStaffTime.name} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, name: e.target.value })} />
+            <input type="date" value={newStaffTime.date} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, date: e.target.value })} min={event.date} max={event.endDate || event.date} />
+            <input placeholder="Start (HH:MM)" value={newStaffTime.startTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, startTime: e.target.value })} />
+            <input placeholder="Slutt (HH:MM)" value={newStaffTime.endTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, endTime: e.target.value })} />
+            {canSeeWages ? (
+              <input type="number" placeholder="Timelønn" value={newStaffTime.hourlyWage} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, hourlyWage: e.target.value })} />
+            ) : (
+              <input value="•••" disabled title="Du har ikke tilgang til å se lønnsdata" />
+            )}
+          </div>
+          <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addStaffTimeEntry}>Legg til timeføring</button>
+
+          <h3 style={{ marginTop: 16 }}>Andre kostnader</h3>
+          {event.customCostLines.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              {event.customCostLines.map((c) => (
+                <div key={c.id} className="editable-row">
+                  <span>{c.label}: {currency(c.amount)} eks. mva{c.mode === "per_unit" ? " (per solgt enhet)" : ""} · {currency(c.amount * (1 + c.vatRate / 100))} inkl. {c.vatRate}% mva</span>
+                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeCustomCostLine(c.id)}>Slett</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="form-grid four" style={{ marginTop: 8 }}>
+            <input placeholder="F.eks. Standplass" value={newCustomCost.label} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, label: e.target.value })} />
+            <input type="number" placeholder="Beløp eks. mva" value={newCustomCost.amount} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, amount: e.target.value })} />
+            <select value={newCustomCost.vatRate} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, vatRate: e.target.value as "15" | "25" })}>
+              <option value="25">25% mva</option>
+              <option value="15">15% mva</option>
+            </select>
+            <select value={newCustomCost.mode} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, mode: e.target.value as "flat" | "per_unit" })}>
+              <option value="flat">Fast beløp</option>
+              <option value="per_unit">Per solgt enhet</option>
+            </select>
+          </div>
+          <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomCostLine}>Legg til kostnad</button>
+
+          <h3 style={{ marginTop: 20 }}>Prognose vs. Faktisk</h3>
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead><tr><th></th><th style={{ textAlign: "right" }}>Prognose</th><th style={{ textAlign: "right" }}>Faktisk</th><th style={{ textAlign: "right" }}>Differanse</th></tr></thead>
+              <tbody>
+                <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenue)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenue)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.revenue, calc.actual.revenue)}</td></tr>
+                <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.cogs, calc.actual.cogs)}</td></tr>
+                <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
+                <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.otherCosts, calc.actual.otherCosts)}</td></tr>
+                <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          {!calc.hasActualData && <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>"Faktisk"-kolonnen viser prognosetall inntil faktisk antall solgt og/eller timeliste er registrert.</p>}
+
+          <div style={{ marginTop: 12 }}>
+            <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notat</label>
+            <textarea className="textarea" value={event.note || ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, note: e.target.value })} placeholder="Fritekst, erfaringer, praktisk info osv." />
+          </div>
+
+          {editingEventId && (
+            <div className="settings-section" style={{ marginTop: 16 }}>
+              <button className="settings-toggle" onClick={() => setEditLogOpen(!editLogOpen)}>
+                Endringslogg ({(event.editLog || []).length})<span>{editLogOpen ? "−" : "+"}</span>
+              </button>
+              {editLogOpen && (
+                <div className="settings-content">
+                  {(event.editLog || []).length === 0 && <p className="muted">Ingen endringer registrert ennå.</p>}
+                  {[...(event.editLog || [])].reverse().map((entry, i) => (
+                    <div key={i} style={{ margin: "4px 0" }}>
+                      <p style={{ fontSize: 12, margin: 0 }}>
+                        {entry.by} – {formatDateNo(entry.at.slice(0, 10))} {new Date(entry.at).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                      {!!entry.fields?.length && <span style={{ fontSize: 11, color: "#94a3b8" }}>{entry.fields.join(", ")}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateData: (p: Partial<AppData>) => void; setTab: (t: Tab) => void }) {
   const rooms = data.rooms || [];
   const tableTypes = data.tableTypes || [];
@@ -14230,6 +14809,11 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
               </table>
             );
           })()}
+
+          <label className="check" style={{ marginTop: 12 }}>
+            <input type="checkbox" checked={!!form.canSeeWages} onChange={(e) => setForm({ ...form, canSeeWages: e.target.checked })} />
+            Kan se lønnsdata i Eventkalkyle
+          </label>
 
           <button className="btn active" style={{ marginTop: 12 }} onClick={saveEntry}>Lagre</button>
         </div>
