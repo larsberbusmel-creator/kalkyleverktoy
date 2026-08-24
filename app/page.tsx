@@ -5420,13 +5420,16 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     return orderSubtotalIncVat(order) - orderDiscountAmount(order);
   }
 
- function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
+ function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string, forceExpandBakery = false): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
     if (path.includes(product.id)) return [];
 
-    // Bakeri-produkter (Søtbakst, Bakeri-egenprodusert) skal kun vises som navn i catering/selskapsmeny-produksjon,
-    // ikke brettes ut til ingrediensnivå (det gjøres separat i den egne bakeri-produksjonsfanen).
+    // Bakeri-produkter (Søtbakst, Bakeri-egenprodusert) skal som hovedregel kun vises
+    // som navn i catering/selskapsmeny-produksjon, ikke brettes ut til ingrediensnivå
+    // (det gjøres separat i den egne bakeri-produksjonsfanen). UNNTAK: forceExpandBakery
+    // brukes av printOrder() for selve bakeri-/egenprodusert-TYPE ordre, der nedbrytingen
+    // faktisk ER poenget med utskriften (se printOrder for detaljer).
     const bakeryNoExpandCategories = ["Søtbakst", "Bakeri, egenprodusert"];
-    if (bakeryNoExpandCategories.includes(product.category)) {
+    if (bakeryNoExpandCategories.includes(product.category) && !forceExpandBakery) {
       return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
     }
 
@@ -5439,7 +5442,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
         const chosenProduct = data.products.find((x) => x.id === sel.productId);
         if (!chosenProduct) return [];
         const course = (product.menuCourses || []).find((c) => c.id === sel.courseId);
-        return expandProductForProduction(chosenProduct, sel.guestCount, [...path, product.id], undefined, course?.name || courseName);
+        return expandProductForProduction(chosenProduct, sel.guestCount, [...path, product.id], undefined, course?.name || courseName, forceExpandBakery);
       });
     }
 
@@ -5512,7 +5515,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     });
   }
 
-  function collectOrderMaterials(order: Order): Record<string, { name: string; category: string; amount: number; unit: string }> {
+  function collectOrderMaterials(order: Order, forceExpandBakery = false): Record<string, { name: string; category: string; amount: number; unit: string }> {
     const acc: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
     const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
     function addMaterial(id: string, amount: number, fallbackUnit: string) {
@@ -5533,7 +5536,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
       });
     }
         function expandProduct(product: Product, multiplier: number, path: string[], isPieceCount = true) {
-      if (path.includes(product.id) || bakeryNoExpand.includes(product.category)) return;
+      if (path.includes(product.id) || (bakeryNoExpand.includes(product.category) && !forceExpandBakery)) return;
       // unitWeightKg skal KUN ganges inn når multiplier faktisk er et antall STYKK
       // (toppnivå ordrelinjer). For underprodukter brukt som ingrediens i et annet
       // produkt er multiplier allerede en vektmengde (regnet ut av kalleren via
@@ -5571,15 +5574,15 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     return acc;
   }
 
-  function scaledRecipeHtmlForOrder(product: Product, quantity: number, menuSelections?: MenuCourseSelection[], includeMaterials = false): string {
+  function scaledRecipeHtmlForOrder(product: Product, quantity: number, menuSelections?: MenuCourseSelection[], includeMaterials = false, forceExpandBakery = false): string {
     const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
-    if (bakeryNoExpand.includes(product.category)) return "";
+    if (bakeryNoExpand.includes(product.category) && !forceExpandBakery) return "";
     if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
       if (!menuSelections || !menuSelections.length) return "";
       return menuSelections.map((sel) => {
         const chosenProduct = data.products.find((x) => x.id === sel.productId);
         if (!chosenProduct) return "";
-        return `<div class="recipe-block"><h3>${escapeHtml(product.menuCourses!.find((c) => c.id === sel.courseId)?.name || "Rett")}: ${escapeHtml(chosenProduct.name)} (${sel.guestCount} stk)</h3>${scaledRecipeHtmlForOrder(chosenProduct, sel.guestCount)}</div>`;
+        return `<div class="recipe-block"><h3>${escapeHtml(product.menuCourses!.find((c) => c.id === sel.courseId)?.name || "Rett")}: ${escapeHtml(chosenProduct.name)} (${sel.guestCount} stk)</h3>${scaledRecipeHtmlForOrder(chosenProduct, sel.guestCount, undefined, false, forceExpandBakery)}</div>`;
       }).join("");
     }
     let html = "";
@@ -5604,7 +5607,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
           const totalAmount = Number(pl.amount || 0) * quantity;
           const subYield = Number(subProduct.recipeYieldAmount || subProduct.yieldAmount || 1) || 1;
           const subScale = totalAmount / subYield;
-          html += `<div class="recipe-block"><h3>Produkt: ${escapeHtml(subProduct.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3>${scaledRecipeHtmlForOrder(subProduct, subScale, undefined, true)}</div>`;
+          html += `<div class="recipe-block"><h3>Produkt: ${escapeHtml(subProduct.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3>${scaledRecipeHtmlForOrder(subProduct, subScale, undefined, true, forceExpandBakery)}</div>`;
         }
       }
     });
@@ -5641,68 +5644,47 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
       : "";
     let prodSection = "";
     {
-      const isBakery = order.type === "bakeri" || order.type === "egenprodusert";
-      if (isBakery) {
-        const prodPages = order.orderLines.map((line) => {
-          const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-          const qty = Number(line.quantity) || 1;
-          const recipeMap: Record<string, { name: string; totalAmount: number; unit: string; ingredientRows: string }> = {};
-          product.lines.forEach((pl) => {
-            if (pl.itemType !== "recipe") return;
-            const recipe = data.recipes.find((r) => r.id === pl.itemId); if (!recipe) return;
-            const totalAmount = Number(pl.amount || 0) * qty;
-            const recipeBaseAmount = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
-            const scale = totalAmount / Math.max(recipeBaseAmount, 1);
-            const ingredientRows = recipe.lines.map((rl) => {
-              let name = "Ukjent"; let unit = recipe.yieldUnit;
-              if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
-              if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
-              return `<tr><td style="width:12px"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td><td>${escapeHtml(name)}</td><td class="right">${escapeHtml(formatAmountUnit(Number(rl.amount || 0) * scale, unit, 3))}</td></tr>`;
-            }).join("");
-            recipeMap[recipe.id] = { name: recipe.name, totalAmount, unit: pl.unit, ingredientRows };
-          });
-          const directMaterialRows = product.lines.filter((pl) => pl.itemType === "material").map((pl) => {
-            const m = data.materials.find((x) => x.id === pl.itemId);
-            return `<tr><td style="width:12px"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td><td>${escapeHtml(m?.name || "Ukjent")}</td><td class="right">${escapeHtml(formatAmountUnit(Number(pl.amount || 0) * qty, pl.unit, 3))}</td></tr>`;
-          }).join("");
-          const recipeBlocks = Object.values(recipeMap).map((entry) =>
-            `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(entry.name)} – ${num(entry.totalAmount, 3)} ${escapeHtml(entry.unit)} (for ${qty} stk)</h3><table><thead><tr><th style="width:12px"></th><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${entry.ingredientRows}</tbody></table></div>`
-          ).join("");
-          const directSection = directMaterialRows
-            ? `<div class="recipe-block"><h3>Direkte råvarer – ${escapeHtml(product.name)}</h3><table><thead><tr><th style="width:12px"></th><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${directMaterialRows}</tbody></table></div>` : "";
-          return `<div class="prod-product"><h2>${qty} × ${escapeHtml(product.name)}</h2>${recipeBlocks}${directSection}</div>`;
-        }).join("");
-prodSection = `<h2>Produksjonsgrunnlag (skalert til bestilt antall)</h2>${prodPages}`;      } else {        const prodRows = order.orderLines.map((line) => {
-          const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-const twoColHtml = productionTwoColumnHtml(expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections));          return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
-        }).join("");
-                const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
-          const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-          // Samme batch-justering (unitWeightKg/recipeYieldAmount) som Produksjonsgrunnlag og
-          // Varebestilling allerede bruker - uten denne bruker "Oppskrifter"-seksjonen rå bestilt
-          // antall i stedet for faktisk antall batcher, og gir feil (for høye) mengder for
-          // underprodukter (produkt-i-produkt-linjer).
-          const qty = Number(line.quantity) || 0;
-          const scaledQty = product.unitWeightKg && product.recipeYieldAmount
-            ? (qty * product.unitWeightKg) / product.recipeYieldAmount
-            : qty;
-          const html = scaledRecipeHtmlForOrder(product, scaledQty, line.menuSelections);
-          if (!html) return "";
-          return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
-        }).join("");
-const materialsAgg = flags.shopping ? collectOrderMaterials(order) : {};
-        const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
-        Object.values(materialsAgg).forEach((entry) => {
-          if (!byCategory[entry.category]) byCategory[entry.category] = [];
-          byCategory[entry.category].push(entry);
-        });
-        const shoppingHtml = Object.keys(byCategory).sort((a, b) => a.localeCompare(b, "no-NO")).map((cat) => {
-          const rows = byCategory[cat]
-            .sort((a, b) => a.name.localeCompare(b.name, "no-NO"))
-            .map((e) => `<tr><td>${escapeHtml(e.name)}</td><td class="right">${num(e.amount, 3)} ${escapeHtml(e.unit)}</td></tr>`).join("");
-          return `<div class="recipe-block"><h3>${escapeHtml(cat)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-        }).join("");
-prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div class="page-break"></div><h2>Oppskrifter (skalert til bestilt antall)</h2>${recipePages}` : ""}${shoppingHtml ? `<div class="page-break"></div><h2>Varebestilling</h2>${shoppingHtml}` : ""}`;      }
+      // Bakeri/egenprodusert-ordre brukte tidligere en helt egen, enkeltkolonne
+      // print-gren her. Nå bruker ALLE ordretyper samme kode - forceExpandBakery
+      // (isBakeryOrder) sørger for at expandProductForProduction/
+      // scaledRecipeHtmlForOrder/collectOrderMaterials likevel bretter ut
+      // Søtbakst/Bakeri-egenprodusert-kategoriene til ingrediensnivå for DENNE
+      // ordretypen spesifikt (de hopper ellers over disse kategoriene by design,
+      // siden bakevarer som opptrer som linje i en CATERING-ordre ikke skal
+      // brettes ut der - den skillelinjen gjelder fortsatt for andre ordretyper).
+      const isBakeryOrder = order.type === "bakeri" || order.type === "egenprodusert";
+      const prodRows = order.orderLines.map((line) => {
+        const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
+        const twoColHtml = productionTwoColumnHtml(expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections, undefined, isBakeryOrder));
+        return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
+      }).join("");
+      const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
+        const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
+        // Samme batch-justering (unitWeightKg/recipeYieldAmount) som Produksjonsgrunnlag og
+        // Varebestilling allerede bruker - uten denne bruker "Oppskrifter"-seksjonen rå bestilt
+        // antall i stedet for faktisk antall batcher, og gir feil (for høye) mengder for
+        // underprodukter (produkt-i-produkt-linjer).
+        const qty = Number(line.quantity) || 0;
+        const scaledQty = product.unitWeightKg && product.recipeYieldAmount
+          ? (qty * product.unitWeightKg) / product.recipeYieldAmount
+          : qty;
+        const html = scaledRecipeHtmlForOrder(product, scaledQty, line.menuSelections, false, isBakeryOrder);
+        if (!html) return "";
+        return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
+      }).join("");
+      const materialsAgg = flags.shopping ? collectOrderMaterials(order, isBakeryOrder) : {};
+      const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
+      Object.values(materialsAgg).forEach((entry) => {
+        if (!byCategory[entry.category]) byCategory[entry.category] = [];
+        byCategory[entry.category].push(entry);
+      });
+      const shoppingHtml = Object.keys(byCategory).sort((a, b) => a.localeCompare(b, "no-NO")).map((cat) => {
+        const rows = byCategory[cat]
+          .sort((a, b) => a.name.localeCompare(b.name, "no-NO"))
+          .map((e) => `<tr><td>${escapeHtml(e.name)}</td><td class="right">${num(e.amount, 3)} ${escapeHtml(e.unit)}</td></tr>`).join("");
+        return `<div class="recipe-block"><h3>${escapeHtml(cat)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      }).join("");
+      prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div class="page-break"></div><h2>Oppskrifter (skalert til bestilt antall)</h2>${recipePages}` : ""}${shoppingHtml ? `<div class="page-break"></div><h2>Varebestilling</h2>${shoppingHtml}` : ""}`;
     }
     const packingListSection = flags.packingList
       ? `<div class="page-break"></div>${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackingListTemplateIds, order.extraPackingListItems)}`
