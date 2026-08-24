@@ -201,6 +201,7 @@ type RentalOffer = {
   phone?: string;
   email?: string;
   note?: string;
+  internalNote?: string; // KUN internt bruk - vises ALDRI i kundens tilbud/utskrift
   guestCount?: number;
   courseCount?: number;
   mealType?: "buffet" | "flere_retter";
@@ -231,7 +232,7 @@ type RentalOffer = {
   teardownAt?: string;
   createdBy?: string;
   createdAt?: string;
-  editLog?: { by: string; at: string }[];
+  editLog?: { by: string; at: string; fields?: { section: string; label: string }[] }[];
   staffTimeLog?: StaffTimeEntry[];
   selectedBarTemplateId?: string;
   barSpendingCap?: number;
@@ -10504,6 +10505,71 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     </section>
   );
 }
+// Norsk visningsnavn + hvilken underfane hvert RentalOffer-felt hører til,
+// brukt til å vise HVA som ble endret i endringsloggen (se diffRentalOfferFields).
+const RENTAL_FIELD_SECTIONS: Record<string, { label: string; section: string }> = {
+  customer: { label: "Kunde", section: "Forside" },
+  phone: { label: "Telefon", section: "Forside" },
+  email: { label: "E-post", section: "Forside" },
+  venue: { label: "Lokale", section: "Forside" },
+  venueExternal: { label: "Eksternt lokale", section: "Forside" },
+  venueExternalName: { label: "Eksternt lokale-navn", section: "Forside" },
+  venuePrice: { label: "Leiepris", section: "Forside" },
+  date: { label: "Dato", section: "Forside" },
+  endDate: { label: "Til dato", section: "Forside" },
+  guestCount: { label: "Antall gjester", section: "Forside" },
+  note: { label: "Notater/merknader", section: "Forside" },
+  internalNote: { label: "Notater/merknader INTERN", section: "Forside" },
+  teardownAt: { label: "Nedrigg", section: "Forside" },
+  waiters: { label: "Antall servitører", section: "Forside" },
+  waiterHours: { label: "Servitørtimer", section: "Forside" },
+  waiterAfterMidnightHours: { label: "Servitørtimer etter midnatt", section: "Forside" },
+  staffTimeLog: { label: "Timeliste servitører", section: "Forside" },
+  productLines: { label: "Produkter/menyer", section: "Meny og allergier" },
+  courseCount: { label: "Antall retter", section: "Meny og allergier" },
+  mealType: { label: "Type servering", section: "Meny og allergier" },
+  allergens: { label: "Allergier", section: "Meny og allergier" },
+  dietVegan: { label: "Vegan", section: "Meny og allergier" },
+  dietVegetarian: { label: "Vegetar", section: "Meny og allergier" },
+  dietPregnant: { label: "Gravid", section: "Meny og allergier" },
+  dietOther: { label: "Andre hensyn", section: "Meny og allergier" },
+  extraLines: { label: "Tillegg", section: "Tillegg" },
+  runSheetEnabled: { label: "Kjøreplan aktivert", section: "Kjøreplan" },
+  runSheet: { label: "Kjøreplan", section: "Kjøreplan" },
+  floorPlanRoomIds: { label: "Valgte rom", section: "Bordplan" },
+  floorPlanTables: { label: "Bordplassering", section: "Bordplan" },
+  floorPlanChairs: { label: "Stolplassering", section: "Bordplan" },
+  selectedPackingListTemplateIds: { label: "Valgte pakkelistemaler", section: "Pakkeliste" },
+  extraPackingListItems: { label: "Ekstra pakkelistepunkter", section: "Pakkeliste" },
+  customPackingItems: { label: "Egne artikler", section: "Pakkeliste" },
+  packingListChecked: { label: "Avkrysning pakkeliste", section: "Pakkeliste" },
+  selectedBarTemplateId: { label: "Bar-mal", section: "Kasse" },
+  barSpendingCap: { label: "Tak for åpen bar", section: "Kasse" },
+  barLocked: { label: "Lås kasseregning", section: "Kasse" },
+};
+
+function diffRentalOfferFields(oldOffer: RentalOffer | undefined, newOffer: RentalOffer): { section: string; label: string }[] {
+  if (!oldOffer) return [];
+  const changed: { section: string; label: string }[] = [];
+  Object.keys(RENTAL_FIELD_SECTIONS).forEach((key) => {
+    const oldVal = JSON.stringify((oldOffer as any)[key] ?? null);
+    const newVal = JSON.stringify((newOffer as any)[key] ?? null);
+    if (oldVal !== newVal) changed.push(RENTAL_FIELD_SECTIONS[key]);
+  });
+  return changed;
+}
+
+function groupChangedFieldsBySection(fields: { section: string; label: string }[]): string {
+  const bySection: Record<string, string[]> = {};
+  fields.forEach((f) => {
+    if (!bySection[f.section]) bySection[f.section] = [];
+    bySection[f.section].push(f.label);
+  });
+  return Object.keys(bySection)
+    .map((section) => `${section}: ${bySection[section].join(", ")}`)
+    .join(" · ");
+}
+
 function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly, userEmail, isSuperadmin }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; userEmail: string; isSuperadmin: boolean }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
@@ -10803,7 +10869,9 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const offerId = rental.id || `rental-${Date.now()}`;
     const offer: RentalOffer = { ...rental, id: offerId };
     if (editingOfferId) {
-      offer.editLog = [...(rental.editLog || []), { by: userEmail, at: new Date().toISOString() }].slice(-20);
+      const previousOffer = ((data as any).rentalOffers || []).find((o: RentalOffer) => o.id === offerId);
+      const changedFields = diffRentalOfferFields(previousOffer, offer);
+      offer.editLog = [...(rental.editLog || []), { by: userEmail, at: new Date().toISOString(), fields: changedFields }].slice(-20);
     } else {
       offer.createdBy = userEmail;
       offer.createdAt = new Date().toISOString();
@@ -12117,7 +12185,7 @@ ${packingListTemplatesHtml(data.packingListTemplates || [], rental.selectedPacki
       ? `<tr><td>Leie av ${escapeHtml(venueName)}</td><td></td><td></td><td style="text-align:right"><b>${currency(rental.venuePrice)}</b></td></tr>`
       : "";
         const barSpecHtml = barGroups.length
-      ? `<br><small style="color:#64748b">${barGroups.map((g) => `${g.count} × ${escapeHtml(g.itemName)}: ${currency(g.total)}`).join("<br>")}</small>`
+      ? `<br><small style="color:#64748b">${barGroups.map((g) => `${g.count} × ${escapeHtml(g.itemName)} à ${currency(g.lastPrice)}: ${currency(g.total)}`).join("<br>")}</small>`
       : "";
     const barRow = effectiveBarTotal > 0
       ? `<tr><td>Bar/servering${barSpecHtml}</td><td></td><td></td><td style="text-align:right"><b>${currency(effectiveBarTotal)}</b></td></tr>`
@@ -12433,9 +12501,14 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                   <div className="soft-box">
                     {(rental.editLog || []).length === 0 && <p className="muted">Ingen endringer registrert ennå.</p>}
                     {[...(rental.editLog || [])].reverse().map((entry, i) => (
-                      <p key={i} style={{ fontSize: 12, margin: "4px 0" }}>
-                        {entry.by} – {formatDateNo(entry.at.slice(0, 10))} {new Date(entry.at).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" })}
-                      </p>
+                      <div key={i} style={{ margin: "4px 0" }}>
+                        <p style={{ fontSize: 12, margin: 0 }}>
+                          {entry.by} – {formatDateNo(entry.at.slice(0, 10))} {new Date(entry.at).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        {!!entry.fields?.length && (
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{groupChangedFieldsBySection(entry.fields)}</span>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -12573,6 +12646,17 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                     disabled={readOnly}
                     onChange={(e) => setRental({ ...rental, note: e.target.value })}
                     placeholder="Spesielle ønsker, praktisk info osv."
+                  />
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notater / merknader INTERN</label>
+                  <textarea
+                    className="textarea"
+                    value={rental.internalNote || ""}
+                    disabled={readOnly}
+                    onChange={(e) => setRental({ ...rental, internalNote: e.target.value })}
+                    placeholder="Kun for internt bruk - vises ikke til kunden"
                   />
                 </div>
               </>
