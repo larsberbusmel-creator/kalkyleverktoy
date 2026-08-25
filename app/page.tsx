@@ -216,6 +216,7 @@ type EventStaffMember = {
   id: string;
   name: string;
   hourlyWage?: number;
+  isContractor?: boolean; // "Innleid personell" - betales utenfor ordinært lønnssystem
 };
 type EventShiftEntry = {
   id: string;
@@ -13760,17 +13761,26 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
   const estimatedRevenue = exVatFromIncVat(estimatedRevenueIncVat, vatRate);
   const actualRevenue = exVatFromIncVat(actualRevenueIncVat, vatRate);
 
-  function staffCostFor(roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+    function staffCostFor(roster: EventStaffMember[], shifts: EventShiftEntry[], contractorFilter?: boolean) {
     return shifts.reduce((sum, shift) => {
       const member = roster.find((m) => m.id === shift.staffMemberId);
+      if (contractorFilter !== undefined && !!member?.isContractor !== contractorFilter) return sum;
       return sum + staffEntryHours(shift) * (Number(member?.hourlyWage) || 0);
     }, 0);
   }
   const estimatedStaffCost = staffCostFor(event.staffRosterPrognose || [], event.shiftsPrognose || []);
+  const estimatedStaffCostPayroll = staffCostFor(event.staffRosterPrognose || [], event.shiftsPrognose || [], false);
+  const estimatedStaffCostContractor = staffCostFor(event.staffRosterPrognose || [], event.shiftsPrognose || [], true);
   const hasActualShifts = (event.shiftsActual || []).length > 0;
   const actualStaffCost = hasActualShifts
     ? staffCostFor(event.staffRosterActual || [], event.shiftsActual || [])
     : estimatedStaffCost;
+  const actualStaffCostPayroll = hasActualShifts
+    ? staffCostFor(event.staffRosterActual || [], event.shiftsActual || [], false)
+    : estimatedStaffCostPayroll;
+  const actualStaffCostContractor = hasActualShifts
+    ? staffCostFor(event.staffRosterActual || [], event.shiftsActual || [], true)
+    : estimatedStaffCostContractor;
 
   const estimatedOtherCosts = otherCosts(estimatedUnits);
   const actualOtherCosts = otherCosts(actualUnits);
@@ -14091,8 +14101,13 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
 
     // Kun navn/dato/tid/timer - ALDRI timelønn/lønnskostnad i selve utskriften,
     // siden papirutskriften kan havne hos andre enn de med canSeeWages-tilgang.
-    function shiftsSectionHtml(title: string, roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+        function shiftsSectionHtml(title: string, roster: EventStaffMember[], shifts: EventShiftEntry[], contractorFilter?: boolean) {
       const rows = [...shifts]
+        .filter((s) => {
+          if (contractorFilter === undefined) return true;
+          const member = roster.find((m) => m.id === s.staffMemberId);
+          return !!member?.isContractor === contractorFilter;
+        })
         .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
         .map((s) => {
           const member = roster.find((m) => m.id === s.staffMemberId);
@@ -14103,8 +14118,10 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
         : `<p style="color:#64748b">Ingen registreringer.</p>`;
       return `<h2>${escapeHtml(title)}</h2>${table}`;
     }
-    const staffSection = shiftsSectionHtml("Vaktliste – Prognose", event.staffRosterPrognose || [], event.shiftsPrognose || [])
-      + shiftsSectionHtml("Vaktliste – Faktisk brukt tid", event.staffRosterActual || [], event.shiftsActual || []);
+    const staffSection = shiftsSectionHtml("Vaktliste – Prognose (ordinært lønnssystem)", event.staffRosterPrognose || [], event.shiftsPrognose || [], false)
+      + shiftsSectionHtml("Vaktliste – Prognose (innleid personell)", event.staffRosterPrognose || [], event.shiftsPrognose || [], true)
+      + shiftsSectionHtml("Vaktliste – Faktisk brukt tid (ordinært lønnssystem)", event.staffRosterActual || [], event.shiftsActual || [], false)
+      + shiftsSectionHtml("Vaktliste – Faktisk brukt tid (innleid personell)", event.staffRosterActual || [], event.shiftsActual || [], true);
 
     const costRows = event.customCostLines.map((c) =>
       `<tr><td>${escapeHtml(c.label)}</td><td class="right">${currency(c.amount)} eks. mva</td><td class="right">${c.vatRate}%</td><td>${c.mode === "per_unit" ? "Per solgt enhet" : "Engangssum"}</td></tr>`
@@ -14361,6 +14378,10 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                         )}
                         <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffMember(member.id)}>Fjern ansatt</button>
                       </div>
+                      <label className="check" style={{ marginTop: 6 }}>
+                        <input type="checkbox" checked={!!member.isContractor} disabled={readOnly} onChange={(e) => updateStaffMember(member.id, { isContractor: e.target.checked })} />
+                        Innleid personell (betales utenfor lønnssystemet)
+                      </label>
                       {shifts.map((shift) => (
                         <div key={shift.id} className="editable-row">
                           <span style={{ display: "flex", gap: 8, flex: 1 }}>
