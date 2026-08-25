@@ -13758,8 +13758,10 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
     actualUnits += actQty;
   });
 
-  const estimatedRevenue = exVatFromIncVat(estimatedRevenueIncVat, vatRate);
+    const estimatedRevenue = exVatFromIncVat(estimatedRevenueIncVat, vatRate);
   const actualRevenue = exVatFromIncVat(actualRevenueIncVat, vatRate);
+  const estimatedRevenueInc = estimatedRevenueIncVat;
+  const actualRevenueInc = actualRevenueIncVat;
 
     function staffCostFor(roster: EventStaffMember[], shifts: EventShiftEntry[], contractorFilter?: boolean) {
     return shifts.reduce((sum, shift) => {
@@ -13794,14 +13796,14 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
   const actualTotalHours = hasActualShifts ? totalHoursFor(event.shiftsActual || []) : estimatedTotalHours;
   const perHour = (profit: number, hours: number) => (hours > 0 ? profit / hours : 0);
 
-  return {
+    return {
     estimated: {
-      revenue: estimatedRevenue, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit,
+      revenue: estimatedRevenue, revenueInc: estimatedRevenueInc, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit,
       cogsPercent: pct(estimatedCogs, estimatedRevenue), staffCostPercent: pct(estimatedStaffCost, estimatedRevenue),
       totalHours: estimatedTotalHours, profitPerHour: perHour(estimatedProfit, estimatedTotalHours),
     },
     actual: {
-      revenue: actualRevenue, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit,
+      revenue: actualRevenue, revenueInc: actualRevenueInc, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit,
       cogsPercent: pct(actualCogs, actualRevenue), staffCostPercent: pct(actualStaffCost, actualRevenue),
       totalHours: actualTotalHours, profitPerHour: perHour(actualProfit, actualTotalHours),
     },
@@ -14493,20 +14495,21 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Sammenligning av forventet og faktisk lønnsomhet, med differanse på hver linje.</p>
             </div>
             <div style={{ overflowX: "auto", marginTop: 12 }}>
-              <table>
-                <thead><tr><th></th><th style={{ textAlign: "right" }}>Prognose</th><th style={{ textAlign: "right" }}>Faktisk</th><th style={{ textAlign: "right" }}>Differanse</th></tr></thead>
+                            <table>
+                <thead><tr><th></th><th style={{ textAlign: "right" }}>Prognose</th><th style={{ textAlign: "right" }}>Faktisk</th></tr></thead>
                 <tbody>
-                  <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenue)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenue)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.revenue, calc.actual.revenue)}</td></tr>
-                                    <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.cogs, calc.actual.cogs)}</td></tr>
-                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– varekost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.cogsPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.cogsPercent.toFixed(1)}%</td><td></td></tr>
+                  <tr><td>Omsetning (inkl. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenueInc)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenueInc)}</td></tr>
+                  <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenue)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenue)}</td></tr>
+                  <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– varekost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.cogsPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.cogsPercent.toFixed(1)}%</td></tr>
                   {(calc.estimated.staffMealCost > 0 || calc.actual.staffMealCost > 0) && (
-                    <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav personalmat</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffMealCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffMealCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffMealCost, calc.actual.staffMealCost)}</td></tr>
+                    <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav personalmat</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffMealCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffMealCost)}</td></tr>
                   )}
-                                    <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
-                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– personalkost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.staffCostPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.staffCostPercent.toFixed(1)}%</td><td></td></tr>
-                  <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.otherCosts, calc.actual.otherCosts)}</td></tr>
-                                    <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
-                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– dekningsbidrag/time ({formatHoursMinutes(calc.estimated.totalHours)} / {formatHoursMinutes(calc.actual.totalHours)})</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profitPerHour)}/t</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profitPerHour)}/t</td><td></td></tr>
+                  <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– personalkost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.staffCostPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.staffCostPercent.toFixed(1)}%</td></tr>
+                  <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td></tr>
+                  <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– dekningsbidrag/time ({formatHoursMinutes(calc.estimated.totalHours)} / {formatHoursMinutes(calc.actual.totalHours)})</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profitPerHour)}/t</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profitPerHour)}/t</td></tr>
                 </tbody>
               </table>
             </div>
