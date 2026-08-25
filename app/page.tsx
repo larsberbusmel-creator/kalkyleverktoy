@@ -207,16 +207,22 @@ type EventProductLine = {
                                  // faller tilbake til product.customerPrice hvis tom
 };
 
-// Samme form som StaffTimeEntry (navn+start+slutt), men med et PÅKREVD
-// date-felt siden hver oppføring skal knyttes til en spesifikk dag i et
-// flerdagers-event, og et sensitivt hourlyWage-felt (se canSeeWages).
-type EventStaffTimeEntry = {
+// Vaktliste: en ansatt (roster) kan ha flere vakter (shifts), hver knyttet
+// til én dag i eventet. Prognose og Faktisk brukt tid er to HELT separate
+// datasett (egne roster+shifts-par) - "Faktisk" starter som en kopi av
+// "Prognose" (se copyPrognoseToActual i EventTab), men redigeres uavhengig
+// deretter. hourlyWage er SENSITIVT - tilgangsstyrt via canSeeWages.
+type EventStaffMember = {
   id: string;
   name: string;
-  date: string;       // "YYYY-MM-DD"
+  hourlyWage?: number;
+};
+type EventShiftEntry = {
+  id: string;
+  staffMemberId: string;
+  date: string;       // "YYYY-MM-DD" - begrenset til event.date...event.endDate i UI
   startTime: string;  // "HH:MM"
   endTime: string;    // "HH:MM"
-  hourlyWage?: number; // SENSITIVT FELT - tilgangsstyrt via canSeeWages
 };
 
 type EventCustomCostLine = {
@@ -235,12 +241,14 @@ type EventCalculation = {
   date: string;
   endDate?: string;              // flerdagers, samme mønster som RentalOffer
   productLines: EventProductLine[];
-  staffTimeLog: EventStaffTimeEntry[];
-  estimatedStaffCount?: number;  // forhåndsestimat, FØR navngitt timeliste finnes
-  estimatedStaffHours?: number;
-  estimatedHourlyWage?: number;  // generelt lønnsestimat brukt KUN i prognosen,
-                                  // før faktiske, navngitte lønninger er kjent
+  staffRosterPrognose: EventStaffMember[];
+  shiftsPrognose: EventShiftEntry[];
+  staffRosterActual: EventStaffMember[];
+  shiftsActual: EventShiftEntry[];
   customCostLines: EventCustomCostLine[];
+  selectedPackingListTemplateIds?: string[];
+  extraPackingListItems?: PackingListItem[];
+  packingListChecked?: Record<string, boolean>;
   note?: string;
   createdBy?: string;
   createdAt?: string;
@@ -670,7 +678,7 @@ function formatDateNo(date: string) {
 }
 
 // Timer for én vakt, korrigert for vakter som går over midnatt (f.eks. 17:00-01:00).
-function staffEntryHours(entry: StaffTimeEntry): number {
+function staffEntryHours(entry: { startTime: string; endTime: string }): number {
   const [startH, startM] = entry.startTime.split(":").map(Number);
   const [endH, endM] = entry.endTime.split(":").map(Number);
   const startMinutes = (startH || 0) * 60 + (startM || 0);
@@ -995,8 +1003,26 @@ barTallyEntries:
   (raw as any).barTallyEntries || [],
   customerDirectory:
     (raw as any).customerDirectory || [],
+  // Ren passthrough av selve eventCalculations-listen (nye, nestede felt på
+  // hvert event følger automatisk med siden objektene ikke bygges opp felt-
+  // for-felt her). ENESTE unntak: eldre testdata kan ha det nå fjernede,
+  // flate staffTimeLog-feltet - migrer denne ETT GANG inn i shiftsActual +
+  // en utledet staffRosterActual-oppføring per unike navn+lønn, kun når
+  // shiftsActual/staffRosterActual ikke allerede finnes (dvs. ikke allerede migrert).
   eventCalculations:
-    (raw as any).eventCalculations || [],
+    ((raw as any).eventCalculations || []).map((ev: any) => {
+      const legacyLog = ev.staffTimeLog || [];
+      const alreadyMigrated = (ev.staffRosterActual || []).length > 0 || (ev.shiftsActual || []).length > 0;
+      if (!legacyLog.length || alreadyMigrated) return ev;
+      const rosterMap: Record<string, { id: string; name: string; hourlyWage?: number }> = {};
+      const shifts: any[] = [];
+      legacyLog.forEach((entry: any) => {
+        const key = `${entry.name}__${entry.hourlyWage ?? ""}`;
+        if (!rosterMap[key]) rosterMap[key] = { id: `esm-migrated-${Object.keys(rosterMap).length}-${ev.id}`, name: entry.name, hourlyWage: entry.hourlyWage };
+        shifts.push({ id: entry.id, staffMemberId: rosterMap[key].id, date: entry.date, startTime: entry.startTime, endTime: entry.endTime });
+      });
+      return { ...ev, staffRosterActual: Object.values(rosterMap), shiftsActual: shifts };
+    }),
   seenOrderIds: (() => {
   const legacyDates: string[] = (raw as any).seenOrderDates || [];
   const existing: string[] = (raw as any).seenOrderIds || [];
@@ -13633,11 +13659,14 @@ const EVENT_FIELD_LABELS: Record<string, string> = {
   date: "Dato",
   endDate: "Til dato",
   productLines: "Produkter",
-  staffTimeLog: "Timeliste",
-  estimatedStaffCount: "Estimert antall ansatte",
-  estimatedStaffHours: "Estimerte timer",
-  estimatedHourlyWage: "Estimert timelønn",
+  staffRosterPrognose: "Bemanning (prognose)",
+  shiftsPrognose: "Vaktliste (prognose)",
+  staffRosterActual: "Bemanning (faktisk)",
+  shiftsActual: "Vaktliste (faktisk)",
   customCostLines: "Andre kostnader",
+  selectedPackingListTemplateIds: "Pakkelistemaler",
+  extraPackingListItems: "Pakkeliste, fritekst-punkter",
+  packingListChecked: "Avkrysning pakkeliste",
   note: "Notat",
 };
 
@@ -13703,10 +13732,16 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
   const estimatedRevenue = exVatFromIncVat(estimatedRevenueIncVat, vatRate);
   const actualRevenue = exVatFromIncVat(actualRevenueIncVat, vatRate);
 
-  const estimatedStaffCost = (Number(event.estimatedStaffCount) || 0) * (Number(event.estimatedStaffHours) || 0) * (Number(event.estimatedHourlyWage) || 0);
-  const hasStaffLog = (event.staffTimeLog || []).length > 0;
-  const actualStaffCost = hasStaffLog
-    ? (event.staffTimeLog || []).reduce((sum, e) => sum + staffEntryHours(e) * (Number(e.hourlyWage) || 0), 0)
+  function staffCostFor(roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+    return shifts.reduce((sum, shift) => {
+      const member = roster.find((m) => m.id === shift.staffMemberId);
+      return sum + staffEntryHours(shift) * (Number(member?.hourlyWage) || 0);
+    }, 0);
+  }
+  const estimatedStaffCost = staffCostFor(event.staffRosterPrognose || [], event.shiftsPrognose || []);
+  const hasActualShifts = (event.shiftsActual || []).length > 0;
+  const actualStaffCost = hasActualShifts
+    ? staffCostFor(event.staffRosterActual || [], event.shiftsActual || [])
     : estimatedStaffCost;
 
   const estimatedOtherCosts = otherCosts(estimatedUnits);
@@ -13718,7 +13753,7 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
   return {
     estimated: { revenue: estimatedRevenue, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit },
     actual: { revenue: actualRevenue, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit },
-    hasActualData: (event.productLines || []).some((l) => l.actualQty != null) || hasStaffLog,
+    hasActualData: (event.productLines || []).some((l) => l.actualQty != null) || hasActualShifts,
   };
 }
 
@@ -13740,8 +13775,13 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
     location: "",
     date: today(),
     productLines: [],
-    staffTimeLog: [],
+    staffRosterPrognose: [],
+    shiftsPrognose: [],
+    staffRosterActual: [],
+    shiftsActual: [],
     customCostLines: [],
+    selectedPackingListTemplateIds: [],
+    extraPackingListItems: [],
   });
 
   const [event, setEvent] = useState<EventCalculation>(emptyEvent());
@@ -13750,9 +13790,11 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   const [eventSearch, setEventSearch] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [newCustomCost, setNewCustomCost] = useState({ label: "", amount: "0", vatRate: "25" as "15" | "25", mode: "flat" as "flat" | "per_unit" });
-  const [newStaffTime, setNewStaffTime] = useState({ name: "", date: "", startTime: "", endTime: "", hourlyWage: "" });
   const [marginDraft, setMarginDraft] = useState<Record<string, string>>({});
   const [editLogOpen, setEditLogOpen] = useState(false);
+  const [staffScheduleMode, setStaffScheduleMode] = useState<"prognose" | "faktisk">("prognose");
+  const [showPackingListPanel, setShowPackingListPanel] = useState(false);
+  const [newExtraPackingLabel, setNewExtraPackingLabel] = useState("");
 
   const events = data.eventCalculations || [];
 
@@ -13852,22 +13894,118 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
     updateProductLine(line.id, { priceOverride: suggested });
   }
 
-  function addStaffTimeEntry() {
-    if (!newStaffTime.name.trim() || !newStaffTime.date || !newStaffTime.startTime || !newStaffTime.endTime) return;
-    const entry: EventStaffTimeEntry = {
-      id: `est-${Date.now()}`,
-      name: newStaffTime.name.trim(),
-      date: newStaffTime.date,
-      startTime: newStaffTime.startTime,
-      endTime: newStaffTime.endTime,
-      hourlyWage: newStaffTime.hourlyWage ? Number(newStaffTime.hourlyWage) : undefined,
-    };
-    setEvent({ ...event, staffTimeLog: [...event.staffTimeLog, entry] });
-    setNewStaffTime({ name: "", date: newStaffTime.date, startTime: "", endTime: "", hourlyWage: "" });
+  // Vaktliste: Prognose og Faktisk brukt tid er to separate roster+shifts-par.
+  // Alt her lagres write-through (som Kasse/pakkeliste-avkrysning) - men kun når
+  // eventet faktisk er lagret én gang (event.id finnes), ellers holder vi oss
+  // til vanlig lokal skjema-state fram til første "Lagre" (samme mønster som
+  // resten av det ulagrede skjemaet).
+  function localDateKey(d: Date) {
+    const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, "0"); const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
   }
 
-  function removeStaffTimeEntry(id: string) {
-    setEvent({ ...event, staffTimeLog: event.staffTimeLog.filter((e) => e.id !== id) });
+  function eventDateOptions(): string[] {
+    if (!event.date) return [];
+    if (!event.endDate || event.endDate <= event.date) return [event.date];
+    const dates: string[] = [];
+    let cur = new Date(event.date + "T12:00:00");
+    const end = new Date(event.endDate + "T12:00:00");
+    while (cur <= end) {
+      dates.push(localDateKey(cur));
+      cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+    }
+    return dates;
+  }
+
+  function currentRoster(): EventStaffMember[] {
+    return staffScheduleMode === "prognose" ? (event.staffRosterPrognose || []) : (event.staffRosterActual || []);
+  }
+  function currentShifts(): EventShiftEntry[] {
+    return staffScheduleMode === "prognose" ? (event.shiftsPrognose || []) : (event.shiftsActual || []);
+  }
+
+  function updateRosterAndShifts(roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+    const updated: EventCalculation = staffScheduleMode === "prognose"
+      ? { ...event, staffRosterPrognose: roster, shiftsPrognose: shifts }
+      : { ...event, staffRosterActual: roster, shiftsActual: shifts };
+    setEvent(updated);
+    if (event.id) updateListRpc("eventCalculations", { [event.id]: updated });
+  }
+
+  function addStaffMember() {
+    const member: EventStaffMember = { id: `esm-${Date.now()}`, name: "" };
+    updateRosterAndShifts([...currentRoster(), member], currentShifts());
+  }
+  function updateStaffMember(id: string, patch: Partial<EventStaffMember>) {
+    updateRosterAndShifts(currentRoster().map((m) => (m.id === id ? { ...m, ...patch } : m)), currentShifts());
+  }
+  function removeStaffMember(id: string) {
+    updateRosterAndShifts(currentRoster().filter((m) => m.id !== id), currentShifts().filter((s) => s.staffMemberId !== id));
+  }
+  function addShift(staffMemberId: string) {
+    const dates = eventDateOptions();
+    const shift: EventShiftEntry = { id: `esh-${Date.now()}`, staffMemberId, date: dates[0] || event.date, startTime: "", endTime: "" };
+    updateRosterAndShifts(currentRoster(), [...currentShifts(), shift]);
+  }
+  function updateShift(id: string, patch: Partial<EventShiftEntry>) {
+    updateRosterAndShifts(currentRoster(), currentShifts().map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }
+  function removeShift(id: string) {
+    updateRosterAndShifts(currentRoster(), currentShifts().filter((s) => s.id !== id));
+  }
+
+  // Kopierer Prognose-bemanningen inn i Faktisk, med nye id-er på alt (dyp kopi).
+  // force=false: kun hvis Faktisk er tomt fra før (automatisk ved modusbytte).
+  // force=true: alltid, med bekreftelsesdialog hvis Faktisk allerede har innhold.
+  function copyPrognoseToActual(force: boolean) {
+    const roster = event.staffRosterPrognose || [];
+    const shifts = event.shiftsPrognose || [];
+    if (!roster.length && !shifts.length) return;
+    const actualHasContent = (event.staffRosterActual || []).length > 0 || (event.shiftsActual || []).length > 0;
+    if (!force && actualHasContent) return;
+    if (force && actualHasContent) {
+      if (!confirm("Dette vil overskrive eksisterende faktiske registreringer med en kopi av prognosen. Fortsette?")) return;
+    }
+    const idMap: Record<string, string> = {};
+    const newRoster = roster.map((m) => {
+      const newId = `esm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      idMap[m.id] = newId;
+      return { ...m, id: newId };
+    });
+    const newShifts = shifts.map((s) => ({ ...s, id: `esh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, staffMemberId: idMap[s.staffMemberId] || s.staffMemberId }));
+    const updated: EventCalculation = { ...event, staffRosterActual: newRoster, shiftsActual: newShifts };
+    setEvent(updated);
+    if (event.id) updateListRpc("eventCalculations", { [event.id]: updated });
+  }
+
+  // Pakkeliste: kun mal-systemet og fritekst-systemet (Eventkalkyle har ikke
+  // bordplan/tillegg, så coverItems/rentalAddons-koblede punkter er ikke
+  // relevante her - se packingChecklistRows i RentalTab for kontrast).
+  function eventPackingChecklistRows(): { id: string; label: string }[] {
+    const rows: { id: string; label: string }[] = [];
+    (data.packingListTemplates || [])
+      .filter((t) => (event.selectedPackingListTemplateIds || []).includes(t.id))
+      .forEach((t) => t.items.forEach((item) => rows.push({ id: `template:${item.id}`, label: item.label })));
+    (event.extraPackingListItems || []).forEach((item) => rows.push({ id: `extra:${item.id}`, label: item.label }));
+    return rows;
+  }
+
+  function addExtraPackingItem() {
+    if (!newExtraPackingLabel.trim()) return;
+    const item: PackingListItem = { id: `epi-${Date.now()}`, label: newExtraPackingLabel.trim() };
+    setEvent({ ...event, extraPackingListItems: [...(event.extraPackingListItems || []), item] });
+    setNewExtraPackingLabel("");
+  }
+  function removeExtraPackingItem(id: string) {
+    setEvent({ ...event, extraPackingListItems: (event.extraPackingListItems || []).filter((i) => i.id !== id) });
+  }
+  function togglePackingListChecked(id: string) {
+    if (!event.id) return;
+    const next = { ...(event.packingListChecked || {}) };
+    next[id] = !next[id];
+    const updated: EventCalculation = { ...event, packingListChecked: next };
+    setEvent(updated);
+    updateListRpc("eventCalculations", { [event.id]: updated });
   }
 
   function addCustomCostLine() {
@@ -13964,166 +14102,306 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
             <label>Til dato (valgfritt - flerdagers)<input type="date" value={event.endDate || ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, endDate: e.target.value || undefined })} /></label>
           </div>
 
-          <h3 style={{ marginTop: 16 }}>Produkter</h3>
-          <div className="search-picker" style={{ maxWidth: 360 }}>
-            <input value={productSearch} disabled={readOnly} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk og legg til produkt..." />
-            {productSearch && (
-              <div className="search-dropdown inline">
-                {filteredProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
-                {filteredProducts.map((p) => (
-                  <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => addProductLine(p.id)}>
-                    <b>{p.name}</b>
-                    <small>{p.productNumber} · {currency(p.customerPrice)}</small>
-                  </button>
+          <div className="soft-box">
+            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Produkter</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Legg til produktene som selges på eventet, med estimert og faktisk solgt antall.</p>
+            </div>
+            <div className="search-picker" style={{ maxWidth: 360, marginTop: 12 }}>
+              <input value={productSearch} disabled={readOnly} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk og legg til produkt..." />
+              {productSearch && (
+                <div className="search-dropdown inline">
+                  {filteredProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+                  {filteredProducts.map((p) => (
+                    <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => addProductLine(p.id)}>
+                      <b>{p.name}</b>
+                      <small>{p.productNumber} · {currency(p.customerPrice)}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {event.productLines.length > 0 && (
+              <table style={{ marginTop: 12 }}>
+                <thead>
+                  <tr>
+                    <th>Produkt</th>
+                    <th style={{ textAlign: "right" }}>Estimert antall</th>
+                    <th style={{ textAlign: "right" }}>Faktisk antall</th>
+                    <th style={{ textAlign: "right" }}>Personalmat</th>
+                    <th style={{ textAlign: "right" }}>Pris (inkl. mva)</th>
+                    <th>Prisforslag</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {event.productLines.map((l) => {
+                    const product = data.products.find((p) => p.id === l.productId);
+                    const cost = product ? productUnitCost(product) : 0;
+                    const suggested = product ? recommendedPriceIncVat(cost, Number(marginDraft[l.id] || 0)) : 0;
+                    const mealQty = Number(l.staffMealQty) || 0;
+                    return (
+                      <React.Fragment key={l.id}>
+                      <tr>
+                        <td>{product?.name || "Ukjent produkt"}</td>
+                        <td style={{ textAlign: "right" }}>
+                          <input type="number" style={{ width: 80, textAlign: "right" }} value={l.estimatedQty} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { estimatedQty: Number(e.target.value) || 0 })} />
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <input type="number" style={{ width: 80, textAlign: "right" }} placeholder="-" value={l.actualQty ?? ""} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { actualQty: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <input type="number" style={{ width: 70, textAlign: "right" }} value={l.staffMealQty ?? ""} placeholder="0" disabled={readOnly} onChange={(e) => updateProductLine(l.id, { staffMealQty: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <input type="number" style={{ width: 90, textAlign: "right" }} placeholder={String(product?.customerPrice || 0)} value={l.priceOverride ?? ""} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { priceOverride: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <input type="number" style={{ width: 55 }} placeholder="Margin %" disabled={readOnly} value={marginDraft[l.id] || ""} onChange={(e) => setMarginDraft({ ...marginDraft, [l.id]: e.target.value })} />
+                            {marginDraft[l.id] && product && (
+                              <button type="button" className="link" disabled={readOnly} onClick={() => applySuggestedPrice(l, product)} title={`Foreslått: ${currency(suggested)}`}>
+                                Bruk {currency(suggested)}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeProductLine(l.id)}>Slett</button></td>
+                      </tr>
+                      {mealQty > 0 && (
+                        <tr>
+                          <td colSpan={7} style={{ fontSize: 12, color: "#64748b", paddingLeft: 20 }}>
+                            Personalmat: {mealQty} stk × {currency(cost)} = {currency(mealQty * cost)} (kostnad, ingen omsetning)
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="soft-box">
+            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Bemanning</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Vaktliste per ansatt og dag - Prognose og Faktisk brukt tid føres som to uavhengige sett.</p>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+              <button className={staffScheduleMode === "prognose" ? "btn active" : "btn"} onClick={() => setStaffScheduleMode("prognose")}>Prognose</button>
+              <button className={staffScheduleMode === "faktisk" ? "btn active" : "btn"} onClick={() => { setStaffScheduleMode("faktisk"); copyPrognoseToActual(false); }}>Faktisk brukt tid</button>
+              {staffScheduleMode === "faktisk" && (
+                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => copyPrognoseToActual(true)}>🔄 Kopier fra prognose på nytt</button>
+              )}
+            </div>
+
+            <button className="btn active" style={{ marginTop: 12 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addStaffMember}>+ Ny ansatt</button>
+
+            {currentRoster().length === 0 ? (
+              <p className="muted" style={{ marginTop: 8 }}>Ingen ansatte lagt til i {staffScheduleMode === "prognose" ? "prognosen" : "faktisk brukt tid"} ennå.</p>
+            ) : (
+              currentRoster().map((member) => {
+                const shifts = currentShifts().filter((s) => s.staffMemberId === member.id);
+                return (
+                  <div key={member.id} className="soft-box" style={{ background: "white" }}>
+                    <div className="form-grid three">
+                      <input placeholder="Navn" value={member.name} disabled={readOnly} onChange={(e) => updateStaffMember(member.id, { name: e.target.value })} />
+                      {canSeeWages ? (
+                        <input type="number" placeholder="Timelønn" value={member.hourlyWage ?? ""} disabled={readOnly} onChange={(e) => updateStaffMember(member.id, { hourlyWage: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                      ) : (
+                        <input value="•••" disabled title="Du har ikke tilgang til å se lønnsdata" />
+                      )}
+                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffMember(member.id)}>Fjern ansatt</button>
+                    </div>
+                    {shifts.map((shift) => (
+                      <div key={shift.id} className="editable-row">
+                        <span style={{ display: "flex", gap: 8, flex: 1 }}>
+                          <select value={shift.date} disabled={readOnly} onChange={(e) => updateShift(shift.id, { date: e.target.value })}>
+                            {eventDateOptions().map((d) => <option key={d} value={d}>{formatDateNo(d)}</option>)}
+                          </select>
+                          <input placeholder="Start (f.eks. 2030)" style={{ maxWidth: 120 }} value={shift.startTime} disabled={readOnly} onChange={(e) => updateShift(shift.id, { startTime: e.target.value })} onBlur={(e) => updateShift(shift.id, { startTime: formatTimeInputPlain(e.target.value) })} />
+                          <input placeholder="Slutt (f.eks. 2200)" style={{ maxWidth: 120 }} value={shift.endTime} disabled={readOnly} onChange={(e) => updateShift(shift.id, { endTime: e.target.value })} onBlur={(e) => updateShift(shift.id, { endTime: formatTimeInputPlain(e.target.value) })} />
+                          <span className="muted" style={{ alignSelf: "center", fontSize: 12 }}>{formatHoursMinutes(staffEntryHours(shift))}</span>
+                        </span>
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeShift(shift.id)}>Fjern</button>
+                      </div>
+                    ))}
+                    <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addShift(member.id)}>+ Legg til vakt</button>
+                  </div>
+                );
+              })
+            )}
+
+            {(() => {
+              const shifts = currentShifts();
+              const roster = currentRoster();
+              const totalHours = shifts.reduce((sum, s) => sum + staffEntryHours(s), 0);
+              const totalWage = shifts.reduce((sum, s) => sum + staffEntryHours(s) * (Number(roster.find((m) => m.id === s.staffMemberId)?.hourlyWage) || 0), 0);
+              return (
+                <p style={{ marginTop: 8, fontWeight: 700 }}>
+                  Totalt: {formatHoursMinutes(totalHours)}{canSeeWages ? ` · ${currency(totalWage)}` : ""}
+                </p>
+              );
+            })()}
+          </div>
+
+          <div className="soft-box">
+            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Andre kostnader</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>F.eks. standplassleie, strøm eller leie av kassapunkt - beløp eks. mva.</p>
+            </div>
+            {event.customCostLines.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                {event.customCostLines.map((c) => (
+                  <div key={c.id} className="editable-row">
+                    <span>{c.label}: {currency(c.amount)} eks. mva{c.mode === "per_unit" ? " (per solgt enhet)" : ""} · {currency(c.amount * (1 + c.vatRate / 100))} inkl. {c.vatRate}% mva</span>
+                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeCustomCostLine(c.id)}>Slett</button>
+                  </div>
                 ))}
               </div>
             )}
-          </div>
-
-          {event.productLines.length > 0 && (
-            <table style={{ marginTop: 12 }}>
-              <thead>
-                <tr>
-                  <th>Produkt</th>
-                  <th style={{ textAlign: "right" }}>Estimert antall</th>
-                  <th style={{ textAlign: "right" }}>Faktisk antall</th>
-                  <th style={{ textAlign: "right" }}>Personalmat</th>
-                  <th style={{ textAlign: "right" }}>Pris (inkl. mva)</th>
-                  <th>Prisforslag</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {event.productLines.map((l) => {
-                  const product = data.products.find((p) => p.id === l.productId);
-                  const cost = product ? productUnitCost(product) : 0;
-                  const suggested = product ? recommendedPriceIncVat(cost, Number(marginDraft[l.id] || 0)) : 0;
-                  const mealQty = Number(l.staffMealQty) || 0;
-                  return (
-                    <React.Fragment key={l.id}>
-                    <tr>
-                      <td>{product?.name || "Ukjent produkt"}</td>
-                      <td style={{ textAlign: "right" }}>
-                        <input type="number" style={{ width: 80, textAlign: "right" }} value={l.estimatedQty} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { estimatedQty: Number(e.target.value) || 0 })} />
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <input type="number" style={{ width: 80, textAlign: "right" }} placeholder="-" value={l.actualQty ?? ""} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { actualQty: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <input type="number" style={{ width: 70, textAlign: "right" }} value={l.staffMealQty ?? ""} placeholder="0" disabled={readOnly} onChange={(e) => updateProductLine(l.id, { staffMealQty: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <input type="number" style={{ width: 90, textAlign: "right" }} placeholder={String(product?.customerPrice || 0)} value={l.priceOverride ?? ""} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { priceOverride: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                          <input type="number" style={{ width: 55 }} placeholder="Margin %" disabled={readOnly} value={marginDraft[l.id] || ""} onChange={(e) => setMarginDraft({ ...marginDraft, [l.id]: e.target.value })} />
-                          {marginDraft[l.id] && product && (
-                            <button type="button" className="link" disabled={readOnly} onClick={() => applySuggestedPrice(l, product)} title={`Foreslått: ${currency(suggested)}`}>
-                              Bruk {currency(suggested)}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeProductLine(l.id)}>Slett</button></td>
-                    </tr>
-                    {mealQty > 0 && (
-                      <tr>
-                        <td colSpan={7} style={{ fontSize: 12, color: "#64748b", paddingLeft: 20 }}>
-                          Personalmat: {mealQty} stk × {currency(cost)} = {currency(mealQty * cost)} (kostnad, ingen omsetning)
-                        </td>
-                      </tr>
-                    )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-
-          <h3 style={{ marginTop: 16 }}>Bemanning - prognose</h3>
-          <div className="form-grid three">
-            <label>Estimert antall ansatte<input type="number" value={event.estimatedStaffCount ?? ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, estimatedStaffCount: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} /></label>
-            <label>Estimerte timer (per ansatt)<input type="number" value={event.estimatedStaffHours ?? ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, estimatedStaffHours: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} /></label>
-            <label>Estimert timelønn
-              {canSeeWages ? (
-                <input type="number" value={event.estimatedHourlyWage ?? ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, estimatedHourlyWage: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
-              ) : (
-                <input value="•••" disabled title="Du har ikke tilgang til å se lønnsdata" />
-              )}
-            </label>
-          </div>
-
-          <h3 style={{ marginTop: 16 }}>Bemanning - timeliste (faktisk)</h3>
-          {event.staffTimeLog.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              {event.staffTimeLog.map((entry) => (
-                <div key={entry.id} className="editable-row">
-                  <span>{entry.name} · {formatDateNo(entry.date)} · {entry.startTime}–{entry.endTime} ({formatHoursMinutes(staffEntryHours(entry))}){canSeeWages && entry.hourlyWage != null ? ` · ${currency(entry.hourlyWage)}/t` : canSeeWages ? "" : " · •••"}</span>
-                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffTimeEntry(entry.id)}>Slett</button>
-                </div>
-              ))}
+            <div className="form-grid four" style={{ marginTop: 8 }}>
+              <input placeholder="F.eks. Standplass" value={newCustomCost.label} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, label: e.target.value })} />
+              <input type="number" placeholder="Beløp eks. mva" value={newCustomCost.amount} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, amount: e.target.value })} />
+              <select value={newCustomCost.vatRate} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, vatRate: e.target.value as "15" | "25" })}>
+                <option value="25">25% mva</option>
+                <option value="15">15% mva</option>
+              </select>
+              <select value={newCustomCost.mode} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, mode: e.target.value as "flat" | "per_unit" })}>
+                <option value="flat">Fast beløp</option>
+                <option value="per_unit">Per solgt enhet</option>
+              </select>
             </div>
-          )}
-          <div className="form-grid five" style={{ marginTop: 8 }}>
-            <input placeholder="Navn" value={newStaffTime.name} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, name: e.target.value })} />
-            <input type="date" value={newStaffTime.date} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, date: e.target.value })} min={event.date} max={event.endDate || event.date} />
-                        <input placeholder="Start (f.eks. 2030)" value={newStaffTime.startTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, startTime: e.target.value })} onBlur={(e) => setNewStaffTime({ ...newStaffTime, startTime: formatTimeInputPlain(e.target.value) })} />
-            <input placeholder="Slutt (f.eks. 2200)" value={newStaffTime.endTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, endTime: e.target.value })} onBlur={(e) => setNewStaffTime({ ...newStaffTime, endTime: formatTimeInputPlain(e.target.value) })} />
-            {canSeeWages ? (
-              <input type="number" placeholder="Timelønn" value={newStaffTime.hourlyWage} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, hourlyWage: e.target.value })} />
-            ) : (
-              <input value="•••" disabled title="Du har ikke tilgang til å se lønnsdata" />
+            <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomCostLine}>Legg til kostnad</button>
+          </div>
+
+          <div className="soft-box">
+            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Prognose vs. Faktisk</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Sammenligning av forventet og faktisk lønnsomhet, med differanse på hver linje.</p>
+            </div>
+            <div style={{ overflowX: "auto", marginTop: 12 }}>
+              <table>
+                <thead><tr><th></th><th style={{ textAlign: "right" }}>Prognose</th><th style={{ textAlign: "right" }}>Faktisk</th><th style={{ textAlign: "right" }}>Differanse</th></tr></thead>
+                <tbody>
+                  <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenue)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenue)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.revenue, calc.actual.revenue)}</td></tr>
+                  <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.cogs, calc.actual.cogs)}</td></tr>
+                  {(calc.estimated.staffMealCost > 0 || calc.actual.staffMealCost > 0) && (
+                    <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav personalmat</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffMealCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffMealCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffMealCost, calc.actual.staffMealCost)}</td></tr>
+                  )}
+                  <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
+                  <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.otherCosts, calc.actual.otherCosts)}</td></tr>
+                  <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+            {!calc.hasActualData && <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>"Faktisk"-kolonnen viser prognosetall inntil faktisk antall solgt og/eller vaktliste er registrert.</p>}
+          </div>
+
+          <div className="soft-box">
+            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Pakkeliste</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Velg pakkelistemaler og/eller legg til fritekst-punkter, kryss av etter hvert som ting pakkes.</p>
+            </div>
+
+            <div className="section-toggle" style={{ marginTop: 12 }} onClick={() => setShowPackingListPanel(!showPackingListPanel)}>
+              <h4 style={{ margin: 0 }}>Velg pakkelistemaler / legg til fritekst-punkter</h4>
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="section-toggle-count">{(event.selectedPackingListTemplateIds || []).length + (event.extraPackingListItems || []).length}</span>
+                {showPackingListPanel ? "▲" : "▼"}
+              </span>
+            </div>
+            {showPackingListPanel && (
+              <div className="soft-box" style={{ background: "white" }}>
+                <div className="chips">
+                  {(data.packingListTemplates || []).map((t) => {
+                    const active = (event.selectedPackingListTemplateIds || []).includes(t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={active ? "btn active" : "btn"}
+                        disabled={readOnly}
+                        onClick={() => {
+                          const ids = active
+                            ? (event.selectedPackingListTemplateIds || []).filter((id) => id !== t.id)
+                            : [...(event.selectedPackingListTemplateIds || []), t.id];
+                          setEvent({ ...event, selectedPackingListTemplateIds: ids });
+                        }}
+                      >
+                        {t.name}
+                      </button>
+                    );
+                  })}
+                  {(data.packingListTemplates || []).length === 0 && <span className="muted" style={{ fontSize: 13 }}>Ingen pakkelistemaler opprettet ennå – se Innstillinger.</span>}
+                </div>
+                <h4 style={{ marginTop: 12, marginBottom: 4 }}>Ekstra punkter (kun for dette eventet)</h4>
+                {(event.extraPackingListItems || []).map((item) => (
+                  <div key={item.id} className="editable-row">
+                    <span>{item.label}</span>
+                    <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeExtraPackingItem(item.id)}>Slett</button>
+                  </div>
+                ))}
+                <div className="form-grid two" style={{ marginTop: 8 }}>
+                  <input
+                    placeholder="F.eks. Ekstra kortterminal"
+                    value={newExtraPackingLabel}
+                    disabled={readOnly}
+                    onChange={(e) => setNewExtraPackingLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        addExtraPackingItem();
+                      }
+                    }}
+                  />
+                  <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addExtraPackingItem}>Legg til</button>
+                </div>
+              </div>
             )}
-          </div>
-          <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addStaffTimeEntry}>Legg til timeføring</button>
 
-          <h3 style={{ marginTop: 16 }}>Andre kostnader</h3>
-          {event.customCostLines.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              {event.customCostLines.map((c) => (
-                <div key={c.id} className="editable-row">
-                  <span>{c.label}: {currency(c.amount)} eks. mva{c.mode === "per_unit" ? " (per solgt enhet)" : ""} · {currency(c.amount * (1 + c.vatRate / 100))} inkl. {c.vatRate}% mva</span>
-                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeCustomCostLine(c.id)}>Slett</button>
-                </div>
-              ))}
+            {(() => {
+              const checklistRows = eventPackingChecklistRows();
+              const checkedMap = event.packingListChecked || {};
+              const checkedCount = checklistRows.filter((r) => checkedMap[r.id]).length;
+              if (!checklistRows.length) {
+                return <p className="muted" style={{ marginTop: 12 }}>Ingen pakkelistepunkter valgt ennå.</p>;
+              }
+              return (
+                <>
+                  <div className="between" style={{ marginTop: 16 }}>
+                    <h4 style={{ margin: 0 }}>Sjekkliste</h4>
+                    <span className="muted">{checkedCount} av {checklistRows.length} huket av</span>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    {checklistRows.map((r) => (
+                      <div key={r.id} className="editable-row">
+                        <label className="check">
+                          <input
+                            type="checkbox"
+                            checked={!!checkedMap[r.id]}
+                            disabled={readOnly || !event.id}
+                            onChange={() => togglePackingListChecked(r.id)}
+                          />
+                          {r.label}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          <div className="soft-box">
+            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Notater</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Fritekst, erfaringer, praktisk info til senere referanse.</p>
             </div>
-          )}
-          <div className="form-grid four" style={{ marginTop: 8 }}>
-            <input placeholder="F.eks. Standplass" value={newCustomCost.label} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, label: e.target.value })} />
-            <input type="number" placeholder="Beløp eks. mva" value={newCustomCost.amount} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, amount: e.target.value })} />
-            <select value={newCustomCost.vatRate} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, vatRate: e.target.value as "15" | "25" })}>
-              <option value="25">25% mva</option>
-              <option value="15">15% mva</option>
-            </select>
-            <select value={newCustomCost.mode} disabled={readOnly} onChange={(e) => setNewCustomCost({ ...newCustomCost, mode: e.target.value as "flat" | "per_unit" })}>
-              <option value="flat">Fast beløp</option>
-              <option value="per_unit">Per solgt enhet</option>
-            </select>
-          </div>
-          <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomCostLine}>Legg til kostnad</button>
-
-          <h3 style={{ marginTop: 20 }}>Prognose vs. Faktisk</h3>
-          <div style={{ overflowX: "auto" }}>
-            <table>
-              <thead><tr><th></th><th style={{ textAlign: "right" }}>Prognose</th><th style={{ textAlign: "right" }}>Faktisk</th><th style={{ textAlign: "right" }}>Differanse</th></tr></thead>
-              <tbody>
-                <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenue)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenue)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.revenue, calc.actual.revenue)}</td></tr>
-                <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.cogs, calc.actual.cogs)}</td></tr>
-                {(calc.estimated.staffMealCost > 0 || calc.actual.staffMealCost > 0) && (
-                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav personalmat</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffMealCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffMealCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffMealCost, calc.actual.staffMealCost)}</td></tr>
-                )}
-                <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
-                <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.otherCosts, calc.actual.otherCosts)}</td></tr>
-                <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
-              </tbody>
-            </table>
-          </div>
-          {!calc.hasActualData && <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>"Faktisk"-kolonnen viser prognosetall inntil faktisk antall solgt og/eller timeliste er registrert.</p>}
-
-          <div style={{ marginTop: 12 }}>
-            <label style={{ fontWeight: 800, fontSize: 14, display: "block", marginBottom: 6 }}>Notat</label>
-            <textarea className="textarea" value={event.note || ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, note: e.target.value })} placeholder="Fritekst, erfaringer, praktisk info osv." />
+            <textarea className="textarea" style={{ marginTop: 12 }} value={event.note || ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, note: e.target.value })} placeholder="Fritekst, erfaringer, praktisk info osv." />
           </div>
 
           {editingEventId && (
