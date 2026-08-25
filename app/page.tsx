@@ -14342,34 +14342,41 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
             {currentRoster().length === 0 ? (
               <p className="muted" style={{ marginTop: 8 }}>Ingen ansatte lagt til i {staffScheduleMode === "prognose" ? "prognosen" : "faktisk brukt tid"} ennå.</p>
             ) : (
-              currentRoster().map((member) => {
+                            currentRoster().map((member) => {
                 const shifts = currentShifts().filter((s) => s.staffMemberId === member.id);
+                const totalHours = shifts.reduce((sum, s) => sum + staffEntryHours(s), 0);
                 return (
-                  <div key={member.id} className="soft-box" style={{ background: "white" }}>
-                    <div className="form-grid three">
-                      <input placeholder="Navn" value={member.name} disabled={readOnly} onChange={(e) => updateStaffMember(member.id, { name: e.target.value })} />
-                      {canSeeWages ? (
-                        <input type="number" placeholder="Timelønn" value={member.hourlyWage ?? ""} disabled={readOnly} onChange={(e) => updateStaffMember(member.id, { hourlyWage: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
-                      ) : (
-                        <input value="•••" disabled title="Du har ikke tilgang til å se lønnsdata" />
-                      )}
-                      <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffMember(member.id)}>Fjern ansatt</button>
-                    </div>
-                    {shifts.map((shift) => (
-                      <div key={shift.id} className="editable-row">
-                        <span style={{ display: "flex", gap: 8, flex: 1 }}>
-                          <select value={shift.date} disabled={readOnly} onChange={(e) => updateShift(shift.id, { date: e.target.value })}>
-                            {eventDateOptions().map((d) => <option key={d} value={d}>{formatDateNo(d)}</option>)}
-                          </select>
-                          <input placeholder="Start (f.eks. 2030)" style={{ maxWidth: 120 }} value={shift.startTime} disabled={readOnly} onChange={(e) => updateShift(shift.id, { startTime: e.target.value })} onBlur={(e) => updateShift(shift.id, { startTime: formatTimeInputPlain(e.target.value) })} />
-                          <input placeholder="Slutt (f.eks. 2200)" style={{ maxWidth: 120 }} value={shift.endTime} disabled={readOnly} onChange={(e) => updateShift(shift.id, { endTime: e.target.value })} onBlur={(e) => updateShift(shift.id, { endTime: formatTimeInputPlain(e.target.value) })} />
-                          <span className="muted" style={{ alignSelf: "center", fontSize: 12 }}>{formatHoursMinutes(staffEntryHours(shift))}</span>
-                        </span>
-                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeShift(shift.id)}>Fjern</button>
+                  <details key={member.id} className="soft-box" style={{ background: "white", padding: 0 }}>
+                    <summary style={{ padding: "10px 14px", cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700 }}>
+                      <span>{member.name || "(Uten navn)"} <span style={{ fontWeight: 400, color: "#64748b", fontSize: 13 }}>({shifts.length} {shifts.length === 1 ? "vakt" : "vakter"}, {formatHoursMinutes(totalHours)})</span></span>
+                      <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+                    </summary>
+                    <div style={{ padding: "0 14px 14px" }}>
+                      <div className="form-grid three">
+                        <input placeholder="Navn" value={member.name} disabled={readOnly} onChange={(e) => updateStaffMember(member.id, { name: e.target.value })} />
+                        {canSeeWages ? (
+                          <input type="number" placeholder="Timelønn" value={member.hourlyWage ?? ""} disabled={readOnly} onChange={(e) => updateStaffMember(member.id, { hourlyWage: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
+                        ) : (
+                          <input value="•••" disabled title="Du har ikke tilgang til å se lønnsdata" />
+                        )}
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffMember(member.id)}>Fjern ansatt</button>
                       </div>
-                    ))}
-                    <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addShift(member.id)}>+ Legg til vakt</button>
-                  </div>
+                      {shifts.map((shift) => (
+                        <div key={shift.id} className="editable-row">
+                          <span style={{ display: "flex", gap: 8, flex: 1 }}>
+                            <select value={shift.date} disabled={readOnly} onChange={(e) => updateShift(shift.id, { date: e.target.value })}>
+                              {eventDateOptions().map((d) => <option key={d} value={d}>{formatDateNo(d)}</option>)}
+                            </select>
+                            <input placeholder="Start (f.eks. 2030)" style={{ maxWidth: 120 }} value={shift.startTime} disabled={readOnly} onChange={(e) => updateShift(shift.id, { startTime: e.target.value })} onBlur={(e) => updateShift(shift.id, { startTime: formatTimeInputPlain(e.target.value) })} />
+                            <input placeholder="Slutt (f.eks. 2200)" style={{ maxWidth: 120 }} value={shift.endTime} disabled={readOnly} onChange={(e) => updateShift(shift.id, { endTime: e.target.value })} onBlur={(e) => updateShift(shift.id, { endTime: formatTimeInputPlain(e.target.value) })} />
+                            <span className="muted" style={{ alignSelf: "center", fontSize: 12 }}>{formatHoursMinutes(staffEntryHours(shift))}</span>
+                          </span>
+                          <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeShift(shift.id)}>Fjern</button>
+                        </div>
+                      ))}
+                      <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => addShift(member.id)}>+ Legg til vakt</button>
+                    </div>
+                  </details>
                 );
               })
             )}
