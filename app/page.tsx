@@ -13788,16 +13788,22 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
     const estimatedProfit = estimatedRevenue - estimatedCogs - estimatedStaffCost - estimatedOtherCosts;
   const actualProfit = actualRevenue - actualCogs - actualStaffCost - actualOtherCosts;
 
-  const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
+    const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
+  const totalHoursFor = (shifts: EventShiftEntry[]) => shifts.reduce((sum, s) => sum + staffEntryHours(s), 0);
+  const estimatedTotalHours = totalHoursFor(event.shiftsPrognose || []);
+  const actualTotalHours = hasActualShifts ? totalHoursFor(event.shiftsActual || []) : estimatedTotalHours;
+  const perHour = (profit: number, hours: number) => (hours > 0 ? profit / hours : 0);
 
   return {
     estimated: {
       revenue: estimatedRevenue, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit,
       cogsPercent: pct(estimatedCogs, estimatedRevenue), staffCostPercent: pct(estimatedStaffCost, estimatedRevenue),
+      totalHours: estimatedTotalHours, profitPerHour: perHour(estimatedProfit, estimatedTotalHours),
     },
     actual: {
       revenue: actualRevenue, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit,
       cogsPercent: pct(actualCogs, actualRevenue), staffCostPercent: pct(actualStaffCost, actualRevenue),
+      totalHours: actualTotalHours, profitPerHour: perHour(actualProfit, actualTotalHours),
     },
     hasActualData: (event.productLines || []).some((l) => l.actualQty != null) || hasActualShifts,
   };
@@ -14189,7 +14195,16 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   </div>
 </div>`;
 
-    const body = `<div class="print-offer">${header}${productSection}<div class="page-break"></div>${staffSection}<div class="page-break"></div>${costSection}${packingSection}${noteSection}<div class="page-break"></div>${comparisonSection}</div>`;
+        const body = `<div class="print-offer">
+${header}
+<div class="print-block">${productSection}</div>
+<div class="print-block">${staffSection}</div>
+<div class="print-block">${costSection}</div>
+${packingSection ? `<div class="print-block">${packingSection}</div>` : ""}
+${noteSection ? `<div class="print-block">${noteSection}</div>` : ""}
+<div class="page-break"></div>
+${comparisonSection}
+</div>`;
 
     const w = window.open("", "_blank");
     if (!w) return;
@@ -14198,7 +14213,12 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
 html{-webkit-print-color-adjust:exact}
 *{-webkit-print-color-adjust:exact}
 body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
-@media print{.page-break{page-break-before:always}}
+@media print{
+  .page-break{page-break-before:always}
+  .print-block{page-break-inside:avoid;break-inside:avoid;margin-bottom:18px}
+  table{page-break-inside:avoid;break-inside:avoid}
+  h2,h3{page-break-after:avoid;break-after:avoid}
+}
 .print-offer{padding:32px;line-height:1.5}
 .print-offer .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
 .print-offer .logo{height:90px;width:auto;object-fit:contain}
@@ -14308,7 +14328,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                     <th style={{ textAlign: "right" }}>Faktisk antall</th>
                     <th style={{ textAlign: "right" }}>Personalmat</th>
                     <th style={{ textAlign: "right" }}>Pris (inkl. mva)</th>
-                    <th>Prisforslag</th>
+                    <th style={{ textAlign: "right" }}>Sum faktisk solgt</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -14334,16 +14354,10 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                         <td style={{ textAlign: "right" }}>
                           <input type="number" style={{ width: 90, textAlign: "right" }} placeholder={String(product?.customerPrice || 0)} value={l.priceOverride ?? ""} disabled={readOnly} onChange={(e) => updateProductLine(l.id, { priceOverride: e.target.value === "" ? undefined : Number(e.target.value) || 0 })} />
                         </td>
-                        <td>
-                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                            <input type="number" style={{ width: 55 }} placeholder="Margin %" disabled={readOnly} value={marginDraft[l.id] || ""} onChange={(e) => setMarginDraft({ ...marginDraft, [l.id]: e.target.value })} />
-                            {marginDraft[l.id] && product && (
-                              <button type="button" className="link" disabled={readOnly} onClick={() => applySuggestedPrice(l, product)} title={`Foreslått: ${currency(suggested)}`}>
-                                Bruk {currency(suggested)}
-                              </button>
-                            )}
-                          </div>
+                                                <td style={{ textAlign: "right" }}>
+                          {l.actualQty != null ? currency(l.actualQty * (l.priceOverride || product?.customerPrice || 0)) : "-"}
                         </td>
+                    
                         <td><button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeProductLine(l.id)}>Slett</button></td>
                       </tr>
                       {mealQty > 0 && (
@@ -14491,7 +14505,8 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                                     <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
                   <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– personalkost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.staffCostPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.staffCostPercent.toFixed(1)}%</td><td></td></tr>
                   <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.otherCosts, calc.actual.otherCosts)}</td></tr>
-                  <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
+                                    <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– dekningsbidrag/time ({formatHoursMinutes(calc.estimated.totalHours)} / {formatHoursMinutes(calc.actual.totalHours)})</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profitPerHour)}/t</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profitPerHour)}/t</td><td></td></tr>
                 </tbody>
               </table>
             </div>
