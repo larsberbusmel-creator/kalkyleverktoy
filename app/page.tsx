@@ -13785,12 +13785,20 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
   const estimatedOtherCosts = otherCosts(estimatedUnits);
   const actualOtherCosts = otherCosts(actualUnits);
 
-  const estimatedProfit = estimatedRevenue - estimatedCogs - estimatedStaffCost - estimatedOtherCosts;
+    const estimatedProfit = estimatedRevenue - estimatedCogs - estimatedStaffCost - estimatedOtherCosts;
   const actualProfit = actualRevenue - actualCogs - actualStaffCost - actualOtherCosts;
 
+  const pct = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
+
   return {
-    estimated: { revenue: estimatedRevenue, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit },
-    actual: { revenue: actualRevenue, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit },
+    estimated: {
+      revenue: estimatedRevenue, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit,
+      cogsPercent: pct(estimatedCogs, estimatedRevenue), staffCostPercent: pct(estimatedStaffCost, estimatedRevenue),
+    },
+    actual: {
+      revenue: actualRevenue, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit,
+      cogsPercent: pct(actualCogs, actualRevenue), staffCostPercent: pct(actualStaffCost, actualRevenue),
+    },
     hasActualData: (event.productLines || []).some((l) => l.actualQty != null) || hasActualShifts,
   };
 }
@@ -14101,27 +14109,43 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
 
     // Kun navn/dato/tid/timer - ALDRI timelønn/lønnskostnad i selve utskriften,
     // siden papirutskriften kan havne hos andre enn de med canSeeWages-tilgang.
-        function shiftsSectionHtml(title: string, roster: EventStaffMember[], shifts: EventShiftEntry[], contractorFilter?: boolean) {
-      const rows = [...shifts]
-        .filter((s) => {
-          if (contractorFilter === undefined) return true;
-          const member = roster.find((m) => m.id === s.staffMemberId);
-          return !!member?.isContractor === contractorFilter;
-        })
-        .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
-        .map((s) => {
-          const member = roster.find((m) => m.id === s.staffMemberId);
-          return `<tr><td>${escapeHtml(member?.name || "Ukjent")}</td><td>${formatDateNo(s.date)}</td><td>${escapeHtml(s.startTime)}–${escapeHtml(s.endTime)}</td><td class="right">${formatHoursMinutes(staffEntryHours(s))}</td></tr>`;
-        }).join("");
-      const table = rows
-        ? `<table><thead><tr><th>Navn</th><th>Dato</th><th>Tid</th><th class="right">Timer</th></tr></thead><tbody>${rows}</tbody></table>`
+                // Summerer timer PER PERSON i stedet for én rad per vakt - print-utskriften
+        // skal vise samlet timeantall per ansatt, ikke hver enkelt registrering.
+        function staffSummaryHtml(title: string, roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+      const internalMembers = roster.filter((m) => !m.isContractor);
+      const contractorMembers = roster.filter((m) => m.isContractor);
+
+      function totalsFor(members: EventStaffMember[]) {
+        return members
+          .map((m) => ({ member: m, hours: shifts.filter((s) => s.staffMemberId === m.id).reduce((sum, s) => sum + staffEntryHours(s), 0) }))
+          .filter((x) => x.hours > 0);
+      }
+
+      const internalTotals = totalsFor(internalMembers);
+      const internalRows = internalTotals.map((x) => `<tr><td>${escapeHtml(x.member.name || "Ukjent")}</td><td class="right">${formatHoursMinutes(x.hours)}</td></tr>`).join("");
+      const internalSumHours = internalTotals.reduce((sum, x) => sum + x.hours, 0);
+      const internalTable = internalRows
+        ? `<table><thead><tr><th>Navn</th><th class="right">Timer</th></tr></thead><tbody>${internalRows}<tr style="font-weight:800"><td>Totalt</td><td class="right">${formatHoursMinutes(internalSumHours)}</td></tr></tbody></table>`
         : `<p style="color:#64748b">Ingen registreringer.</p>`;
-      return `<h2>${escapeHtml(title)}</h2>${table}`;
+
+      const contractorTotals = totalsFor(contractorMembers);
+      const contractorRows = contractorTotals.map((x) => {
+        const wage = Number(x.member.hourlyWage) || 0;
+        const cost = x.hours * wage;
+        return `<tr><td>${escapeHtml(x.member.name || "Ukjent")}</td><td class="right">${formatHoursMinutes(x.hours)}</td><td class="right">${currency(wage)}/t</td><td class="right">${currency(cost)}</td></tr>`;
+      }).join("");
+      const contractorSumHours = contractorTotals.reduce((sum, x) => sum + x.hours, 0);
+      const contractorSumCost = contractorTotals.reduce((sum, x) => sum + x.hours * (Number(x.member.hourlyWage) || 0), 0);
+      const contractorTable = contractorRows
+        ? `<table><thead><tr><th>Navn</th><th class="right">Timer</th><th class="right">Timelønn</th><th class="right">Sum</th></tr></thead><tbody>${contractorRows}<tr style="font-weight:800"><td>Totalt</td><td class="right">${formatHoursMinutes(contractorSumHours)}</td><td></td><td class="right">${currency(contractorSumCost)}</td></tr></tbody></table>`
+        : `<p style="color:#64748b">Ingen registreringer.</p>`;
+
+      return `<h2>${escapeHtml(title)}</h2>
+<h3 style="margin-top:14px">Ordinært lønnssystem</h3>${internalTable}
+<h3 style="margin-top:14px">Innleid personell</h3>${contractorTable}`;
     }
-    const staffSection = shiftsSectionHtml("Vaktliste – Prognose (ordinært lønnssystem)", event.staffRosterPrognose || [], event.shiftsPrognose || [], false)
-      + shiftsSectionHtml("Vaktliste – Prognose (innleid personell)", event.staffRosterPrognose || [], event.shiftsPrognose || [], true)
-      + shiftsSectionHtml("Vaktliste – Faktisk brukt tid (ordinært lønnssystem)", event.staffRosterActual || [], event.shiftsActual || [], false)
-      + shiftsSectionHtml("Vaktliste – Faktisk brukt tid (innleid personell)", event.staffRosterActual || [], event.shiftsActual || [], true);
+    const staffSection = staffSummaryHtml("Vaktliste – Prognose", event.staffRosterPrognose || [], event.shiftsPrognose || [])
+      + staffSummaryHtml("Vaktliste – Faktisk brukt tid", event.staffRosterActual || [], event.shiftsActual || []);
 
     const costRows = event.customCostLines.map((c) =>
       `<tr><td>${escapeHtml(c.label)}</td><td class="right">${currency(c.amount)} eks. mva</td><td class="right">${c.vatRate}%</td><td>${c.mode === "per_unit" ? "Per solgt enhet" : "Engangssum"}</td></tr>`
@@ -14459,11 +14483,13 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                 <thead><tr><th></th><th style={{ textAlign: "right" }}>Prognose</th><th style={{ textAlign: "right" }}>Faktisk</th><th style={{ textAlign: "right" }}>Differanse</th></tr></thead>
                 <tbody>
                   <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.revenue)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.revenue)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.revenue, calc.actual.revenue)}</td></tr>
-                  <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.cogs, calc.actual.cogs)}</td></tr>
+                                    <tr><td>Varekost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.cogs)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.cogs)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.cogs, calc.actual.cogs)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– varekost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.cogsPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.cogsPercent.toFixed(1)}%</td><td></td></tr>
                   {(calc.estimated.staffMealCost > 0 || calc.actual.staffMealCost > 0) && (
                     <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav personalmat</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffMealCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffMealCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffMealCost, calc.actual.staffMealCost)}</td></tr>
                   )}
-                  <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
+                                    <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.staffCost, calc.actual.staffCost)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– personalkost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.staffCostPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.staffCostPercent.toFixed(1)}%</td><td></td></tr>
                   <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.otherCosts, calc.actual.otherCosts)}</td></tr>
                   <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td><td style={{ textAlign: "right" }}>{diffLine(calc.estimated.profit, calc.actual.profit)}</td></tr>
                 </tbody>
