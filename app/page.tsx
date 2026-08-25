@@ -2165,13 +2165,14 @@ const bg = isToday ? "#dcfce7"
                           {o.recurringNote?.startsWith("Importert fra webshop") && !(data.seenOrderIds || []).includes(o.id) && (
                             <td><span style={{ color: "#f59e0b", fontWeight: 900 }}>🔔 Ny</span></td>
                           )}
-                          <td>
+                                                    <td>
                             <button
-                              className="link"
+                              className="btn"
+                              style={{ background: "#2563eb", borderColor: "#2563eb", color: "white", padding: "2px 10px", fontSize: 12 }}
                               title="Åpne klar til utskrift i Ordre-fanen"
                               onClick={(e) => { e.stopPropagation(); setOrderToOpen(o.id); setTab("orders"); }}
                             >
-                              🖨️
+                              Print
                             </button>
                           </td>
                         </tr>
@@ -6084,10 +6085,22 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
       )}
 
       {showNewOrder && (
-        <div className="soft-box full-width">
+                <div className="soft-box full-width">
           <div className="between">
             <h3>{editingOrderId ? "Rediger ordre" : "Ny ordre"}</h3>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {editingOrderId && (
+                <button
+                  className="btn active"
+                  style={{ background: "#2563eb", borderColor: "#2563eb", color: "white" }}
+                  onClick={() => {
+                    const savedOrder = data.orders.find((o) => o.id === editingOrderId);
+                    if (savedOrder) printOrder(savedOrder, printFlags);
+                  }}
+                >
+                  Print
+                </button>
+              )}
               <button className="btn" onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt</button>
               <button
                 className="btn active"
