@@ -2165,6 +2165,15 @@ const bg = isToday ? "#dcfce7"
                           {o.recurringNote?.startsWith("Importert fra webshop") && !(data.seenOrderIds || []).includes(o.id) && (
                             <td><span style={{ color: "#f59e0b", fontWeight: 900 }}>🔔 Ny</span></td>
                           )}
+                          <td>
+                            <button
+                              className="link"
+                              title="Åpne klar til utskrift i Ordre-fanen"
+                              onClick={(e) => { e.stopPropagation(); setOrderToOpen(o.id); setTab("orders"); }}
+                            >
+                              🖨️
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -5422,7 +5431,13 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   useEffect(() => {
     if (!pendingOrderId) return;
     const order = data.orders.find((o) => o.id === pendingOrderId);
-    if (order) editOrder(order);
+    if (order) {
+      editOrder(order);
+      // Utvid ordrens rad i tillegg til å åpne redigeringsskjemaet, slik at
+      // Utskriftsvalg/Print-knappen (som kun finnes i den utvidede raden) er
+      // synlig med det samme - nødvendig for print-knappen på dashbordet.
+      setExpandedOrderId(order.id);
+    }
     clearPendingOrderId?.();
   }, [pendingOrderId]);
 
@@ -14040,6 +14055,111 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
     return `${sign}${currency(diff)} (${sign}${pct.toFixed(0)}%)`;
   }
 
+  // Samlet print for hele eventkalkylen - ETT window.open()-kall (samme
+  // "flere seksjoners HTML slått sammen med page-break"-mønster som
+  // printSelectedDocuments i RentalTab). MERK: gjenbruker IKKE
+  // packingListTemplatesHtml direkte for pakkelisten - den funksjonen slår
+  // opp avkrysning via "extra:<label>" (riktig for RentalOffer sin gamle
+  // streng-baserte extraPackingListItems), mens EventCalculation bevisst
+  // bruker id-baserte PackingListItem-er ("extra:<id>", se
+  // eventPackingChecklistRows). Å kalle den delte funksjonen ville derfor
+  // vist FEIL avkrysningsstatus i printen - bygger derfor samme ☑/☐-
+  // visning direkte fra eventPackingChecklistRows() i stedet, som allerede
+  // har riktig id-oppslag.
+  function printEventCalculation() {
+    const productRows = event.productLines.map((l) => {
+      const product = data.products.find((p) => p.id === l.productId);
+      const price = l.priceOverride || product?.customerPrice || 0;
+      const estQty = Number(l.estimatedQty) || 0;
+      const lineTotal = price * estQty;
+      return `<tr><td>${escapeHtml(product?.name || "Ukjent produkt")}</td><td class="right">${estQty}</td><td class="right">${l.actualQty != null ? l.actualQty : "-"}</td><td class="right">${l.staffMealQty || "-"}</td><td class="right">${currency(price)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
+    }).join("");
+    const productSection = `<h2>Produkter</h2><table><thead><tr><th>Produkt</th><th class="right">Estimert antall</th><th class="right">Faktisk antall</th><th class="right">Personalmat</th><th class="right">Pris</th><th class="right">Delsum</th></tr></thead><tbody>${productRows}</tbody></table>`;
+
+    // Kun navn/dato/tid/timer - ALDRI timelønn/lønnskostnad i selve utskriften,
+    // siden papirutskriften kan havne hos andre enn de med canSeeWages-tilgang.
+    function shiftsSectionHtml(title: string, roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+      const rows = [...shifts]
+        .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
+        .map((s) => {
+          const member = roster.find((m) => m.id === s.staffMemberId);
+          return `<tr><td>${escapeHtml(member?.name || "Ukjent")}</td><td>${formatDateNo(s.date)}</td><td>${escapeHtml(s.startTime)}–${escapeHtml(s.endTime)}</td><td class="right">${formatHoursMinutes(staffEntryHours(s))}</td></tr>`;
+        }).join("");
+      const table = rows
+        ? `<table><thead><tr><th>Navn</th><th>Dato</th><th>Tid</th><th class="right">Timer</th></tr></thead><tbody>${rows}</tbody></table>`
+        : `<p style="color:#64748b">Ingen registreringer.</p>`;
+      return `<h2>${escapeHtml(title)}</h2>${table}`;
+    }
+    const staffSection = shiftsSectionHtml("Vaktliste – Prognose", event.staffRosterPrognose || [], event.shiftsPrognose || [])
+      + shiftsSectionHtml("Vaktliste – Faktisk brukt tid", event.staffRosterActual || [], event.shiftsActual || []);
+
+    const costRows = event.customCostLines.map((c) =>
+      `<tr><td>${escapeHtml(c.label)}</td><td class="right">${currency(c.amount)} eks. mva</td><td class="right">${c.vatRate}%</td><td>${c.mode === "per_unit" ? "Per solgt enhet" : "Engangssum"}</td></tr>`
+    ).join("");
+    const costSection = event.customCostLines.length
+      ? `<h2>Andre kostnader</h2><table><thead><tr><th>Beskrivelse</th><th class="right">Beløp</th><th class="right">Mva</th><th>Type</th></tr></thead><tbody>${costRows}</tbody></table>`
+      : "";
+
+    const checklistRows = eventPackingChecklistRows();
+    const isPackingChecked = (id: string) => !!(event.packingListChecked || {})[id];
+    const packingSection = checklistRows.length
+      ? `<h2>Pakkeliste</h2>${checklistRows.map((r) => `<div style="padding:3px 0">${isPackingChecked(r.id) ? "☑" : "☐"} ${escapeHtml(r.label)}</div>`).join("")}`
+      : "";
+
+    const noteSection = event.note?.trim()
+      ? `<h2>Notater</h2><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(event.note.trim())}</p>`
+      : "";
+
+    const comparisonRows = ([
+      ["Omsetning (eks. mva)", calc.estimated.revenue, calc.actual.revenue],
+      ["Varekost", calc.estimated.cogs, calc.actual.cogs],
+      ["Personalkost", calc.estimated.staffCost, calc.actual.staffCost],
+      ["Andre kostnader", calc.estimated.otherCosts, calc.actual.otherCosts],
+      ["Overskudd", calc.estimated.profit, calc.actual.profit],
+    ] as [string, number, number][]).map(([label, est, act]) => {
+      const diff = act - est;
+      const sign = diff > 0 ? "+" : "";
+      return `<tr><td>${label}</td><td class="right">${currency(est)}</td><td class="right">${currency(act)}</td><td class="right">${sign}${currency(diff)}</td></tr>`;
+    }).join("");
+    const comparisonSection = `<h2>Prognose vs. Faktisk</h2><table><thead><tr><th></th><th class="right">Prognose</th><th class="right">Faktisk</th><th class="right">Differanse</th></tr></thead><tbody>${comparisonRows}</tbody></table>`;
+
+    const dateText = event.endDate && event.endDate !== event.date
+      ? `${formatDateNo(event.date)} – ${formatDateNo(event.endDate)}`
+      : formatDateNo(event.date);
+    const header = `<div class="header">
+  <img src="/logo.png" class="logo" />
+  <div class="header-right">
+    <b style="font-size:16px">${escapeHtml(event.eventName)}</b><br>
+    ${event.location ? `<span>${escapeHtml(event.location)}</span><br>` : ""}
+    <span>${dateText}</span>
+  </div>
+</div>`;
+
+    const body = `<div class="print-offer">${header}${productSection}<div class="page-break"></div>${staffSection}<div class="page-break"></div>${costSection}${packingSection}${noteSection}<div class="page-break"></div>${comparisonSection}</div>`;
+
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>Eventkalkyle – ${escapeHtml(event.eventName)}</title><style>
+@page{size:A4;margin:14mm}
+html{-webkit-print-color-adjust:exact}
+*{-webkit-print-color-adjust:exact}
+body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
+@media print{.page-break{page-break-before:always}}
+.print-offer{padding:32px;line-height:1.5}
+.print-offer .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:24px}
+.print-offer .logo{height:90px;width:auto;object-fit:contain}
+.print-offer .header-right{text-align:right;font-size:13px;color:#374151}
+.print-offer h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #e5e7eb;padding-bottom:4px}
+.print-offer table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+.print-offer th{background:#f3f4f6;text-align:left;padding:8px;border-bottom:2px solid #e5e7eb}
+.print-offer td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.print-offer .right{text-align:right}
+@media print{.print-offer button{display:none}.print-offer{padding:0}}
+</style></head><body>${body}<script>window.print()</script></body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
   return (
     <section className="card">
       {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
@@ -14082,6 +14202,7 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
           <div className="between">
             <h2>{editingEventId ? "Rediger eventkalkyle" : "Ny eventkalkyle"}</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn" onClick={printEventCalculation}>🖨️ Skriv ut</button>
               <button className="btn" onClick={cancelEdit}>Avbryt</button>
               <button
                 className="btn active"
@@ -14102,11 +14223,13 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
             <label>Til dato (valgfritt - flerdagers)<input type="date" value={event.endDate || ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, endDate: e.target.value || undefined })} /></label>
           </div>
 
-          <div className="soft-box">
-            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
-              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Produkter</h3>
-              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Legg til produktene som selges på eventet, med estimert og faktisk solgt antall.</p>
-            </div>
+          <details className="soft-box" style={{ padding: 0 }} open>
+            <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Produkter <span style={{ fontWeight: 400, color: "#64748b", fontSize: 13 }}>({event.productLines.length} produktlinjer)</span></span>
+              <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+            </summary>
+            <div style={{ padding: "0 16px 16px" }}>
+            <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "0 0 8px" }}>Legg til produktene som selges på eventet, med estimert og faktisk solgt antall.</p>
             <div className="search-picker" style={{ maxWidth: 360, marginTop: 12 }}>
               <input value={productSearch} disabled={readOnly} onChange={(e) => setProductSearch(e.target.value)} placeholder="Søk og legg til produkt..." />
               {productSearch && (
@@ -14182,13 +14305,16 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
                 </tbody>
               </table>
             )}
-          </div>
-
-          <div className="soft-box">
-            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
-              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Bemanning</h3>
-              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Vaktliste per ansatt og dag - Prognose og Faktisk brukt tid føres som to uavhengige sett.</p>
             </div>
+          </details>
+
+          <details className="soft-box" style={{ padding: 0, marginTop: 12 }}>
+            <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Bemanning <span style={{ fontWeight: 400, color: "#64748b", fontSize: 13 }}>({(event.staffRosterPrognose || []).length} i prognose, {(event.staffRosterActual || []).length} i faktisk)</span></span>
+              <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+            </summary>
+            <div style={{ padding: "0 16px 16px" }}>
+            <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "0 0 8px" }}>Vaktliste per ansatt og dag - Prognose og Faktisk brukt tid føres som to uavhengige sett.</p>
 
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
               <button className={staffScheduleMode === "prognose" ? "btn active" : "btn"} onClick={() => setStaffScheduleMode("prognose")}>Prognose</button>
@@ -14246,13 +14372,16 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
                 </p>
               );
             })()}
-          </div>
-
-          <div className="soft-box">
-            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
-              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Andre kostnader</h3>
-              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>F.eks. standplassleie, strøm eller leie av kassapunkt - beløp eks. mva.</p>
             </div>
+          </details>
+
+          <details className="soft-box" style={{ padding: 0, marginTop: 12 }}>
+            <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Andre kostnader <span style={{ fontWeight: 400, color: "#64748b", fontSize: 13 }}>({event.customCostLines.length} linjer)</span></span>
+              <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+            </summary>
+            <div style={{ padding: "0 16px 16px" }}>
+            <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "0 0 8px" }}>F.eks. standplassleie, strøm eller leie av kassapunkt - beløp eks. mva.</p>
             {event.customCostLines.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 {event.customCostLines.map((c) => (
@@ -14276,7 +14405,8 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
               </select>
             </div>
             <button className="btn" style={{ marginTop: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomCostLine}>Legg til kostnad</button>
-          </div>
+            </div>
+          </details>
 
           <div className="soft-box">
             <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
@@ -14301,11 +14431,13 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
             {!calc.hasActualData && <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>"Faktisk"-kolonnen viser prognosetall inntil faktisk antall solgt og/eller vaktliste er registrert.</p>}
           </div>
 
-          <div className="soft-box">
-            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
-              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Pakkeliste</h3>
-              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Velg pakkelistemaler og/eller legg til fritekst-punkter, kryss av etter hvert som ting pakkes.</p>
-            </div>
+          <details className="soft-box" style={{ padding: 0, marginTop: 12 }}>
+            <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Pakkeliste <span style={{ fontWeight: 400, color: "#64748b", fontSize: 13 }}>({eventPackingChecklistRows().filter((r) => (event.packingListChecked || {})[r.id]).length} av {eventPackingChecklistRows().length} huket av)</span></span>
+              <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+            </summary>
+            <div style={{ padding: "0 16px 16px" }}>
+            <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "0 0 8px" }}>Velg pakkelistemaler og/eller legg til fritekst-punkter, kryss av etter hvert som ting pakkes.</p>
 
             <div className="section-toggle" style={{ marginTop: 12 }} onClick={() => setShowPackingListPanel(!showPackingListPanel)}>
               <h4 style={{ margin: 0 }}>Velg pakkelistemaler / legg til fritekst-punkter</h4>
@@ -14394,15 +14526,19 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
                 </>
               );
             })()}
-          </div>
-
-          <div className="soft-box">
-            <div style={{ borderLeft: "4px solid #c026d3", paddingLeft: 12 }}>
-              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Notater</h3>
-              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Fritekst, erfaringer, praktisk info til senere referanse.</p>
             </div>
+          </details>
+
+          <details className="soft-box" style={{ padding: 0, marginTop: 12 }}>
+            <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Notater {event.note?.trim() ? <span style={{ fontWeight: 400, color: "#64748b", fontSize: 13 }}>(utfylt)</span> : null}</span>
+              <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+            </summary>
+            <div style={{ padding: "0 16px 16px" }}>
+            <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "0 0 8px" }}>Fritekst, erfaringer, praktisk info til senere referanse.</p>
             <textarea className="textarea" style={{ marginTop: 12 }} value={event.note || ""} disabled={readOnly} onChange={(e) => setEvent({ ...event, note: e.target.value })} placeholder="Fritekst, erfaringer, praktisk info osv." />
-          </div>
+            </div>
+          </details>
 
           {editingEventId && (
             <div className="settings-section" style={{ marginTop: 16 }}>
