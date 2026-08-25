@@ -5010,6 +5010,15 @@ function formatTimeInput(value: string) {
   if (digits.length === 3) return `Kl ${digits.slice(0, 1)}:${digits.slice(1).padEnd(2, "0")}`;
   return `Kl ${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
 }
+// Samme normalisering som formatTimeInput, men UTEN "Kl "-prefiks - til bruk
+// der verdien skal regnes videre på (f.eks. staffEntryHours), ikke bare vises.
+function formatTimeInputPlain(value: string) {
+  const digits = value.replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  if (digits.length <= 2) return `${digits.padStart(2, "0")}:00`;
+  if (digits.length === 3) return `${digits.slice(0, 1)}:${digits.slice(1).padEnd(2, "0")}`;
+  return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
+}
 function cleanWebshopText(raw: string): string {
   return raw
     .replace(/\[https?:\/\/[^\]]*\]/g, "")
@@ -14059,8 +14068,8 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
           <div className="form-grid five" style={{ marginTop: 8 }}>
             <input placeholder="Navn" value={newStaffTime.name} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, name: e.target.value })} />
             <input type="date" value={newStaffTime.date} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, date: e.target.value })} min={event.date} max={event.endDate || event.date} />
-            <input placeholder="Start (HH:MM)" value={newStaffTime.startTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, startTime: e.target.value })} />
-            <input placeholder="Slutt (HH:MM)" value={newStaffTime.endTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, endTime: e.target.value })} />
+                        <input placeholder="Start (f.eks. 2030)" value={newStaffTime.startTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, startTime: e.target.value })} onBlur={(e) => setNewStaffTime({ ...newStaffTime, startTime: formatTimeInputPlain(e.target.value) })} />
+            <input placeholder="Slutt (f.eks. 2200)" value={newStaffTime.endTime} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, endTime: e.target.value })} onBlur={(e) => setNewStaffTime({ ...newStaffTime, endTime: formatTimeInputPlain(e.target.value) })} />
             {canSeeWages ? (
               <input type="number" placeholder="Timelønn" value={newStaffTime.hourlyWage} disabled={readOnly} onChange={(e) => setNewStaffTime({ ...newStaffTime, hourlyWage: e.target.value })} />
             ) : (
