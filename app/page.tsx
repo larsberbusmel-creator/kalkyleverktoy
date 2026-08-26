@@ -191,6 +191,8 @@ type StaffTimeEntry = {
   name: string;
   startTime: string; // "HH:MM"
   endTime: string;   // "HH:MM"
+  isContractor?: boolean; // "Innleid personale" - betales utenfor ordinær fakturering/lønn
+  hourlyWage?: number;    // kun relevant når isContractor er true
 };
 
 // Eventkalkyle: lønnsomhetskalkyle (prognose + faktisk) for et salgsevent
@@ -12264,35 +12266,36 @@ ${renderStaticRoomSvg(room, tables, scale, false)}`;
     </>
   );
 
-  const [staffTimeForm, setStaffTimeForm] = useState({ name: "", startTime: "", endTime: "" });
+    const [staffTimeForm, setStaffTimeForm] = useState({ name: "", startTime: "", endTime: "", isContractor: false, hourlyWage: "" });
   const [editingStaffTimeId, setEditingStaffTimeId] = useState<string | null>(null);
 
   function addStaffTimeEntry() {
     if (!staffTimeForm.name.trim() || !staffTimeForm.startTime || !staffTimeForm.endTime) return;
+    const hourlyWage = staffTimeForm.isContractor ? (Number(staffTimeForm.hourlyWage) || 0) : undefined;
     if (editingStaffTimeId) {
       setRental({
         ...rental,
         staffTimeLog: (rental.staffTimeLog || []).map((e) =>
           e.id === editingStaffTimeId
-            ? { ...e, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime }
+            ? { ...e, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime, isContractor: staffTimeForm.isContractor, hourlyWage }
             : e
         ),
       });
       setEditingStaffTimeId(null);
     } else {
-      const entry: StaffTimeEntry = { id: `staff-${Date.now()}`, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime };
+      const entry: StaffTimeEntry = { id: `staff-${Date.now()}`, name: staffTimeForm.name.trim(), startTime: staffTimeForm.startTime, endTime: staffTimeForm.endTime, isContractor: staffTimeForm.isContractor, hourlyWage };
       setRental({ ...rental, staffTimeLog: [...(rental.staffTimeLog || []), entry] });
     }
-    setStaffTimeForm({ name: "", startTime: "", endTime: "" });
+    setStaffTimeForm({ name: "", startTime: "", endTime: "", isContractor: false, hourlyWage: "" });
   }
 
   function startEditStaffTimeEntry(entry: StaffTimeEntry) {
-    setStaffTimeForm({ name: entry.name, startTime: entry.startTime, endTime: entry.endTime });
+    setStaffTimeForm({ name: entry.name, startTime: entry.startTime, endTime: entry.endTime, isContractor: !!entry.isContractor, hourlyWage: entry.hourlyWage != null ? String(entry.hourlyWage) : "" });
     setEditingStaffTimeId(entry.id);
   }
 
   function cancelEditStaffTimeEntry() {
-    setStaffTimeForm({ name: "", startTime: "", endTime: "" });
+    setStaffTimeForm({ name: "", startTime: "", endTime: "", isContractor: false, hourlyWage: "" });
     setEditingStaffTimeId(null);
   }
 
@@ -12739,11 +12742,51 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                   <label>Timer før midnatt<input type="number" value={rental.waiterHours} disabled={readOnly} onChange={(e) => setRental({ ...rental, waiterHours: Number(e.target.value) })} /></label>
                   <label>Timer etter midnatt<input type="number" value={rental.waiterAfterMidnightHours} disabled={readOnly} onChange={(e) => setRental({ ...rental, waiterAfterMidnightHours: Number(e.target.value) })} /></label>
                 </div>
-                {!!(rental.staffTimeLog || []).length && (
+                                {!!(rental.staffTimeLog || []).filter((e) => !e.isContractor).length && (
                   <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                     ℹ️ Faktisk loggførte timer brukes nå i prisberegningen i stedet for estimatet over.
                   </p>
                 )}
+
+                {(() => {
+                  const contractors = (rental.staffTimeLog || []).filter((e) => e.isContractor);
+                  const contractorTotalCost = contractors.reduce((sum, e) => sum + staffEntryHours(e) * (Number(e.hourlyWage) || 0), 0);
+                  const contractorTotalHours = contractors.reduce((sum, e) => sum + staffEntryHours(e), 0);
+                  return (
+                    <details className="soft-box" style={{ padding: 0, marginTop: 8, marginBottom: 14 }}>
+                      <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>
+                          Innleid personale
+                          {!!contractors.length && (
+                            <span style={{ fontWeight: 400, color: "#64748b", marginLeft: 8, fontSize: 13 }}>
+                              {formatHoursMinutes(contractorTotalHours)}, {currency(contractorTotalCost)}
+                            </span>
+                          )}
+                        </span>
+                        <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+                      </summary>
+                      <div style={{ padding: "0 16px 16px" }}>
+                        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                          Registreres separat fra ordinær timeliste, siden innleid personale betales ut utenfor vanlig lønnssystem/fakturering. Kommer ikke med i print.
+                        </p>
+                        {contractors.map((entry) => (
+                          <div key={entry.id} className="editable-row" style={{ background: editingStaffTimeId === entry.id ? "#fef9c3" : undefined, borderRadius: editingStaffTimeId === entry.id ? 8 : undefined }}>
+                            <span>{entry.name}: {entry.startTime}–{entry.endTime} ({formatHoursMinutes(staffEntryHours(entry))}) × {currency(Number(entry.hourlyWage) || 0)}/t = <b>{currency(staffEntryHours(entry) * (Number(entry.hourlyWage) || 0))}</b></span>
+                            <span style={{ display: "flex", gap: 10 }}>
+                              <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => startEditStaffTimeEntry(entry)}>Rediger</button>
+                              <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeStaffTimeEntry(entry.id)}>Fjern</button>
+                            </span>
+                          </div>
+                        ))}
+                        {!!contractors.length && (
+                          <p style={{ fontWeight: 700, marginTop: 8 }}>
+                            Totalt: {formatHoursMinutes(contractorTotalHours)}, {currency(contractorTotalCost)}
+                          </p>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })()}
 
                 <details className="soft-box" style={{ padding: 0, marginTop: 8, marginBottom: 14 }}>
                   <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -12758,7 +12801,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                     <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
                   </summary>
                   <div style={{ padding: "0 16px 16px" }}>
-                    <div className="form-grid four">
+                                        <div className="form-grid four">
                       <input placeholder="Navn" value={staffTimeForm.name} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, name: e.target.value })} />
                       <input type="time" value={staffTimeForm.startTime} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, startTime: e.target.value })} />
                       <input type="time" value={staffTimeForm.endTime} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, endTime: e.target.value })} />
@@ -12771,7 +12814,16 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                         )}
                       </div>
                     </div>
-                    {(rental.staffTimeLog || []).map((entry) => (
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6 }}>
+                      <label className="check">
+                        <input type="checkbox" checked={staffTimeForm.isContractor} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, isContractor: e.target.checked })} />
+                        Innleid personale
+                      </label>
+                      {staffTimeForm.isContractor && (
+                        <input type="number" placeholder="Kostnad/time" style={{ maxWidth: 140 }} value={staffTimeForm.hourlyWage} disabled={readOnly} onChange={(e) => setStaffTimeForm({ ...staffTimeForm, hourlyWage: e.target.value })} />
+                      )}
+                    </div>
+                      {(rental.staffTimeLog || []).filter((entry) => !entry.isContractor).map((entry) => (
                       <div key={entry.id} className="editable-row" style={{ background: editingStaffTimeId === entry.id ? "#fef9c3" : undefined, borderRadius: editingStaffTimeId === entry.id ? 8 : undefined }}>
                         <span>{entry.name}: {entry.startTime}–{entry.endTime} ({formatHoursMinutes(staffEntryHours(entry))})</span>
                         <span style={{ display: "flex", gap: 10 }}>
