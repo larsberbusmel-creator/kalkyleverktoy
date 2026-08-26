@@ -4467,6 +4467,7 @@ th{background:#f3f4f6}
     <th>Mengde</th>
     <th>Svinn %</th>
     <th>Enhet</th>
+    <th>Gruppe</th>
     <th>Kost</th>
     <th></th>
   </tr>
@@ -4540,6 +4541,29 @@ th{background:#f3f4f6}
   />
 </td>
                   <td><select value={l.unit} disabled={readOnly} onChange={(e) => updateDraftLine(i, { unit: e.target.value as ProductLine["unit"] })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option><option value="porsjoner">porsjoner</option></select></td>
+                  <td>
+                    {(() => {
+                      const existingGroups = Array.from(new Set(draftLines.map((dl) => dl.groupLabel).filter((g): g is string => !!g)));
+                      return (
+                        <select
+                          value={l.groupLabel || ""}
+                          disabled={readOnly}
+                          onChange={(e) => {
+                            if (e.target.value === "__new__") {
+                              const name = window.prompt("Nytt gruppenavn");
+                              if (name && name.trim()) updateDraftLine(i, { groupLabel: name.trim() });
+                            } else {
+                              updateDraftLine(i, { groupLabel: e.target.value || undefined });
+                            }
+                          }}
+                        >
+                          <option value="">Ingen gruppe</option>
+                          {existingGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+                          <option value="__new__">+ Ny gruppe...</option>
+                        </select>
+                      );
+                    })()}
+                  </td>
                   <td>{currency(lineCost(l))}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setDraftLines((prev) => prev.filter((_, ix) => ix !== i))}>Slett</button>
