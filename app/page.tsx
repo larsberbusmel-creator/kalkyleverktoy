@@ -117,7 +117,7 @@ type Product = {
 };
 
 type MenuCourseSelection = { courseId: string; productId: string; guestCount: number };
-type OrderLine = { productId: string; quantity: number; menuSelections?: MenuCourseSelection[] };
+type OrderLine = { productId: string; quantity: number; menuSelections?: MenuCourseSelection[]; priceOverride?: number; discountPercent?: number };
 
 type Order = {
    id: string;
@@ -5508,6 +5508,9 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     setWebshopUnmatched([]);
   }
 
+    function updateOrderLine(index: number, patch: Partial<OrderLine>) {
+    setForm({ ...form, orderLines: form.orderLines.map((l, i) => (i === index ? { ...l, ...patch } : l)) });
+  }
   function removeOrderLine(index: number) {
     setForm({ ...form, orderLines: form.orderLines.filter((_, i) => i !== index) });
   }
@@ -5723,10 +5726,12 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
       .map(([name, count]) => `${name}: ${count}`);
   }
 
-  function orderSubtotalIncVat(order: Order) {
+    function orderSubtotalIncVat(order: Order) {
     return order.orderLines.reduce((sum, line) => {
       const product = data.products.find((p) => p.id === line.productId);
-      return sum + (product?.customerPrice || 0) * Number(line.quantity || 0);
+      const price = line.priceOverride ?? product?.customerPrice ?? 0;
+      const lineDiscount = (Number(line.discountPercent) || 0) / 100;
+      return sum + price * Number(line.quantity || 0) * (1 - lineDiscount);
     }, 0);
   }
   function orderDiscountAmount(order: Order) {
@@ -6194,7 +6199,10 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
               </>}
             </div>
           )}
-          <h3>Legg til produkt / meny</h3>
+                    <div className="soft-box">
+          <div style={{ borderLeft: "4px solid #2563eb", paddingLeft: 12, marginBottom: 12 }}>
+            <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Legg til produkt / meny</h3>
+          </div>
           <div className="form-grid three">
             <div className="search-picker">
               <input
@@ -6230,8 +6238,9 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
                 </div>
               )}
             </div>
-            <input type="number" value={lineToAdd.quantity} disabled={readOnly} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
+                        <input type="number" value={lineToAdd.quantity} disabled={readOnly} onChange={(e) => setLineToAdd({ ...lineToAdd, quantity: Number(e.target.value) })} placeholder="Antall" />
             <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addOrderLine}>Legg til</button>
+          </div>
           </div>
 
           {(() => {
@@ -6278,15 +6287,31 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
             );
           })()}
 
-          <h3>Produkter i ordre</h3>
+                    <div className="soft-box">
+          <div style={{ borderLeft: "4px solid #2563eb", paddingLeft: 12, marginBottom: 12 }}>
+            <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Produkter i ordre</h3>
+          </div>
           {form.orderLines.map((line, i) => {
             const product = data.products.find((p) => p.id === line.productId);
+            const price = line.priceOverride ?? product?.customerPrice ?? 0;
+            const lineDiscount = Number(line.discountPercent) || 0;
+            const lineTotal = price * (Number(line.quantity) || 0) * (1 - lineDiscount / 100);
             return (
               <div key={i} className="pill" style={{ display: "block", marginBottom: 6 }}>
-                <div>
-                  {line.quantity} × {product?.name}
-                  <button style={{ marginLeft: 8 }} className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeOrderLine(i)}>×</button>
-                  {product && <button className="btn" style={{ marginLeft: 8 }} onClick={() => printProductPopup(product)}>Se oppskrift</button>}
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <b style={{ minWidth: 160 }}>{product?.name}</b>
+                  <label style={{ fontSize: 12, color: "#64748b" }}>Antall
+                    <input type="number" style={{ width: 70, marginLeft: 4 }} value={line.quantity} disabled={readOnly} onChange={(e) => updateOrderLine(i, { quantity: Number(e.target.value) || 0 })} />
+                  </label>
+                  <label style={{ fontSize: 12, color: "#64748b" }}>Pris (inkl. mva)
+                    <input type="number" style={{ width: 90, marginLeft: 4 }} value={price} disabled={readOnly} onChange={(e) => updateOrderLine(i, { priceOverride: Number(e.target.value) })} />
+                  </label>
+                  <label style={{ fontSize: 12, color: "#64748b" }}>Rabatt %
+                    <input type="number" style={{ width: 60, marginLeft: 4 }} value={line.discountPercent || 0} disabled={readOnly} onChange={(e) => updateOrderLine(i, { discountPercent: Number(e.target.value) || 0 })} />
+                  </label>
+                  <span style={{ fontWeight: 700 }}>{currency(lineTotal)}</span>
+                  <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeOrderLine(i)}>×</button>
+                  {product && <button className="btn" onClick={() => printProductPopup(product)}>Se oppskrift</button>}
                 </div>
                 {line.menuSelections && line.menuSelections.length > 0 && (
                   <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
@@ -6304,12 +6329,17 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
               </div>
             );
           })}
-          <h3>Dietter / hensyn</h3>
-          <div className="form-grid four">
+          </div>
+          <div className="soft-box">
+          <div style={{ borderLeft: "4px solid #2563eb", paddingLeft: 12, marginBottom: 12 }}>
+            <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Dietter / hensyn</h3>
+          </div>
+                    <div className="form-grid four">
             <label>Vegetar<input type="number" value={form.dietVegetarian || "0"} disabled={readOnly} onChange={(e) => setForm({ ...form, dietVegetarian: e.target.value })} /></label>
             <label>Vegan<input type="number" value={form.dietVegan || "0"} disabled={readOnly} onChange={(e) => setForm({ ...form, dietVegan: e.target.value })} /></label>
             <label>Gravid<input type="number" value={form.dietPregnant || "0"} disabled={readOnly} onChange={(e) => setForm({ ...form, dietPregnant: e.target.value })} /></label>
             <label>Andre hensyn<input value={form.dietOther || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, dietOther: e.target.value })} placeholder="Fritekst" /></label>
+          </div>
           </div>
           <div className="section-toggle" style={readOnly ? { opacity: 0.6, cursor: "not-allowed" } : undefined} onClick={() => { if (!readOnly) setForm({ ...form, packingListEnabled: !form.packingListEnabled }); }}>
             <h3>Lag pakkeliste for denne ordren</h3>
