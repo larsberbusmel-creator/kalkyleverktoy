@@ -13854,7 +13854,8 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   const [editLogOpen, setEditLogOpen] = useState(false);
   const [staffScheduleMode, setStaffScheduleMode] = useState<"prognose" | "faktisk">("prognose");
   const [eventPrintOptionsOpen, setEventPrintOptionsOpen] = useState(false);
-  const [eventPrintFlags, setEventPrintFlags] = useState({ detailedStaffList: false, production: false, recipes: false, shopping: false });
+  const [eventPrintFlags, setEventPrintFlags] = useState({ detailedStaffList: false, production: false, recipes: false, shopping: false, compareWithPrevious: false });
+  const [compareEventId, setCompareEventId] = useState("");
   const [showPackingListPanel, setShowPackingListPanel] = useState(false);
   const [newExtraPackingLabel, setNewExtraPackingLabel] = useState("");
 
@@ -14100,6 +14101,17 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   const estimatedUnits = event.productLines.reduce((sum, l) => sum + (Number(l.estimatedQty) || 0), 0);
   const actualUnits = event.productLines.reduce((sum, l) => sum + (Number(l.actualQty ?? l.estimatedQty) || 0), 0);
 
+  // DEL C: sammenlign med et annet, tidligere lagret event. Ren, lokal
+  // UI-state (ikke lagret på selve EventCalculation) - gjenbruker
+  // computeEventCalculation 1:1 på det valgte sammenligningseventet.
+  const compareEvent = events.find((e) => e.id === compareEventId && e.id !== event.id);
+  const compareCalc = compareEvent ? computeEventCalculation(compareEvent, data, productUnitCost) : null;
+  // Faktisk-tall hvis tilgjengelig, ellers Prognose - samme "beste kjente tall"-
+  // prinsipp som resten av kalkylen bruker.
+  function pickSide(c: ReturnType<typeof computeEventCalculation>) {
+    return c.hasActualData ? c.actual : c.estimated;
+  }
+
   function diffLine(estimatedVal: number, actualVal: number) {
     const diff = actualVal - estimatedVal;
     const pct = estimatedVal !== 0 ? (diff / Math.abs(estimatedVal)) * 100 : 0;
@@ -14118,13 +14130,14 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   // vist FEIL avkrysningsstatus i printen - bygger derfor samme ☑/☐-
   // visning direkte fra eventPackingChecklistRows() i stedet, som allerede
   // har riktig id-oppslag.
-  function printEventCalculation(flags: { detailedStaffList: boolean; production: boolean; recipes: boolean; shopping: boolean }) {
+  function printEventCalculation(flags: { detailedStaffList: boolean; production: boolean; recipes: boolean; shopping: boolean; compareWithPrevious: boolean }) {
     const productRows = event.productLines.map((l) => {
       const product = data.products.find((p) => p.id === l.productId);
       const price = l.priceOverride || product?.customerPrice || 0;
       const estQty = Number(l.estimatedQty) || 0;
+      const actQty = Number(l.actualQty ?? l.estimatedQty) || 0;
       const costPrice = product ? productUnitCost(product) : 0;
-      const lineTotal = price * estQty;
+      const lineTotal = price * actQty;
       return `<tr><td>${escapeHtml(product?.name || "Ukjent produkt")}</td><td class="right">${estQty}</td><td class="right">${l.actualQty != null ? l.actualQty : "-"}</td><td class="right">${l.staffMealQty || "-"}</td><td class="right">${currency(price)}</td><td class="right">${currency(costPrice)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
     }).join("");
     const productSection = `<h2>Produktspesifikasjon</h2><table><thead><tr><th>Produkt</th><th class="right">Estimert antall</th><th class="right">Faktisk antall</th><th class="right">Personalmat</th><th class="right">Pris</th><th class="right">Kostpris</th><th class="right">Delsum</th></tr></thead><tbody>${productRows}</tbody></table>`;
@@ -14232,6 +14245,22 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
     ].join("");
     const comparisonSection = `<h2>Prognose vs. Faktisk</h2><table><thead><tr><th></th><th class="right">Prognose</th><th class="right">Faktisk</th><th class="right">Differanse</th></tr></thead><tbody>${comparisonRows}</tbody></table>`;
 
+    // DEL C: valgfri sammenligning med et annet, tidligere lagret event.
+    // Gjenbruker computeEventCalculation 1:1 på sammenligningseventet - ingen
+    // egen beregningslogikk her, kun visning av samme nøkkeltall side om side.
+    const comparisonWithPreviousSection = (flags.compareWithPrevious && compareEvent && compareCalc) ? (() => {
+      const thisSide = pickSide(calc);
+      const otherSide = pickSide(compareCalc);
+      const rows = [
+        ["Omsetning (eks. mva)", currency(thisSide.revenue), currency(otherSide.revenue)],
+        ["Varekost %", `${thisSide.cogsPercent.toFixed(1)}%`, `${otherSide.cogsPercent.toFixed(1)}%`],
+        ["Personalkost %", `${thisSide.staffCostPercent.toFixed(1)}%`, `${otherSide.staffCostPercent.toFixed(1)}%`],
+        ["Overskudd", currency(thisSide.profit), currency(otherSide.profit)],
+        ["Dekningsbidrag/time", `${currency(thisSide.profitPerHour)}/t`, `${currency(otherSide.profitPerHour)}/t`],
+      ].map(([label, a, b]) => `<tr><td>${escapeHtml(label)}</td><td class="right">${a}</td><td class="right">${b}</td></tr>`).join("");
+      return `<h2>Sammenligning med tidligere event</h2><table><thead><tr><th></th><th class="right">${escapeHtml(event.eventName || "Dette eventet")}</th><th class="right">${escapeHtml(compareEvent.eventName)}</th></tr></thead><tbody>${rows}</tbody></table>`;
+    })() : "";
+
     // DEL C: valgfri Produksjonsgrunnlag/Oppskrifter/Varebestilling BASERT PÅ
     // PROGNOSEN (estimatedQty, aldri faktisk solgt - formålet er planlegging
     // FØR arrangementet). Gjenbruker 1:1 de samme funksjonene Ordre-fanen
@@ -14314,8 +14343,9 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
 ${header}
 ${noteSection ? `<div class="print-block">${noteSection}</div>` : ""}
 <div class="print-block">${productSection}</div>
-<div class="print-block">${staffTotalsSection}</div>
 <div class="print-block">${comparisonSection}</div>
+${comparisonWithPreviousSection ? `<div class="print-block">${comparisonWithPreviousSection}</div>` : ""}
+<div class="print-block">${staffTotalsSection}</div>
 ${costSection ? `<div class="print-block">${costSection}</div>` : ""}
 ${packingSection ? `<div class="print-block">${packingSection}</div>` : ""}
 ${flags.detailedStaffList ? `<div class="page-break"></div><div class="print-block">${detailedStaffSection}</div>` : ""}
@@ -14431,6 +14461,12 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                 <input type="checkbox" checked={eventPrintFlags.shopping} onChange={(e) => setEventPrintFlags({ ...eventPrintFlags, shopping: e.target.checked })} />
                 Varebestilling
               </label>
+              {compareEvent && (
+                <label className="check">
+                  <input type="checkbox" checked={eventPrintFlags.compareWithPrevious} onChange={(e) => setEventPrintFlags({ ...eventPrintFlags, compareWithPrevious: e.target.checked })} />
+                  Inkluder sammenligning med tidligere event ({compareEvent.eventName})
+                </label>
+              )}
               <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Produksjonsgrunnlag/Oppskrifter/Varebestilling beregnes fra PROGNOSEN (estimert antall), ikke faktisk solgt.</p>
             </div>
           )}
@@ -14671,6 +14707,37 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               </table>
             </div>
             {!calc.hasActualData && <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>"Faktisk"-kolonnen viser prognosetall inntil faktisk antall solgt og/eller vaktliste er registrert.</p>}
+          </div>
+
+          <div className="soft-box">
+            <div style={{ borderLeft: "4px solid #0ea5e9", paddingLeft: 12 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Sammenlign med tidligere event</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Velg et annet lagret event for å se nøkkeltall side om side. Kun for visning – lagres ikke.</p>
+            </div>
+            <select style={{ marginTop: 12, maxWidth: 400 }} value={compareEventId} onChange={(e) => setCompareEventId(e.target.value)}>
+              <option value="">Ingen sammenligning</option>
+              {events
+                .filter((e) => e.id !== event.id)
+                .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+                .map((e) => (
+                  <option key={e.id} value={e.id}>{e.eventName} ({formatDateNo(e.date)})</option>
+                ))}
+            </select>
+            {compareEvent && compareCalc && (
+              <div style={{ overflowX: "auto", marginTop: 12 }}>
+                <table>
+                  <thead><tr><th></th><th style={{ textAlign: "right" }}>{event.eventName || "Dette eventet"}</th><th style={{ textAlign: "right" }}>{compareEvent.eventName}</th></tr></thead>
+                  <tbody>
+                    <tr><td>Omsetning (eks. mva)</td><td style={{ textAlign: "right" }}>{currency(pickSide(calc).revenue)}</td><td style={{ textAlign: "right" }}>{currency(pickSide(compareCalc).revenue)}</td></tr>
+                    <tr><td>Varekost %</td><td style={{ textAlign: "right" }}>{pickSide(calc).cogsPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{pickSide(compareCalc).cogsPercent.toFixed(1)}%</td></tr>
+                    <tr><td>Personalkost %</td><td style={{ textAlign: "right" }}>{pickSide(calc).staffCostPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{pickSide(compareCalc).staffCostPercent.toFixed(1)}%</td></tr>
+                    <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(pickSide(calc).profit)}</td><td style={{ textAlign: "right" }}>{currency(pickSide(compareCalc).profit)}</td></tr>
+                    <tr><td>Dekningsbidrag/time</td><td style={{ textAlign: "right" }}>{currency(pickSide(calc).profitPerHour)}/t</td><td style={{ textAlign: "right" }}>{currency(pickSide(compareCalc).profitPerHour)}/t</td></tr>
+                  </tbody>
+                </table>
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Viser Faktisk-tall der det finnes, ellers Prognose – for hvert event uavhengig av det andre.</p>
+              </div>
+            )}
           </div>
 
           <details className="soft-box" style={{ padding: 0, marginTop: 12 }}>
