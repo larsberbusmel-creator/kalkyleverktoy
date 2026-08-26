@@ -14226,24 +14226,35 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
       ? `<h2>Notater</h2><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(event.note.trim())}</p>`
       : "";
 
-    function comparisonRow(label: string, est: number, act: number, indent = false) {
-      const diff = act - est;
-      const sign = diff > 0 ? "+" : "";
+    function comparisonRow(label: string, est: number, act: number, indent = false, suffix = "") {
       const rowStyle = indent ? ' style="color:#64748b;font-size:11px"' : "";
       const labelCell = indent ? `<td style="padding-left:16px">${escapeHtml(label)}</td>` : `<td>${escapeHtml(label)}</td>`;
-      return `<tr${rowStyle}>${labelCell}<td class="right">${currency(est)}</td><td class="right">${currency(act)}</td><td class="right">${sign}${currency(diff)}</td></tr>`;
+      const fmt = (v: number) => (suffix ? `${v.toFixed(1)}${suffix}` : currency(v));
+      return `<tr${rowStyle}>${labelCell}<td class="right">${fmt(est)}</td><td class="right">${fmt(act)}</td></tr>`;
     }
+    const otherCostLineRows = (event.customCostLines || []).map((c) => {
+      const amt = Number(c.amount) || 0;
+      const estAmt = c.mode === "per_unit" ? amt * estimatedUnits : amt;
+      const actAmt = c.mode === "per_unit" ? amt * actualUnits : amt;
+      const label = `– ${c.label || "Uten navn"} (${c.mode === "per_unit" ? `${currency(amt)}/enhet` : "engangssum"}, ${c.vatRate}% mva)`;
+      return comparisonRow(label, estAmt, actAmt, true);
+    }).join("");
     const comparisonRows = [
+      comparisonRow("Omsetning (inkl. mva)", calc.estimated.revenueInc, calc.actual.revenueInc),
       comparisonRow("Omsetning (eks. mva)", calc.estimated.revenue, calc.actual.revenue),
       comparisonRow("Varekost", calc.estimated.cogs, calc.actual.cogs),
+      comparisonRow("– varekost % av omsetning", calc.estimated.cogsPercent, calc.actual.cogsPercent, true, "%"),
       ...(calc.estimated.staffMealCost > 0 || calc.actual.staffMealCost > 0 ? [comparisonRow("– herav personalmat", calc.estimated.staffMealCost, calc.actual.staffMealCost, true)] : []),
       comparisonRow("Personalkost", calc.estimated.staffCost, calc.actual.staffCost),
       comparisonRow("– herav internt (ordinært lønnssystem)", calc.estimated.staffCostPayroll, calc.actual.staffCostPayroll, true),
       comparisonRow("– herav innleid personell", calc.estimated.staffCostContractor, calc.actual.staffCostContractor, true),
+      comparisonRow("– personalkost % av omsetning", calc.estimated.staffCostPercent, calc.actual.staffCostPercent, true, "%"),
       comparisonRow("Andre kostnader", calc.estimated.otherCosts, calc.actual.otherCosts),
+      otherCostLineRows,
       comparisonRow("Overskudd", calc.estimated.profit, calc.actual.profit),
+      comparisonRow(`– dekningsbidrag/time (${formatHoursMinutes(calc.estimated.totalHours)} / ${formatHoursMinutes(calc.actual.totalHours)})`, calc.estimated.profitPerHour, calc.actual.profitPerHour, true).replace(/kr<\/td><\/tr>$/, "").replace(/(<td class="right">[^<]*)(<\/td>)/g, "$1/t$2"),
     ].join("");
-    const comparisonSection = `<h2>Prognose vs. Faktisk</h2><table><thead><tr><th></th><th class="right">Prognose</th><th class="right">Faktisk</th><th class="right">Differanse</th></tr></thead><tbody>${comparisonRows}</tbody></table>`;
+    const comparisonSection = `<h2>Prognose vs. Faktisk</h2><table><thead><tr><th></th><th class="right">Prognose</th><th class="right">Faktisk</th></tr></thead><tbody>${comparisonRows}</tbody></table>`;
 
     // DEL C: valgfri sammenligning med et annet, tidligere lagret event.
     // Gjenbruker computeEventCalculation 1:1 på sammenligningseventet - ingen
