@@ -5089,6 +5089,202 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
   return { date: `${year}-${month}-${day}`, time: match[3] };
 }
 
+// Flyttet til toppnivå (fra å være lukninger inni OrdersTab) slik at de kan
+// gjenbrukes 1:1 fra Eventkalkyle sin print-funksjon også (samme mengde-
+// beregning for Produksjonsgrunnlag/Oppskrifter/Varebestilling, uansett om
+// kilden er en ekte Order eller en syntetisk en bygget fra en prognose).
+// data sendes nå eksplisitt som parameter i stedet for lukket over - alle
+// kallsteder inni OrdersTab er oppdatert til å sende med sin egen data.
+function expandProductForProduction(data: AppData, product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string, forceExpandBakery = false): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
+  if (path.includes(product.id)) return [];
+
+  // Bakeri-produkter (Søtbakst, Bakeri-egenprodusert) skal som hovedregel kun vises
+  // som navn i catering/selskapsmeny-produksjon, ikke brettes ut til ingrediensnivå
+  // (det gjøres separat i den egne bakeri-produksjonsfanen). UNNTAK: forceExpandBakery
+  // brukes av printOrder() for selve bakeri-/egenprodusert-TYPE ordre, der nedbrytingen
+  // faktisk ER poenget med utskriften (se printOrder for detaljer).
+  const bakeryNoExpandCategories = ["Søtbakst", "Bakeri, egenprodusert"];
+  if (bakeryNoExpandCategories.includes(product.category) && !forceExpandBakery) {
+    return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+  }
+
+  // Selskapsmeny: bruk faktiske valgte alternativer per rettkategori, hver vektet med antall gjester som valgte det
+  if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
+    if (!menuSelections || !menuSelections.length) {
+      return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+    }
+    return menuSelections.flatMap((sel) => {
+      const chosenProduct = data.products.find((x) => x.id === sel.productId);
+      if (!chosenProduct) return [];
+      const course = (product.menuCourses || []).find((c) => c.id === sel.courseId);
+      return expandProductForProduction(data, chosenProduct, sel.guestCount, [...path, product.id], undefined, course?.name || courseName, forceExpandBakery);
+    });
+  }
+
+  if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+  const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
+    ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
+    : multiplier;
+  return product.lines.flatMap((line) => {
+    const amount = line.amount * batchMultiplier;
+    const effectiveCourseName = line.groupLabel || courseName;
+    if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
+    if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
+    const p = data.products.find((x) => x.id === line.itemId);
+    if (!p) return [];
+    // Underprodukter vises som egen linje (f.eks. "Chimichurri 0,2 kg") i stedet for å flates ut til råvarer.
+    // Oppskriften for å lage mengden vises som egen skalert blokk i printen (scaledRecipeHtml).
+    return [{ name: p.name, amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }];
+  });
+}
+
+function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
+  type Group = { key?: string; rows: typeof items };
+  const groups: Group[] = [];
+  items.forEach((r) => {
+    const last = groups[groups.length - 1];
+    if (!last || last.key !== r.courseName) {
+      groups.push({ key: r.courseName, rows: [r] });
+    } else {
+      last.rows.push(r);
+    }
+  });
+  const colA: Group[] = []; const colB: Group[] = [];
+  let heightA = 0; let heightB = 0;
+  groups.forEach((g) => {
+    const h = g.rows.length + (g.key ? 1 : 0);
+    if (heightA <= heightB) { colA.push(g); heightA += h; } else { colB.push(g); heightB += h; }
+  });
+  function renderGroups(list: Group[]) {
+    return list.map((g) => {
+      const header = g.key ? `<tr><td colspan="3" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
+      const rows = g.rows.map((r) => {
+        const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${escapeHtml(formatAmountUnit(r.perUnit, r.unit, 3))}</span>` : "";
+        const checkbox = `<td style="width:12px;padding:1px 3px 1px 0"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td>`;
+        return `<tr>${checkbox}<td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${escapeHtml(formatAmountUnit(r.amount, r.unit))}</td></tr>`;
+      }).join("");
+      const groupTable = `<table style="width:100%;border-collapse:collapse">${header}${rows}</table>`;
+      return `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
+    }).join("");
+  }
+  return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px"><tr><td style="vertical-align:top;width:50%;padding-right:8px;border-right:1px solid #e5e7eb;font-size:10px">${renderGroups(colA)}</td><td style="vertical-align:top;width:50%;padding-left:8px;font-size:10px">${renderGroups(colB)}</td></tr></table>`;
+}
+
+function productionRowsForOrder(data: AppData, order: Order) {
+  return order.orderLines.flatMap((line) => {
+    const product = data.products.find((p) => p.id === line.productId);
+    return product ? expandProductForProduction(data, product, Number(line.quantity) || 0, [], line.menuSelections) : [];
+  });
+}
+
+function collectOrderMaterials(data: AppData, order: Order, forceExpandBakery = false): Record<string, { name: string; category: string; amount: number; unit: string }> {
+  const acc: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
+  const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
+  function addMaterial(id: string, amount: number, fallbackUnit: string) {
+    const m = data.materials.find((x) => x.id === id);
+    if (!m) return;
+    if (!acc[m.id]) acc[m.id] = { name: m.name, category: m.category, amount: 0, unit: m.unit || fallbackUnit };
+    acc[m.id].amount += amount;
+  }
+  function expandRecipe(recipeId: string, totalAmount: number, path: string[]) {
+    const recipe = data.recipes.find((r) => r.id === recipeId);
+    if (!recipe || path.includes(recipeId)) return;
+    const base = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+    const scale = totalAmount / Math.max(base, 1);
+    recipe.lines.forEach((rl) => {
+      const amt = Number(rl.amount || 0) * scale;
+      if (rl.itemType === "material") addMaterial(rl.itemId, amt, recipe.yieldUnit);
+      if (rl.itemType === "recipe") expandRecipe(rl.itemId, amt, [...path, recipeId]);
+    });
+  }
+  function expandProduct(product: Product, multiplier: number, path: string[], isPieceCount = true) {
+    if (path.includes(product.id) || (bakeryNoExpand.includes(product.category) && !forceExpandBakery)) return;
+    // unitWeightKg skal KUN ganges inn når multiplier faktisk er et antall STYKK
+    // (toppnivå ordrelinjer). For underprodukter brukt som ingrediens i et annet
+    // produkt er multiplier allerede en vektmengde (regnet ut av kalleren via
+    // amt / subYield), og skal IKKE ganges med unitWeightKg på nytt - det gir
+    // en dobbel skalering og feil (for lav/høy) mengde i varebestillingen.
+    const batchMultiplier = isPieceCount && product.unitWeightKg && product.recipeYieldAmount
+      ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
+      : multiplier;
+    product.lines.forEach((pl) => {
+      const amt = Number(pl.amount || 0) * batchMultiplier;
+      if (pl.itemType === "material") addMaterial(pl.itemId, amt, pl.unit);
+      if (pl.itemType === "recipe") expandRecipe(pl.itemId, amt, []);
+      if (pl.itemType === "product") {
+        const sub = data.products.find((x) => x.id === pl.itemId);
+        if (sub) {
+          const subYield = Number(sub.recipeYieldAmount || sub.yieldAmount || 1) || 1;
+          expandProduct(sub, amt / subYield, [...path, product.id], false);
+        }
+      }
+    });
+  }
+  order.orderLines.forEach((line) => {
+    const product = data.products.find((p) => p.id === line.productId);
+    if (!product) return;
+    const qty = Number(line.quantity) || 0;
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length && line.menuSelections?.length) {
+      line.menuSelections.forEach((sel) => {
+        const chosen = data.products.find((x) => x.id === sel.productId);
+        if (chosen) expandProduct(chosen, sel.guestCount, []);
+      });
+    } else {
+      expandProduct(product, qty, []);
+    }
+  });
+  return acc;
+}
+
+function scaledRecipeHtmlForOrder(data: AppData, product: Product, quantity: number, menuSelections?: MenuCourseSelection[], includeMaterials = false, forceExpandBakery = false): string {
+  const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
+  if (bakeryNoExpand.includes(product.category) && !forceExpandBakery) return "";
+  if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
+    if (!menuSelections || !menuSelections.length) return "";
+    return menuSelections.map((sel) => {
+      const chosenProduct = data.products.find((x) => x.id === sel.productId);
+      if (!chosenProduct) return "";
+      return `<div class="recipe-block"><h3>${escapeHtml(product.menuCourses!.find((c) => c.id === sel.courseId)?.name || "Rett")}: ${escapeHtml(chosenProduct.name)} (${sel.guestCount} stk)</h3>${scaledRecipeHtmlForOrder(data, chosenProduct, sel.guestCount, undefined, false, forceExpandBakery)}</div>`;
+    }).join("");
+  }
+  let html = "";
+  product.lines.forEach((pl) => {
+    if (pl.itemType === "recipe") {
+      const recipe = data.recipes.find((r) => r.id === pl.itemId);
+      if (!recipe) return;
+      const totalAmount = Number(pl.amount || 0) * quantity;
+      const recipeBase = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
+      const scale = totalAmount / Math.max(recipeBase, 1);
+      const ingredientRows = recipe.lines.map((rl) => {
+        let name = "Ukjent"; let unit = recipe.yieldUnit;
+        if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
+        if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
+        return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(rl.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
+      }).join("");
+      html += `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(recipe.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
+    }
+    if (pl.itemType === "product") {
+      const subProduct = data.products.find((x) => x.id === pl.itemId);
+      if (subProduct && subProduct.id !== product.id) {
+        const totalAmount = Number(pl.amount || 0) * quantity;
+        const subYield = Number(subProduct.recipeYieldAmount || subProduct.yieldAmount || 1) || 1;
+        const subScale = totalAmount / subYield;
+        html += `<div class="recipe-block"><h3>Produkt: ${escapeHtml(subProduct.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3>${scaledRecipeHtmlForOrder(data, subProduct, subScale, undefined, true, forceExpandBakery)}</div>`;
+      }
+    }
+  });
+  const materialRows = product.lines
+    .filter((pl) => pl.itemType === "material")
+    .map((pl) => {
+      const m = data.materials.find((x) => x.id === pl.itemId);
+      return `<tr><td>${escapeHtml(m?.name || "Ukjent råvare")}</td><td class="right">${num(Number(pl.amount || 0) * quantity, 3)} ${escapeHtml(pl.unit)}</td></tr>`;
+    }).join("");
+  if (materialRows && includeMaterials) {
+    html += `<table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${materialRows}</tbody></table>`;
+  }
+  return html;
+}
+
 function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, setEventCalculationToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "customerDirectory", itemsPatch: Record<string, any>) => void;
   data: AppData;
@@ -5540,49 +5736,6 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     return orderSubtotalIncVat(order) - orderDiscountAmount(order);
   }
 
- function expandProductForProduction(product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string, forceExpandBakery = false): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
-    if (path.includes(product.id)) return [];
-
-    // Bakeri-produkter (Søtbakst, Bakeri-egenprodusert) skal som hovedregel kun vises
-    // som navn i catering/selskapsmeny-produksjon, ikke brettes ut til ingrediensnivå
-    // (det gjøres separat i den egne bakeri-produksjonsfanen). UNNTAK: forceExpandBakery
-    // brukes av printOrder() for selve bakeri-/egenprodusert-TYPE ordre, der nedbrytingen
-    // faktisk ER poenget med utskriften (se printOrder for detaljer).
-    const bakeryNoExpandCategories = ["Søtbakst", "Bakeri, egenprodusert"];
-    if (bakeryNoExpandCategories.includes(product.category) && !forceExpandBakery) {
-      return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
-    }
-
-    // Selskapsmeny: bruk faktiske valgte alternativer per rettkategori, hver vektet med antall gjester som valgte det
-    if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
-      if (!menuSelections || !menuSelections.length) {
-        return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
-      }
-      return menuSelections.flatMap((sel) => {
-        const chosenProduct = data.products.find((x) => x.id === sel.productId);
-        if (!chosenProduct) return [];
-        const course = (product.menuCourses || []).find((c) => c.id === sel.courseId);
-        return expandProductForProduction(chosenProduct, sel.guestCount, [...path, product.id], undefined, course?.name || courseName, forceExpandBakery);
-      });
-    }
-
-   if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
-    const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
-      ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
-      : multiplier;
-    return product.lines.flatMap((line) => {
-      const amount = line.amount * batchMultiplier;
-      const effectiveCourseName = line.groupLabel || courseName;
-      if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
-      if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
-      const p = data.products.find((x) => x.id === line.itemId);
-      if (!p) return [];
-      // Underprodukter vises som egen linje (f.eks. "Chimichurri 0,2 kg") i stedet for å flates ut til råvarer.
-      // Oppskriften for å lage mengden vises som egen skalert blokk i printen (scaledRecipeHtml).
-      return [{ name: p.name, amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }];
-    });
-  }
-
   function productionRowsHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
     let lastCourse: string | undefined;
     return items.map((r) => {
@@ -5594,153 +5747,6 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
       const perUnitHtml = r.perUnit != null ? ` <span style="color:#94a3b8;font-size:9px">(à ${num(r.perUnit, 3)} ${escapeHtml(r.unit)})</span>` : "";
       return `${header}<tr><td style="padding-left:${r.courseName ? "34px" : "9px"}">${escapeHtml(r.name)}${perUnitHtml}</td><td>${num(r.amount)} ${escapeHtml(r.unit)}</td></tr>`;
     }).join("");
-  }
-
-function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
-      type Group = { key?: string; rows: typeof items };
-    const groups: Group[] = [];
-    items.forEach((r) => {
-      const last = groups[groups.length - 1];
-      if (!last || last.key !== r.courseName) {
-        groups.push({ key: r.courseName, rows: [r] });
-      } else {
-        last.rows.push(r);
-      }
-    });
-    const colA: Group[] = []; const colB: Group[] = [];
-    let heightA = 0; let heightB = 0;
-    groups.forEach((g) => {
-      const h = g.rows.length + (g.key ? 1 : 0);
-      if (heightA <= heightB) { colA.push(g); heightA += h; } else { colB.push(g); heightB += h; }
-    });
-    function renderGroups(list: Group[]) {
-      return list.map((g) => {
-        const header = g.key ? `<tr><td colspan="3" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
-        const rows = g.rows.map((r) => {
-          const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${escapeHtml(formatAmountUnit(r.perUnit, r.unit, 3))}</span>` : "";
-          const checkbox = `<td style="width:12px;padding:1px 3px 1px 0"><span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span></td>`;
-          return `<tr>${checkbox}<td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${escapeHtml(formatAmountUnit(r.amount, r.unit))}</td></tr>`;
-        }).join("");
-        const groupTable = `<table style="width:100%;border-collapse:collapse">${header}${rows}</table>`;
-        return `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
-      }).join("");
-    }
-    return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px"><tr><td style="vertical-align:top;width:50%;padding-right:8px;border-right:1px solid #e5e7eb;font-size:10px">${renderGroups(colA)}</td><td style="vertical-align:top;width:50%;padding-left:8px;font-size:10px">${renderGroups(colB)}</td></tr></table>`;
-  }
-
-  function productionRowsForOrder(order: Order) {
-    return order.orderLines.flatMap((line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      return product ? expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections) : [];
-    });
-  }
-
-  function collectOrderMaterials(order: Order, forceExpandBakery = false): Record<string, { name: string; category: string; amount: number; unit: string }> {
-    const acc: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
-    const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
-    function addMaterial(id: string, amount: number, fallbackUnit: string) {
-      const m = data.materials.find((x) => x.id === id);
-      if (!m) return;
-      if (!acc[m.id]) acc[m.id] = { name: m.name, category: m.category, amount: 0, unit: m.unit || fallbackUnit };
-      acc[m.id].amount += amount;
-    }
-    function expandRecipe(recipeId: string, totalAmount: number, path: string[]) {
-      const recipe = data.recipes.find((r) => r.id === recipeId);
-      if (!recipe || path.includes(recipeId)) return;
-      const base = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
-      const scale = totalAmount / Math.max(base, 1);
-      recipe.lines.forEach((rl) => {
-        const amt = Number(rl.amount || 0) * scale;
-        if (rl.itemType === "material") addMaterial(rl.itemId, amt, recipe.yieldUnit);
-        if (rl.itemType === "recipe") expandRecipe(rl.itemId, amt, [...path, recipeId]);
-      });
-    }
-        function expandProduct(product: Product, multiplier: number, path: string[], isPieceCount = true) {
-      if (path.includes(product.id) || (bakeryNoExpand.includes(product.category) && !forceExpandBakery)) return;
-      // unitWeightKg skal KUN ganges inn når multiplier faktisk er et antall STYKK
-      // (toppnivå ordrelinjer). For underprodukter brukt som ingrediens i et annet
-      // produkt er multiplier allerede en vektmengde (regnet ut av kalleren via
-      // amt / subYield), og skal IKKE ganges med unitWeightKg på nytt - det gir
-      // en dobbel skalering og feil (for lav/høy) mengde i varebestillingen.
-      const batchMultiplier = isPieceCount && product.unitWeightKg && product.recipeYieldAmount
-        ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
-        : multiplier;
-      product.lines.forEach((pl) => {
-        const amt = Number(pl.amount || 0) * batchMultiplier;
-        if (pl.itemType === "material") addMaterial(pl.itemId, amt, pl.unit);
-        if (pl.itemType === "recipe") expandRecipe(pl.itemId, amt, []);
-        if (pl.itemType === "product") {
-          const sub = data.products.find((x) => x.id === pl.itemId);
-          if (sub) {
-            const subYield = Number(sub.recipeYieldAmount || sub.yieldAmount || 1) || 1;
-            expandProduct(sub, amt / subYield, [...path, product.id], false);
-          }
-        }
-      });
-    }
-    order.orderLines.forEach((line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      if (!product) return;
-      const qty = Number(line.quantity) || 0;
-      if (product.type === "selskapsmeny" && (product.menuCourses || []).length && line.menuSelections?.length) {
-        line.menuSelections.forEach((sel) => {
-          const chosen = data.products.find((x) => x.id === sel.productId);
-          if (chosen) expandProduct(chosen, sel.guestCount, []);
-        });
-      } else {
-        expandProduct(product, qty, []);
-      }
-    });
-    return acc;
-  }
-
-  function scaledRecipeHtmlForOrder(product: Product, quantity: number, menuSelections?: MenuCourseSelection[], includeMaterials = false, forceExpandBakery = false): string {
-    const bakeryNoExpand = ["Søtbakst", "Bakeri, egenprodusert"];
-    if (bakeryNoExpand.includes(product.category) && !forceExpandBakery) return "";
-    if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
-      if (!menuSelections || !menuSelections.length) return "";
-      return menuSelections.map((sel) => {
-        const chosenProduct = data.products.find((x) => x.id === sel.productId);
-        if (!chosenProduct) return "";
-        return `<div class="recipe-block"><h3>${escapeHtml(product.menuCourses!.find((c) => c.id === sel.courseId)?.name || "Rett")}: ${escapeHtml(chosenProduct.name)} (${sel.guestCount} stk)</h3>${scaledRecipeHtmlForOrder(chosenProduct, sel.guestCount, undefined, false, forceExpandBakery)}</div>`;
-      }).join("");
-    }
-    let html = "";
-    product.lines.forEach((pl) => {
-      if (pl.itemType === "recipe") {
-        const recipe = data.recipes.find((r) => r.id === pl.itemId);
-        if (!recipe) return;
-        const totalAmount = Number(pl.amount || 0) * quantity;
-        const recipeBase = recipe.lines.reduce((s, rl) => s + Number(rl.amount || 0), 0) || Number(recipe.yieldAmount || 1) || 1;
-        const scale = totalAmount / Math.max(recipeBase, 1);
-        const ingredientRows = recipe.lines.map((rl) => {
-          let name = "Ukjent"; let unit = recipe.yieldUnit;
-          if (rl.itemType === "material") { const m = data.materials.find((m) => m.id === rl.itemId); name = m?.name || "Ukjent råvare"; unit = m?.unit || recipe.yieldUnit; }
-          if (rl.itemType === "recipe") { const sr = data.recipes.find((r) => r.id === rl.itemId); name = sr?.name || "Ukjent grunnoppskrift"; unit = sr?.yieldUnit || recipe.yieldUnit; }
-          return `<tr><td>${escapeHtml(name)}</td><td class="right">${num(Number(rl.amount || 0) * scale, 3)} ${escapeHtml(unit)}</td></tr>`;
-        }).join("");
-        html += `<div class="recipe-block"><h3>Grunnoppskrift: ${escapeHtml(recipe.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3><table><thead><tr><th>Ingrediens</th><th class="right">Mengde</th></tr></thead><tbody>${ingredientRows}</tbody></table></div>`;
-      }
-      if (pl.itemType === "product") {
-        const subProduct = data.products.find((x) => x.id === pl.itemId);
-        if (subProduct && subProduct.id !== product.id) {
-          const totalAmount = Number(pl.amount || 0) * quantity;
-          const subYield = Number(subProduct.recipeYieldAmount || subProduct.yieldAmount || 1) || 1;
-          const subScale = totalAmount / subYield;
-          html += `<div class="recipe-block"><h3>Produkt: ${escapeHtml(subProduct.name)} – ${num(totalAmount, 3)} ${escapeHtml(pl.unit)}</h3>${scaledRecipeHtmlForOrder(subProduct, subScale, undefined, true, forceExpandBakery)}</div>`;
-        }
-      }
-    });
-    const materialRows = product.lines
-      .filter((pl) => pl.itemType === "material")
-      .map((pl) => {
-        const m = data.materials.find((x) => x.id === pl.itemId);
-        return `<tr><td>${escapeHtml(m?.name || "Ukjent råvare")}</td><td class="right">${num(Number(pl.amount || 0) * quantity, 3)} ${escapeHtml(pl.unit)}</td></tr>`;
-      }).join("");
-    if (materialRows && includeMaterials) {
-      html += `<table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${materialRows}</tbody></table>`;
-    }
-    return html;
   }
 
   function printOrder(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
@@ -5775,7 +5781,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
       const isBakeryOrder = order.type === "bakeri" || order.type === "egenprodusert";
       const prodRows = order.orderLines.map((line) => {
         const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-        const twoColHtml = productionTwoColumnHtml(expandProductForProduction(product, Number(line.quantity) || 0, [], line.menuSelections, undefined, isBakeryOrder));
+        const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, Number(line.quantity) || 0, [], line.menuSelections, undefined, isBakeryOrder));
         return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
       }).join("");
       const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
@@ -5788,11 +5794,11 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
         const scaledQty = product.unitWeightKg && product.recipeYieldAmount
           ? (qty * product.unitWeightKg) / product.recipeYieldAmount
           : qty;
-        const html = scaledRecipeHtmlForOrder(product, scaledQty, line.menuSelections, false, isBakeryOrder);
+        const html = scaledRecipeHtmlForOrder(data, product, scaledQty, line.menuSelections, false, isBakeryOrder);
         if (!html) return "";
         return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
       }).join("");
-      const materialsAgg = flags.shopping ? collectOrderMaterials(order, isBakeryOrder) : {};
+      const materialsAgg = flags.shopping ? collectOrderMaterials(data, order, isBakeryOrder) : {};
       const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
       Object.values(materialsAgg).forEach((entry) => {
         if (!byCategory[entry.category]) byCategory[entry.category] = [];
@@ -6551,7 +6557,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
                 </table>
                 <details style={{ marginTop: 10 }}>
                   <summary style={{ cursor: "pointer", color: "#64748b" }}>Produksjonsgrunnlag</summary>
-                  <table><tbody>{productionRowsForOrder(o).map((r, i) => <tr key={i}><td>{r.courseName || r.source}</td><td>{r.name}</td><td>{formatAmountUnit(r.amount, r.unit)}</td></tr>)}</tbody></table>
+                  <table><tbody>{productionRowsForOrder(data, o).map((r, i) => <tr key={i}><td>{r.courseName || r.source}</td><td>{r.name}</td><td>{formatAmountUnit(r.amount, r.unit)}</td></tr>)}</tbody></table>
                 </details>
                 <div className="section-toggle print-toggle" style={{ marginTop: 12 }} onClick={() => setPrintOptionsOpen(!printOptionsOpen)}>
                   <h3>Utskriftsvalg</h3>
@@ -13798,12 +13804,12 @@ function computeEventCalculation(event: EventCalculation, data: AppData, product
 
     return {
     estimated: {
-      revenue: estimatedRevenue, revenueInc: estimatedRevenueInc, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, otherCosts: estimatedOtherCosts, profit: estimatedProfit,
+      revenue: estimatedRevenue, revenueInc: estimatedRevenueInc, cogs: estimatedCogs, staffMealCost: estimatedStaffMealCost, staffCost: estimatedStaffCost, staffCostPayroll: estimatedStaffCostPayroll, staffCostContractor: estimatedStaffCostContractor, otherCosts: estimatedOtherCosts, profit: estimatedProfit,
       cogsPercent: pct(estimatedCogs, estimatedRevenue), staffCostPercent: pct(estimatedStaffCost, estimatedRevenue),
       totalHours: estimatedTotalHours, profitPerHour: perHour(estimatedProfit, estimatedTotalHours),
     },
     actual: {
-      revenue: actualRevenue, revenueInc: actualRevenueInc, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, otherCosts: actualOtherCosts, profit: actualProfit,
+      revenue: actualRevenue, revenueInc: actualRevenueInc, cogs: actualCogs, staffMealCost: actualStaffMealCost, staffCost: actualStaffCost, staffCostPayroll: actualStaffCostPayroll, staffCostContractor: actualStaffCostContractor, otherCosts: actualOtherCosts, profit: actualProfit,
       cogsPercent: pct(actualCogs, actualRevenue), staffCostPercent: pct(actualStaffCost, actualRevenue),
       totalHours: actualTotalHours, profitPerHour: perHour(actualProfit, actualTotalHours),
     },
@@ -13847,6 +13853,8 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   const [marginDraft, setMarginDraft] = useState<Record<string, string>>({});
   const [editLogOpen, setEditLogOpen] = useState(false);
   const [staffScheduleMode, setStaffScheduleMode] = useState<"prognose" | "faktisk">("prognose");
+  const [eventPrintOptionsOpen, setEventPrintOptionsOpen] = useState(false);
+  const [eventPrintFlags, setEventPrintFlags] = useState({ detailedStaffList: false, production: false, recipes: false, shopping: false });
   const [showPackingListPanel, setShowPackingListPanel] = useState(false);
   const [newExtraPackingLabel, setNewExtraPackingLabel] = useState("");
 
@@ -14086,6 +14094,11 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   const filteredEvents = events.filter((e) => e.eventName.toLowerCase().includes(eventSearch.toLowerCase()));
 
   const calc = computeEventCalculation(event, data, productUnitCost);
+  // Samme totalt-solgt-enheter-beregning som computeEventCalculation bruker internt
+  // for "per_unit"-kostnadslinjer - eksponert her lokalt siden skjermtabellen viser
+  // per-kostnadslinje-spesifikasjon (computeEventCalculation returnerer kun summerte tall).
+  const estimatedUnits = event.productLines.reduce((sum, l) => sum + (Number(l.estimatedQty) || 0), 0);
+  const actualUnits = event.productLines.reduce((sum, l) => sum + (Number(l.actualQty ?? l.estimatedQty) || 0), 0);
 
   function diffLine(estimatedVal: number, actualVal: number) {
     const diff = actualVal - estimatedVal;
@@ -14105,21 +14118,24 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   // vist FEIL avkrysningsstatus i printen - bygger derfor samme ☑/☐-
   // visning direkte fra eventPackingChecklistRows() i stedet, som allerede
   // har riktig id-oppslag.
-  function printEventCalculation() {
+  function printEventCalculation(flags: { detailedStaffList: boolean; production: boolean; recipes: boolean; shopping: boolean }) {
     const productRows = event.productLines.map((l) => {
       const product = data.products.find((p) => p.id === l.productId);
       const price = l.priceOverride || product?.customerPrice || 0;
       const estQty = Number(l.estimatedQty) || 0;
+      const costPrice = product ? productUnitCost(product) : 0;
       const lineTotal = price * estQty;
-      return `<tr><td>${escapeHtml(product?.name || "Ukjent produkt")}</td><td class="right">${estQty}</td><td class="right">${l.actualQty != null ? l.actualQty : "-"}</td><td class="right">${l.staffMealQty || "-"}</td><td class="right">${currency(price)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
+      return `<tr><td>${escapeHtml(product?.name || "Ukjent produkt")}</td><td class="right">${estQty}</td><td class="right">${l.actualQty != null ? l.actualQty : "-"}</td><td class="right">${l.staffMealQty || "-"}</td><td class="right">${currency(price)}</td><td class="right">${currency(costPrice)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
     }).join("");
-    const productSection = `<h2>Produkter</h2><table><thead><tr><th>Produkt</th><th class="right">Estimert antall</th><th class="right">Faktisk antall</th><th class="right">Personalmat</th><th class="right">Pris</th><th class="right">Delsum</th></tr></thead><tbody>${productRows}</tbody></table>`;
+    const productSection = `<h2>Produktspesifikasjon</h2><table><thead><tr><th>Produkt</th><th class="right">Estimert antall</th><th class="right">Faktisk antall</th><th class="right">Personalmat</th><th class="right">Pris</th><th class="right">Kostpris</th><th class="right">Delsum</th></tr></thead><tbody>${productRows}</tbody></table>`;
 
     // Kun navn/dato/tid/timer - ALDRI timelønn/lønnskostnad i selve utskriften,
     // siden papirutskriften kan havne hos andre enn de med canSeeWages-tilgang.
-                // Summerer timer PER PERSON i stedet for én rad per vakt - print-utskriften
-        // skal vise samlet timeantall per ansatt, ikke hver enkelt registrering.
-        function staffSummaryHtml(title: string, roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+    // Summerer timer PER PERSON i stedet for én rad per vakt - print-utskriften
+    // skal vise samlet timeantall per ansatt, ikke hver enkelt registrering.
+    // Brukes KUN i den valgfrie, detaljerte seksjonen (flags.detailedStaffList) -
+    // hovedsiden viser i stedet den forenklede staffTotalsSummaryHtml under.
+    function staffSummaryHtml(title: string, roster: EventStaffMember[], shifts: EventShiftEntry[]) {
       const internalMembers = roster.filter((m) => !m.isContractor);
       const contractorMembers = roster.filter((m) => m.isContractor);
 
@@ -14152,8 +14168,33 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
 <h3 style="margin-top:14px">Ordinært lønnssystem</h3>${internalTable}
 <h3 style="margin-top:14px">Innleid personell</h3>${contractorTable}`;
     }
-    const staffSection = staffSummaryHtml("Vaktliste – Prognose", event.staffRosterPrognose || [], event.shiftsPrognose || [])
+    const detailedStaffSection = staffSummaryHtml("Vaktliste – Prognose", event.staffRosterPrognose || [], event.shiftsPrognose || [])
       + staffSummaryHtml("Vaktliste – Faktisk brukt tid", event.staffRosterActual || [], event.shiftsActual || []);
+
+    // NY, forenklet bemannings-oppsummering for hovedsiden - kun aggregerte
+    // tall, ingen navn/per-person-linjer (den detaljerte, navngitte versjonen
+    // er staffSummaryHtml over, kun med i printen når flags.detailedStaffList).
+    function staffTotalsSummaryHtml(roster: EventStaffMember[], shifts: EventShiftEntry[]) {
+      const internalShifts = shifts.filter((s) => !roster.find((m) => m.id === s.staffMemberId)?.isContractor);
+      const contractorShifts = shifts.filter((s) => roster.find((m) => m.id === s.staffMemberId)?.isContractor);
+      const hoursOf = (list: EventShiftEntry[]) => list.reduce((sum, s) => sum + staffEntryHours(s), 0);
+      const costOf = (list: EventShiftEntry[]) => list.reduce((sum, s) => {
+        const member = roster.find((m) => m.id === s.staffMemberId);
+        return sum + staffEntryHours(s) * (Number(member?.hourlyWage) || 0);
+      }, 0);
+      const internalHours = hoursOf(internalShifts);
+      const internalCost = costOf(internalShifts);
+      const contractorHours = hoursOf(contractorShifts);
+      const contractorCost = costOf(contractorShifts);
+      return `<p>Timer internt (ordinært lønnssystem): ${formatHoursMinutes(internalHours)}</p>
+<p>Lønnskostnad internt: ${currency(internalCost)}</p>
+<p>Timer innleid personell: ${formatHoursMinutes(contractorHours)}</p>
+<p>Lønnskostnad innleid personell: ${currency(contractorCost)}</p>
+<p><b>Sum lønnskostnad totalt: ${currency(internalCost + contractorCost)}</b></p>`;
+    }
+    const staffTotalsSection = `<h2>Bemanning – sammendrag</h2>
+<h3>Prognose</h3>${staffTotalsSummaryHtml(event.staffRosterPrognose || [], event.shiftsPrognose || [])}
+<h3 style="margin-top:14px">Faktisk brukt tid</h3>${staffTotalsSummaryHtml(event.staffRosterActual || [], event.shiftsActual || [])}`;
 
     const costRows = event.customCostLines.map((c) =>
       `<tr><td>${escapeHtml(c.label)}</td><td class="right">${currency(c.amount)} eks. mva</td><td class="right">${c.vatRate}%</td><td>${c.mode === "per_unit" ? "Per solgt enhet" : "Engangssum"}</td></tr>`
@@ -14172,18 +14213,85 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
       ? `<h2>Notater</h2><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(event.note.trim())}</p>`
       : "";
 
-    const comparisonRows = ([
-      ["Omsetning (eks. mva)", calc.estimated.revenue, calc.actual.revenue],
-      ["Varekost", calc.estimated.cogs, calc.actual.cogs],
-      ["Personalkost", calc.estimated.staffCost, calc.actual.staffCost],
-      ["Andre kostnader", calc.estimated.otherCosts, calc.actual.otherCosts],
-      ["Overskudd", calc.estimated.profit, calc.actual.profit],
-    ] as [string, number, number][]).map(([label, est, act]) => {
+    function comparisonRow(label: string, est: number, act: number, indent = false) {
       const diff = act - est;
       const sign = diff > 0 ? "+" : "";
-      return `<tr><td>${label}</td><td class="right">${currency(est)}</td><td class="right">${currency(act)}</td><td class="right">${sign}${currency(diff)}</td></tr>`;
-    }).join("");
+      const rowStyle = indent ? ' style="color:#64748b;font-size:11px"' : "";
+      const labelCell = indent ? `<td style="padding-left:16px">${escapeHtml(label)}</td>` : `<td>${escapeHtml(label)}</td>`;
+      return `<tr${rowStyle}>${labelCell}<td class="right">${currency(est)}</td><td class="right">${currency(act)}</td><td class="right">${sign}${currency(diff)}</td></tr>`;
+    }
+    const comparisonRows = [
+      comparisonRow("Omsetning (eks. mva)", calc.estimated.revenue, calc.actual.revenue),
+      comparisonRow("Varekost", calc.estimated.cogs, calc.actual.cogs),
+      ...(calc.estimated.staffMealCost > 0 || calc.actual.staffMealCost > 0 ? [comparisonRow("– herav personalmat", calc.estimated.staffMealCost, calc.actual.staffMealCost, true)] : []),
+      comparisonRow("Personalkost", calc.estimated.staffCost, calc.actual.staffCost),
+      comparisonRow("– herav internt (ordinært lønnssystem)", calc.estimated.staffCostPayroll, calc.actual.staffCostPayroll, true),
+      comparisonRow("– herav innleid personell", calc.estimated.staffCostContractor, calc.actual.staffCostContractor, true),
+      comparisonRow("Andre kostnader", calc.estimated.otherCosts, calc.actual.otherCosts),
+      comparisonRow("Overskudd", calc.estimated.profit, calc.actual.profit),
+    ].join("");
     const comparisonSection = `<h2>Prognose vs. Faktisk</h2><table><thead><tr><th></th><th class="right">Prognose</th><th class="right">Faktisk</th><th class="right">Differanse</th></tr></thead><tbody>${comparisonRows}</tbody></table>`;
+
+    // DEL C: valgfri Produksjonsgrunnlag/Oppskrifter/Varebestilling BASERT PÅ
+    // PROGNOSEN (estimatedQty, aldri faktisk solgt - formålet er planlegging
+    // FØR arrangementet). Gjenbruker 1:1 de samme funksjonene Ordre-fanen
+    // bruker (nå flyttet til toppnivå slik at de kan kalles herfra også), via
+    // en minimal, gyldig syntetisk Order bygget fra event.productLines - se
+    // begrunnelse i sluttoppsummeringen for hvorfor en syntetisk Order (og
+    // ikke en ny, egen beregningsfunksjon) ble valgt.
+    function productionSectionsHtml(): string {
+      if (!flags.production && !flags.recipes && !flags.shopping) return "";
+      const syntheticOrder: Order = {
+        id: `event-synthetic-${event.id || "draft"}`,
+        type: "catering",
+        customerType: "bedrift",
+        customer: event.eventName,
+        phone: "",
+        deliveryAddress: event.location || "",
+        date: event.date,
+        endDate: event.endDate,
+        time: "",
+        guests: 0,
+        productId: event.productLines[0]?.productId || "",
+        orderLines: event.productLines.filter((l) => l.productId).map((l) => ({ productId: l.productId, quantity: Number(l.estimatedQty) || 0 })),
+        allergens: {},
+      };
+
+      let html = "";
+      if (flags.production) {
+        const prodRows = syntheticOrder.orderLines.map((line) => {
+          const product = data.products.find((p) => p.id === line.productId);
+          if (!product) return "";
+          const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, line.quantity, [], line.menuSelections));
+          return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
+        }).join("");
+        html += `<div class="print-block"><h2>Produksjonsgrunnlag (fra prognose)</h2>${prodRows}</div>`;
+      }
+      if (flags.recipes) {
+        const recipePages = syntheticOrder.orderLines.map((line) => {
+          const product = data.products.find((p) => p.id === line.productId);
+          if (!product) return "";
+          const recipeHtml = scaledRecipeHtmlForOrder(data, product, line.quantity, line.menuSelections);
+          if (!recipeHtml) return "";
+          return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${recipeHtml}</div>`;
+        }).join("");
+        html += `<div class="print-block"><h2>Oppskrifter (fra prognose)</h2>${recipePages || '<p style="color:#64748b">Ingen oppskrifter å vise.</p>'}</div>`;
+      }
+      if (flags.shopping) {
+        const materialsAgg = collectOrderMaterials(data, syntheticOrder);
+        const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
+        Object.values(materialsAgg).forEach((entry) => {
+          if (!byCategory[entry.category]) byCategory[entry.category] = [];
+          byCategory[entry.category].push(entry);
+        });
+        const shoppingHtml = Object.keys(byCategory).sort((a, b) => a.localeCompare(b, "no-NO")).map((cat) => {
+          const rows = byCategory[cat].sort((a, b) => a.name.localeCompare(b.name, "no-NO")).map((e) => `<tr><td>${escapeHtml(e.name)}</td><td class="right">${num(e.amount, 3)} ${escapeHtml(e.unit)}</td></tr>`).join("");
+          return `<h3 style="margin-top:12px">${escapeHtml(cat)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${rows}</tbody></table>`;
+        }).join("");
+        html += `<div class="print-block"><h2>Varebestilling (fra prognose)</h2>${shoppingHtml || '<p style="color:#64748b">Ingen råvarer å vise.</p>'}</div>`;
+      }
+      return html;
+    }
 
     const dateText = event.endDate && event.endDate !== event.date
       ? `${formatDateNo(event.date)} – ${formatDateNo(event.endDate)}`
@@ -14197,15 +14305,21 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
   </div>
 </div>`;
 
-        const body = `<div class="print-offer">
+    // DEL A: side 1 - arrangementinfo, notater, produktspesifikasjon, forenklet
+    // bemanningssammendrag, regnestykket, deretter Andre kostnader/Pakkeliste
+    // (ikke eksplisitt plassert av oppgaven - lagt rett etter regnestykket,
+    // se sluttoppsummeringen). DEL B/C er valgfrie tilleggsseksjoner helt til
+    // slutt, hver med eget sideskift foran, kun med når avhuket.
+    const body = `<div class="print-offer">
 ${header}
-<div class="print-block">${productSection}</div>
-<div class="print-block">${staffSection}</div>
-<div class="print-block">${costSection}</div>
-${packingSection ? `<div class="print-block">${packingSection}</div>` : ""}
 ${noteSection ? `<div class="print-block">${noteSection}</div>` : ""}
-<div class="page-break"></div>
-${comparisonSection}
+<div class="print-block">${productSection}</div>
+<div class="print-block">${staffTotalsSection}</div>
+<div class="print-block">${comparisonSection}</div>
+${costSection ? `<div class="print-block">${costSection}</div>` : ""}
+${packingSection ? `<div class="print-block">${packingSection}</div>` : ""}
+${flags.detailedStaffList ? `<div class="page-break"></div><div class="print-block">${detailedStaffSection}</div>` : ""}
+${(flags.production || flags.recipes || flags.shopping) ? `<div class="page-break"></div>${productionSectionsHtml()}` : ""}
 </div>`;
 
     const w = window.open("", "_blank");
@@ -14278,7 +14392,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
           <div className="between">
             <h2>{editingEventId ? "Rediger eventkalkyle" : "Ny eventkalkyle"}</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btn" onClick={printEventCalculation}>🖨️ Skriv ut</button>
+              <button className="btn" onClick={() => printEventCalculation(eventPrintFlags)}>🖨️ Skriv ut</button>
               <button className="btn" onClick={cancelEdit}>Avbryt</button>
               <button
                 className="btn active"
@@ -14291,6 +14405,35 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
               </button>
             </div>
           </div>
+
+          <div className="section-toggle print-toggle" style={{ marginTop: 8 }} onClick={() => setEventPrintOptionsOpen(!eventPrintOptionsOpen)}>
+            <h3>Utskriftsvalg</h3>
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="section-toggle-count">{Object.values(eventPrintFlags).filter(Boolean).length}</span>
+              {eventPrintOptionsOpen ? "▲" : "▼"}
+            </span>
+          </div>
+          {eventPrintOptionsOpen && (
+            <div className="soft-box">
+              <label className="check">
+                <input type="checkbox" checked={eventPrintFlags.detailedStaffList} onChange={(e) => setEventPrintFlags({ ...eventPrintFlags, detailedStaffList: e.target.checked })} />
+                Inkluder detaljert timeliste per ansatt (intern og ekstern)
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={eventPrintFlags.production} onChange={(e) => setEventPrintFlags({ ...eventPrintFlags, production: e.target.checked })} />
+                Produksjonsgrunnlag
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={eventPrintFlags.recipes} onChange={(e) => setEventPrintFlags({ ...eventPrintFlags, recipes: e.target.checked })} />
+                Oppskrifter
+              </label>
+              <label className="check">
+                <input type="checkbox" checked={eventPrintFlags.shopping} onChange={(e) => setEventPrintFlags({ ...eventPrintFlags, shopping: e.target.checked })} />
+                Varebestilling
+              </label>
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Produksjonsgrunnlag/Oppskrifter/Varebestilling beregnes fra PROGNOSEN (estimert antall), ikke faktisk solgt.</p>
+            </div>
+          )}
 
           <div className="form-grid two">
             <label>Navn på event<input value={event.eventName} disabled={readOnly} onChange={(e) => setEvent({ ...event, eventName: e.target.value })} placeholder="F.eks. Julemarked Bodø" /></label>
@@ -14506,6 +14649,8 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                     <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav personalmat</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffMealCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffMealCost)}</td></tr>
                   )}
                   <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav internt (ordinært lønnssystem)</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCostPayroll)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCostPayroll)}</td></tr>
+                  <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– herav innleid personell</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCostContractor)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCostContractor)}</td></tr>
                   <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– personalkost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.staffCostPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.staffCostPercent.toFixed(1)}%</td></tr>
                   <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td></tr>
                   {(event.customCostLines || []).map((c) => {
