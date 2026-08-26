@@ -3232,6 +3232,7 @@ const [line, setLine] = useState<{
 });
 const [lineSearch, setLineSearch] = useState("");
   const [editLineSearch, setEditLineSearch] = useState<Record<number, string>>({});
+  const [customGroupLabelMode, setCustomGroupLabelMode] = useState(false);
   const [packLine, setPackLine] = useState({ packagingId: "", quantity: "1" });
   const [draftMenuCourses, setDraftMenuCourses] = useState<MenuCourse[]>([]);
   const [newCourseName, setNewCourseName] = useState("");
@@ -4427,12 +4428,31 @@ th{background:#f3f4f6}
               <option value="stk">stk</option>
               <option value="porsjoner">porsjoner</option>
             </select>
-            <input
-              value={line.groupLabel}
-              disabled={readOnly}
-              onChange={(e) => setLine({ ...line, groupLabel: e.target.value })}
-              placeholder="Gruppe i produksjon (valgfritt), f.eks. Albondigas"
-            />
+            {(() => {
+              const existingGroups = Array.from(new Set(draftLines.map((l) => l.groupLabel).filter((g): g is string => !!g)));
+              return customGroupLabelMode ? (
+                <input
+                  value={line.groupLabel}
+                  disabled={readOnly}
+                  onChange={(e) => setLine({ ...line, groupLabel: e.target.value })}
+                  placeholder="Nytt gruppenavn"
+                  autoFocus
+                />
+              ) : (
+                <select
+                  value={existingGroups.includes(line.groupLabel) ? line.groupLabel : ""}
+                  disabled={readOnly}
+                  onChange={(e) => {
+                    if (e.target.value === "__new__") { setCustomGroupLabelMode(true); setLine({ ...line, groupLabel: "" }); }
+                    else setLine({ ...line, groupLabel: e.target.value });
+                  }}
+                >
+                  <option value="">Ingen gruppe</option>
+                  {existingGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+                  <option value="__new__">+ Ny gruppe...</option>
+                </select>
+              );
+            })()}
             <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addLine}>Legg til</button>
           </div>
           <p style={{ color: "#64748b", fontSize: 13, marginTop: -6 }}>
