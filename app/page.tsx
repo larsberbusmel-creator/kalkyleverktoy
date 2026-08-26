@@ -14508,6 +14508,18 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                   <tr><td>Personalkost</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.staffCost)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.staffCost)}</td></tr>
                   <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– personalkost % av omsetning</td><td style={{ textAlign: "right" }}>{calc.estimated.staffCostPercent.toFixed(1)}%</td><td style={{ textAlign: "right" }}>{calc.actual.staffCostPercent.toFixed(1)}%</td></tr>
                   <tr><td>Andre kostnader</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.otherCosts)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.otherCosts)}</td></tr>
+                  {(event.customCostLines || []).map((c) => {
+                    const amt = Number(c.amount) || 0;
+                    const estAmt = c.mode === "per_unit" ? amt * estimatedUnits : amt;
+                    const actAmt = c.mode === "per_unit" ? amt * actualUnits : amt;
+                    return (
+                      <tr key={c.id} style={{ color: "#64748b", fontSize: 12 }}>
+                        <td style={{ paddingLeft: 16 }}>– {c.label || "Uten navn"} ({c.mode === "per_unit" ? `${currency(amt)}/enhet` : "engangssum"}, {c.vatRate}% mva)</td>
+                        <td style={{ textAlign: "right" }}>{currency(estAmt)}</td>
+                        <td style={{ textAlign: "right" }}>{currency(actAmt)}</td>
+                      </tr>
+                    );
+                  })}
                   <tr style={{ fontWeight: 800 }}><td>Overskudd</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profit)}</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profit)}</td></tr>
                   <tr style={{ color: "#64748b", fontSize: 12 }}><td style={{ paddingLeft: 16 }}>– dekningsbidrag/time ({formatHoursMinutes(calc.estimated.totalHours)} / {formatHoursMinutes(calc.actual.totalHours)})</td><td style={{ textAlign: "right" }}>{currency(calc.estimated.profitPerHour)}/t</td><td style={{ textAlign: "right" }}>{currency(calc.actual.profitPerHour)}/t</td></tr>
                 </tbody>
