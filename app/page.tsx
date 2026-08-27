@@ -12652,7 +12652,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
             title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
             onClick={() => toggleConfirmed(offer)}
           >
-            {offer.confirmedName ? "Angre" : "Bekreft"}
+            {offer.confirmedName ? "Angre" : "Bekreftet"}
           </button>
           {offer.rungInName && (
             <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
