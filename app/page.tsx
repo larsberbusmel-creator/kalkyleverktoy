@@ -151,6 +151,8 @@ note?: string;
   dietOther?: string;
   rungInName?: string;
   rungInAt?: string;
+  confirmedName?: string;
+  confirmedAt?: string;
   packingListEnabled?: boolean;
   selectedPackingListTemplateIds?: string[];
   extraPackingListItems?: string[];
@@ -292,6 +294,8 @@ type RentalOffer = {
   runSheet?: RunSheetItem[];
   rungInName?: string;
   rungInAt?: string;
+  confirmedName?: string;
+  confirmedAt?: string;
   selectedPackingListTemplateIds?: string[];
   extraPackingListItems?: string[];
   teardownAt?: string;
@@ -1705,7 +1709,7 @@ return (
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
-        {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
+        {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
         {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} />}
@@ -1836,6 +1840,7 @@ function CalendarDashboard({
   setOrderToOpen,
   setProductionDateToOpen,
   setWantsNewOrder,
+  orderFilter,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -1843,6 +1848,7 @@ function CalendarDashboard({
   setOrderToOpen: (id: string | null) => void;
   setProductionDateToOpen: (date: string | null) => void;
   setWantsNewOrder: (v: boolean) => void;
+  orderFilter?: (order: Order) => boolean; // valgfritt visningsfilter - f.eks. kun rental-order-* for mini-kalenderen i Leie av lokale. Påvirker KUN hva som vises her, ikke lagring/synk.
 }) {
   const todayDate = today();
   const [view, setView] = useState<"month" | "day">("month");
@@ -1917,7 +1923,7 @@ function CalendarDashboard({
   }
 
   function dayOrders(date: string) {
-    return data.orders.filter((o) => o.date === date && !o.deletedAt).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+    return data.orders.filter((o) => o.date === date && !o.deletedAt && (!orderFilter || orderFilter(o))).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }
   function isRentalOrder(order: Order) {
   return order.recurringNote?.startsWith("Leieavtale:");
@@ -1927,12 +1933,12 @@ function CalendarDashboard({
 
   function hasUnseenWebshopOrder(date: string): boolean {
     const seenIds = data.seenOrderIds || [];
-    return data.orders.some((o) => o.date === date && !o.deletedAt && o.recurringNote?.startsWith("Importert fra webshop") && !seenIds.includes(o.id));
+    return data.orders.some((o) => o.date === date && !o.deletedAt && (!orderFilter || orderFilter(o)) && o.recurringNote?.startsWith("Importert fra webshop") && !seenIds.includes(o.id));
   }
 
   function markOrdersAsSeen(date: string) {
     const seenIds = data.seenOrderIds || [];
-    const newIds = data.orders.filter((o) => o.date === date && !o.deletedAt && o.recurringNote?.startsWith("Importert fra webshop") && !seenIds.includes(o.id)).map((o) => o.id);
+    const newIds = data.orders.filter((o) => o.date === date && !o.deletedAt && (!orderFilter || orderFilter(o)) && o.recurringNote?.startsWith("Importert fra webshop") && !seenIds.includes(o.id)).map((o) => o.id);
     if (newIds.length) updateData({ seenOrderIds: [...seenIds, ...newIds] });
   }
 
@@ -10766,7 +10772,7 @@ function groupChangedFieldsBySection(fields: { section: string; label: string }[
     .join(" · ");
 }
 
-function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly, userEmail, isSuperadmin }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; userEmail: string; isSuperadmin: boolean }) {
+function RentalTab({ data, updateData, updateListRpc, pendingOfferId, clearPendingOfferId, productAllergens, recipeAllergens, readOnly, userEmail, isSuperadmin, setTab, setOrderToOpen, setProductionDateToOpen, setWantsNewOrder }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries", itemsPatch: Record<string, any>) => void; pendingOfferId?: string | null; clearPendingOfferId?: () => void; productAllergens: (p: Product, visited?: string[]) => string[]; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; userEmail: string; isSuperadmin: boolean; setTab: (tab: Tab) => void; setOrderToOpen: (id: string | null) => void; setProductionDateToOpen: (date: string | null) => void; setWantsNewOrder: (v: boolean) => void }) {
   const [productSearch, setProductSearch] = useState("");
   const [showIncluded, setShowIncluded] = useState(true);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -11095,6 +11101,8 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
         allergens: offer.allergens || {}, dietVegan: offer.dietVegan || "0", dietVegetarian: offer.dietVegetarian || "0", dietPregnant: offer.dietPregnant || "0", dietOther: offer.dietOther || "",
         rungInName: offer.rungInName ?? existingLinkedOrder?.rungInName,
         rungInAt: offer.rungInAt ?? existingLinkedOrder?.rungInAt,
+        confirmedName: offer.confirmedName ?? existingLinkedOrder?.confirmedName,
+        confirmedAt: offer.confirmedAt ?? existingLinkedOrder?.confirmedAt,
       };
       updateListRpc("orders", { [rentalOrder.id]: rentalOrder });
     }
@@ -11142,6 +11150,27 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     const updated: RentalOffer = { ...offer, rungInName: name.trim(), rungInAt };
     updateListRpc("rentalOffers", { [offer.id!]: updated });
     if (linkedOrder) updateListRpc("orders", { [linkedOrderId]: { ...linkedOrder, rungInName: name.trim(), rungInAt } });
+    if (rental.id === offer.id) setRental(updated);
+  }
+
+  function toggleConfirmed(offer: RentalOffer) {
+    const linkedOrderId = `rental-order-${offer.id}`;
+    const linkedOrder = (data.orders || []).find((o) => o.id === linkedOrderId);
+
+    if (offer.confirmedName) {
+      if (!confirm(`Fjerne "bekreftet"-merking (${offer.confirmedName})?`)) return;
+      const updated: RentalOffer = { ...offer, confirmedName: undefined, confirmedAt: undefined };
+      updateListRpc("rentalOffers", { [offer.id!]: updated });
+      if (linkedOrder) updateListRpc("orders", { [linkedOrderId]: { ...linkedOrder, confirmedName: undefined, confirmedAt: undefined } });
+      if (rental.id === offer.id) setRental(updated);
+      return;
+    }
+    const name = window.prompt("Bekreftet\nSignatur");
+    if (!name || !name.trim()) return;
+    const confirmedAt = new Date().toISOString();
+    const updated: RentalOffer = { ...offer, confirmedName: name.trim(), confirmedAt };
+    updateListRpc("rentalOffers", { [offer.id!]: updated });
+    if (linkedOrder) updateListRpc("orders", { [linkedOrderId]: { ...linkedOrder, confirmedName: name.trim(), confirmedAt } });
     if (rental.id === offer.id) setRental(updated);
   }
 
@@ -12442,14 +12471,14 @@ ${shoppingRowsR ? `<h2 style="margin-top:20px">Varebestilling</h2>${shoppingRows
   ${rental.date ? `<p><b>Dato:</b> ${formatDateNo(rental.date)}</p>` : ""}
   ${rental.note ? `<p><b>Merknad:</b></p><p style="white-space:pre-wrap;line-height:1.6">${escapeHtml(rental.note.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim())}</p>` : ""}
 </div>
-${opts.tilbud ? `<div class="page-break"></div><h2>Spesifikasjon</h2>
+${opts.tilbud ? `<div style="page-break-inside:avoid;break-inside:avoid"><h2>Spesifikasjon</h2>
 <table>
   <thead><tr><th>Beskrivelse</th><th style="text-align:right">Antall</th><th style="text-align:right">Pris/pers</th><th style="text-align:right">Sum</th></tr></thead>
   <tbody>${venueRow}${productRows}${waiterRow}${addonRows}${barRow}</tbody>
   <tfoot><tr class="total-row"><td colspan="3">Total inkl. mva</td><td style="text-align:right">${currency(total)}</td></tr></tfoot>
 </table>
 ${showIncluded ? `<p class="included">${escapeHtml(includedText)}</p>` : ""}
-<p class="disclaimer">Skrivefeil kan forekomme.</p>
+<p class="disclaimer">Skrivefeil kan forekomme.</p></div>
 ${showTerms ? `<div class="page-break"></div>
 <h2 style="border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:16px">Vilkår for leie av Bodøgaard</h2>
 <p style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:#374151">${escapeHtml(termsText)}</p>` : ""}` : ""}
@@ -12543,7 +12572,6 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
     productSearch === "" || p.name.toLowerCase().includes(productSearch.toLowerCase())
   ).slice(0, 50);
 
- const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const allMatchingOffers = (((data as any).rentalOffers || []) as RentalOffer[])
     .filter((o) => offerSearch === "" ||
       o.customer.toLowerCase().includes(offerSearch.toLowerCase()) ||
@@ -12551,9 +12579,16 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
       (o.venueExternalName || "").toLowerCase().includes(offerSearch.toLowerCase())
     )
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-  const offers = allMatchingOffers.filter((o) => !o.date || o.date >= sevenDaysAgo);
-  const archivedOffers = allMatchingOffers.filter((o) => o.date && o.date < sevenDaysAgo);
+  // Arkivering styres av rungInName (dato er ikke lenger relevant her) - se
+  // toggleRungIn. Av de gjenværende (ikke slått inn) deles tilbudene videre
+  // i to lister basert på confirmedName.
+  const archivedOffers = allMatchingOffers.filter((o) => !!o.rungInName);
+  const notArchivedOffers = allMatchingOffers.filter((o) => !o.rungInName);
+  const unconfirmedOffers = notArchivedOffers.filter((o) => !o.confirmedName);
+  const confirmedOffers = notArchivedOffers.filter((o) => !!o.confirmedName);
   const [showArchive, setShowArchive] = useState(false);
+  const [unconfirmedPage, setUnconfirmedPage] = useState(0);
+  const [confirmedPage, setConfirmedPage] = useState(0);
 
   // Live dobbeltbooking-sjekk for internt lokale valgt i redigeringsskjemaet.
   // Kun informativt - hindrer ikke lagring.
@@ -12577,9 +12612,128 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
             return { venueName: rental.venue, customer: o.customer, rangeLabel };
           });
 
+  // Delt kort-rendering for "Tilbud"- og "Bekreftede tilbud"-listene (del C) -
+  // unngår å duplisere samme HTML/logikk to ganger. Fargekoding (del B): lys
+  // rød bakgrunn når IKKE bekreftet, ellers vanlig/nøytral bakgrunn.
+  function renderOfferCard(offer: RentalOffer) {
+    const offerActualStaff = actualStaffHoursAndCount(offer);
+    const offerEffectiveWaiterHours = offerActualStaff ? offerActualStaff.beforeMidnightHours : (offer.waiterHours || 0);
+    const offerWaiterAfterMidnightHours = offerActualStaff ? offerActualStaff.afterMidnightHours : (offer.waiterAfterMidnightHours || 0);
+    const offerWaiterCost = offerEffectiveWaiterHours * data.settings.waiterHourlyRate + offerWaiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
+    const offerTotal = offer.venuePrice
+      + offer.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
+      + offerWaiterCost
+      + (offer.extraLines || []).reduce((sum, l) => sum + Number(l.amount || 0), 0);
+    const isEditing = editingOfferId === offer.id;
+    return (
+      <div key={offer.id} className="editable-row" style={{ background: isEditing ? "#fef9c3" : (!offer.confirmedName ? "#fef2f2" : undefined), borderRadius: isEditing ? 10 : undefined, padding: isEditing ? "8px 12px" : undefined }}>
+        <div>
+          <b>{offer.customer}</b>
+          {isEditing && <span style={{ marginLeft: 8, fontSize: 12, background: "#fbbf24", color: "white", borderRadius: 6, padding: "2px 8px" }}>Redigeres nå</span>}
+          {offer.date && (
+            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>
+              📅 {offer.endDate && offer.endDate !== offer.date ? `${formatDateNo(offer.date)} – ${formatDateNo(offer.endDate)}` : formatDateNo(offer.date)}
+            </span>
+          )}
+          <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
+          <br />
+          <small style={{ color: "#64748b" }}>Total: {currency(offerTotal)}</small>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {offer.confirmedName && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
+              ✓ Bekreftet {formatDateNo(offer.confirmedAt!.slice(0, 10))} ({offer.confirmedName})
+            </span>
+          )}
+          <button
+            className={offer.confirmedName ? "btn active" : "btn"}
+            style={offer.confirmedName && !readOnly ? { background: "#e2e8f0", borderColor: "#cbd5e1", color: "#334155" } : undefined}
+            disabled={readOnly}
+            title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+            onClick={() => toggleConfirmed(offer)}
+          >
+            {offer.confirmedName ? "Angre" : "Bekreft"}
+          </button>
+          {offer.rungInName && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
+              ✓ Slått inn {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
+            </span>
+          )}
+          <button
+            className={offer.rungInName ? "btn active" : "btn"}
+            style={offer.rungInName && !readOnly ? { background: "#e2e8f0", borderColor: "#cbd5e1", color: "#334155" } : undefined}
+            disabled={readOnly}
+            title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+            onClick={() => toggleRungIn(offer)}
+          >
+            {offer.rungInName ? "Angre" : "Slått inn"}
+          </button>
+          {!isEditing && <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => loadOffer(offer)}>Rediger</button>}
+          <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteOffer(offer.id!)}>Slett</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Delt liste-panel (del C): kollapsbar, åpen som standard, med søkefelt og
+  // paginering (maks 20 om gangen) - kalles to ganger, én gang per liste.
+  function renderOfferListPanel(title: string, list: RentalOffer[], page: number, setPage: (n: number) => void) {
+    const pageSize = 20;
+    const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+    const clampedPage = Math.min(page, totalPages - 1);
+    const pageItems = list.slice(clampedPage * pageSize, clampedPage * pageSize + pageSize);
+    return (
+      <details className="soft-box" open style={{ padding: 0, marginTop: 18 }}>
+        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{title} <span style={{ fontWeight: 400, color: "#64748b", fontSize: 13 }}>({list.length})</span></span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+        </summary>
+        <div style={{ padding: "0 16px 16px" }}>
+          <div className="between" style={{ marginBottom: 12 }}>
+            <span />
+            <input
+              value={offerSearch}
+              onChange={(e) => setOfferSearch(e.target.value)}
+              placeholder="Søk på kunde eller lokale..."
+              style={{ maxWidth: 260 }}
+            />
+          </div>
+          {pageItems.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud funnet.</p>}
+          {pageItems.map((offer) => renderOfferCard(offer))}
+          {totalPages > 1 && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", marginTop: 12 }}>
+              <button className="btn" disabled={clampedPage === 0} onClick={() => setPage(clampedPage - 1)}>◀ Forrige side</button>
+              <span style={{ color: "#64748b", fontSize: 13 }}>Side {clampedPage + 1} av {totalPages}</span>
+              <button className="btn" disabled={clampedPage >= totalPages - 1} onClick={() => setPage(clampedPage + 1)}>Neste side ▶</button>
+            </div>
+          )}
+        </div>
+      </details>
+    );
+  }
+
   return (
     <section>
       {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
+
+      <details className="soft-box" style={{ padding: 0, marginBottom: 18 }}>
+        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>📅 Kalender – Leie av lokale</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+        </summary>
+        <div style={{ padding: "0 16px 16px" }}>
+          <CalendarDashboard
+            data={data}
+            updateData={updateData}
+            setTab={setTab}
+            setOrderToOpen={setOrderToOpen}
+            setProductionDateToOpen={setProductionDateToOpen}
+            setWantsNewOrder={setWantsNewOrder}
+            orderFilter={(o) => o.id.startsWith("rental-order-")}
+          />
+        </div>
+      </details>
+
       <div className="card">
         <div className="between" style={{ justifyContent: "flex-end" }}>
           <div style={{ display: "flex", gap: 8 }}>
@@ -12622,6 +12776,22 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
             <div className="between">
               <h2>{editingOfferId ? "Rediger tilbud" : "Nytt tilbud"}</h2>
                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {rental.confirmedName && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
+                    ✓ Bekreftet {formatDateNo(rental.confirmedAt!.slice(0, 10))} ({rental.confirmedName})
+                  </span>
+                )}
+                {editingOfferId && (
+                  <button
+                    className={rental.confirmedName ? "btn active" : "btn"}
+                    style={rental.confirmedName && !readOnly ? { background: "#e2e8f0", borderColor: "#cbd5e1", color: "#334155" } : undefined}
+                    disabled={readOnly}
+                    title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                    onClick={() => toggleConfirmed(rental)}
+                  >
+                    {rental.confirmedName ? "Angre" : "Bekreft"}
+                  </button>
+                )}
                 {rental.rungInName && (
                   <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
                     ✓ Slått inn {formatDateNo(rental.rungInAt!.slice(0, 10))} ({rental.rungInName})
@@ -13680,63 +13850,8 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
         </>
       )}
 
-      <div className="card" style={{ marginTop: 18 }}>
-        <div className="between" style={{ marginBottom: 12 }}>
-          <h2>Lagrede tilbud</h2>
-          <input
-            value={offerSearch}
-            onChange={(e) => setOfferSearch(e.target.value)}
-            placeholder="Søk på kunde eller lokale..."
-            style={{ maxWidth: 260 }}
-          />
-        </div>
-        {offers.length === 0 && <p style={{ color: "#64748b" }}>Ingen tilbud funnet.</p>}
-        {offers.map((offer) => {
-          const offerActualStaff = actualStaffHoursAndCount(offer);
-          const offerEffectiveWaiterHours = offerActualStaff ? offerActualStaff.beforeMidnightHours : (offer.waiterHours || 0);
-          const offerWaiterAfterMidnightHours = offerActualStaff ? offerActualStaff.afterMidnightHours : (offer.waiterAfterMidnightHours || 0);
-          const offerWaiterCost = offerEffectiveWaiterHours * data.settings.waiterHourlyRate + offerWaiterAfterMidnightHours * data.settings.waiterAfterMidnightHourlyRate;
-          const offerTotal = offer.venuePrice
-            + offer.productLines.reduce((sum, l) => sum + (data.products.find((p) => p.id === l.productId)?.customerPrice || 0) * l.guests, 0)
-            + offerWaiterCost
-            + (offer.extraLines || []).reduce((sum, l) => sum + Number(l.amount || 0), 0);
-          const isEditing = editingOfferId === offer.id;
-          return (
-            <div key={offer.id} className="editable-row" style={{ background: isEditing ? "#fef9c3" : undefined, borderRadius: isEditing ? 10 : undefined, padding: isEditing ? "8px 12px" : undefined }}>
-              <div>
-                <b>{offer.customer}</b>
-                {isEditing && <span style={{ marginLeft: 8, fontSize: 12, background: "#fbbf24", color: "white", borderRadius: 6, padding: "2px 8px" }}>Redigeres nå</span>}
-                {offer.date && (
-                  <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>
-                    📅 {offer.endDate && offer.endDate !== offer.date ? `${formatDateNo(offer.date)} – ${formatDateNo(offer.endDate)}` : formatDateNo(offer.date)}
-                  </span>
-                )}
-                <span style={{ marginLeft: 10, color: "#64748b", fontSize: 13 }}>{offer.venueExternal ? (offer.venueExternalName || "Eksternt") : offer.venue}</span>
-                <br />
-                <small style={{ color: "#64748b" }}>Total: {currency(offerTotal)}</small>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {offer.rungInName && (
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", borderRadius: 6, padding: "2px 8px" }}>
-                    ✓ Slått inn {formatDateNo(offer.rungInAt!.slice(0, 10))} ({offer.rungInName})
-                  </span>
-                )}
-                <button
-                  className={offer.rungInName ? "btn active" : "btn"}
-                  style={offer.rungInName && !readOnly ? { background: "#e2e8f0", borderColor: "#cbd5e1", color: "#334155" } : undefined}
-                  disabled={readOnly}
-                  title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                  onClick={() => toggleRungIn(offer)}
-                >
-                  {offer.rungInName ? "Angre" : "Slått inn"}
-                </button>
-                {!isEditing && <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => loadOffer(offer)}>Rediger</button>}
-                <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteOffer(offer.id!)}>Slett</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {renderOfferListPanel("Tilbud", unconfirmedOffers, unconfirmedPage, setUnconfirmedPage)}
+      {renderOfferListPanel("Bekreftede tilbud", confirmedOffers, confirmedPage, setConfirmedPage)}
 
       <div className="card" style={{ marginTop: 18 }}>
         <div className="section-toggle" onClick={() => setShowArchive(!showArchive)}>
