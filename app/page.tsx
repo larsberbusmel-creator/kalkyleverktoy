@@ -70,6 +70,7 @@ type Recipe = {
   yieldUnit: YieldUnit;
   lines: RecipeLine[];
   steps?: RecipeStep[];
+  showOnBaseProductionSheet?: boolean; // "Vis på egen produksjonsliste" - egen side ved print av grunnproduksjon (surdeig o.l.)
 };
 
 type Packaging = {
@@ -114,6 +115,7 @@ type Product = {
   menuCourses?: MenuCourse[];
   instructions?: string;
   showWholegrainInDeclaration?: boolean;
+  productionCategory?: ProductionCategory;
 };
 
 type MenuCourseSelection = { courseId: string; productId: string; guestCount: number };
@@ -408,6 +410,29 @@ type ProductList = {
 
 type ProductionCategory = "smabakst" | "brod" | "spesialbrod" | "pasmuurt";
 
+// Samme rekkefølge/navn som productionCategories-arrayet inne i
+// Produksjon-fanen (BakeriTab) - duplisert her fordi denne (modulnivå)
+// trengs av expandProductForProduction/productionTwoColumnHtml og
+// ProductsTab, som ikke har tilgang til det komponent-lokale arrayet.
+const PRODUCTION_CATEGORY_ORDER: { id: ProductionCategory; name: string }[] = [
+  { id: "smabakst", name: "Småbakst" },
+  { id: "brod", name: "Brød" },
+  { id: "spesialbrod", name: "Spesialbrød" },
+  { id: "pasmuurt", name: "Påsmurt" },
+];
+
+// Engangs, myk standardverdi ved VISNING (form-forhåndsutfylling og print-
+// gruppering) - skriver ALDRI om lagrede produkter automatisk. Matcher kun
+// det den er sikker på; resten står uspesifisert fremfor å gjette feil.
+function guessProductionCategory(category: string): ProductionCategory | undefined {
+  const norm = (category || "").toLowerCase().replace(/æ/g, "ae").replace(/ø/g, "o").replace(/å/g, "a");
+  if (norm.includes("spesialbrod")) return "spesialbrod";
+  if (norm.includes("sotbakst") || norm.includes("smabakst")) return "smabakst";
+  if (norm.includes("brod")) return "brod";
+  if (norm.includes("pasmurt")) return "pasmuurt";
+  return undefined;
+}
+
 type BakeryProductionTemplateLine = {
   id: string;
   category: ProductionCategory;
@@ -422,6 +447,7 @@ type StorkjokkenCustomer = {
   address?: string;
   deliveryAddress?: string;
   phone?: string;
+  email?: string; // brukt til varsel om ugodkjent ordre (DEL E) - separat fra settings.notificationEmails/NOTIFY_EMAIL, som er interne/ansatt-varsler
   active?: boolean;
   internal?: boolean;
   pin?: string;
@@ -447,6 +473,7 @@ type PendingPortalOrder = {
   status: "pending" | "approved" | "rejected";
   note?: string;
   deliveryTime?: string;
+  reminderSentAt?: string; // DEL E2: hindrer at cronjobben sender flere påminnelser for samme bestilling
 };
 
 type PendingRecurringOrderRequest = {
@@ -457,6 +484,32 @@ type PendingRecurringOrderRequest = {
   note?: string;
   submittedAt: string;
   status: "pending" | "approved" | "rejected";
+};
+
+// DEL F: godkjent endring av en storkjøkken-bestilling ETTER at fristen for
+// datoen er passert. Storkjøkkenkunders bestillinger blir ALDRI til et eget
+// Order-objekt (de blir til StorkjokkenPickupOrder-rader og manuelt
+// redigerbare celler i productionDays[date].quantities) - denne forespørsels-
+// typen er derfor nøkkelet på customerId+date, ikke en orderId.
+type PendingOrderChangeRequest = {
+  id: string;
+  customerId: string;
+  date: string;
+  requestedLines: { productId: string; quantity: number }[]; // kundens ønskede, FULLSTENDIGE nye sett for datoen
+  submittedAt: string;
+  status: "pending" | "approved" | "rejected";
+};
+
+// Fakturagrunnlaget for én kunde/dato, satt av en godkjent
+// PendingOrderChangeRequest - overstyrer HELE det beregnede grunnlaget for
+// nettopp den kunden/datoen i invoiceRows() (produksjonsgrunnlaget/
+// produksjonsgriden forblir HELT urørt av dette - se approveOrderChangeRequest).
+type StorkjokkenInvoiceOverride = {
+  id: string;
+  customerId: string;
+  date: string;
+  lines: { productId: string; quantity: number }[];
+  approvedAt: string;
 };
 
 type StorkjokkenSpecialPrice = {
@@ -613,6 +666,8 @@ type AppData = {
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
   documentBank: DocumentBankEntry[];
+  pendingOrderChangeRequests: PendingOrderChangeRequest[];
+  storkjokkenInvoiceOverrides: StorkjokkenInvoiceOverride[];
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
@@ -937,6 +992,8 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   userAccess: [],
   packingListTemplates: [],
   documentBank: [],
+  pendingOrderChangeRequests: [],
+  storkjokkenInvoiceOverrides: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -954,6 +1011,8 @@ function migrateData(raw: Partial<AppData>): AppData {
       wastePercent: line.wastePercent !== undefined && line.wastePercent !== "" ? Number(line.wastePercent) : undefined,
       groupLabel: line.groupLabel || undefined,
     })),
+    steps: recipe.steps || undefined,
+    showOnBaseProductionSheet: recipe.showOnBaseProductionSheet || undefined,
   }));
 
   const oldMenus = ((raw as any).menus || []).map((m: any) => ({
@@ -1085,6 +1144,8 @@ rentalOffers: (raw as any).rentalOffers || [],
     roomLayoutTemplates: raw.roomLayoutTemplates || [],
     coverItems: raw.coverItems || [],
     documentBank: (raw as any).documentBank || [],
+    pendingOrderChangeRequests: (raw as any).pendingOrderChangeRequests || [],
+    storkjokkenInvoiceOverrides: (raw as any).storkjokkenInvoiceOverrides || [],
   };
 }
 
@@ -1207,6 +1268,7 @@ export default function Page() {
   const [rentalOfferToOpen, setRentalOfferToOpen] = useState<string | null>(null);
   const [orderToOpen, setOrderToOpen] = useState<string | null>(null);
   const [productionDateToOpen, setProductionDateToOpen] = useState<string | null>(null);
+  const [wantsOpenStorkjokkenCustomers, setWantsOpenStorkjokkenCustomers] = useState(false);
   const [wantsNewOrder, setWantsNewOrder] = useState(false);
   const [eventCalculationToOpen, setEventCalculationToOpen] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(initialData);
@@ -1908,12 +1970,12 @@ return (
       {/* ── INNHOLD ── */}
       <div className="main-content">
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
-        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
+        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} setWantsOpenStorkjokkenCustomers={setWantsOpenStorkjokkenCustomers} />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} isDirty={dirtyTabs.has("recipes")} onDirtyChange={onDirtyChangeFor("recipes")} registerSave={registerSave} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} />}
-        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} readOnly={!canEdit("production")} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
@@ -2059,6 +2121,7 @@ function CalendarDashboard({
   setOrderToOpen,
   setProductionDateToOpen,
   setWantsNewOrder,
+  setWantsOpenStorkjokkenCustomers,
   orderFilter,
 }: {
   data: AppData;
@@ -2067,6 +2130,7 @@ function CalendarDashboard({
   setOrderToOpen: (id: string | null) => void;
   setProductionDateToOpen: (date: string | null) => void;
   setWantsNewOrder: (v: boolean) => void;
+  setWantsOpenStorkjokkenCustomers?: (v: boolean) => void; // valgfri - kun dashbordet (DEL A: Henteordre-snarvei), ikke rental-mini-kalenderen
   orderFilter?: (order: Order) => boolean; // valgfritt visningsfilter - f.eks. kun rental-order-* for mini-kalenderen i Leie av lokale. Påvirker KUN hva som vises her, ikke lagring/synk.
 }) {
   const todayDate = today();
@@ -2376,6 +2440,15 @@ const bg = isToday ? "#dcfce7"
                   Gå til produksjon for {formatDateNo(selectedDate)}
                 </button>
               </div>
+
+              {setWantsOpenStorkjokkenCustomers && (
+                <div className="soft-box">
+                  <h3>Henteordre</h3>
+                  <button className="btn active" onClick={() => { setWantsOpenStorkjokkenCustomers(true); setTab("production"); }}>
+                    🛍️ Gå til Storkjøkkenkunder
+                  </button>
+                </div>
+              )}
 
               <div className="soft-box">
                 <div className="between">
@@ -2861,7 +2934,7 @@ function defaultRetailMargin(category: string) {
 function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens, readOnly, isDirty, onDirtyChange, registerSave }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; isDirty: boolean; onDirtyChange: (dirty: boolean) => void; registerSave: (fn: (() => boolean) | null) => void }) {
   const [selectedId, setSelectedId] = useState(data.recipes[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
-  const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
+  const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit, showOnBaseProductionSheet: false });
   const [draftLines, setDraftLines] = useState<RecipeLine[]>([]);
   const [draftSteps, setDraftSteps] = useState<RecipeStep[]>([]);
   const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
@@ -2885,6 +2958,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     yieldUnit: form.yieldUnit,
     lines: draftLines,
     steps: draftSteps,
+    showOnBaseProductionSheet: form.showOnBaseProductionSheet,
   };
 
   const activeCategoryTab = data.recipeCategories.includes(categoryFilter) ? categoryFilter : (data.recipeCategories[0] || categoryFilter);
@@ -2896,7 +2970,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
 
   function startNewRecipe() {
     setMode("new");
-    setForm({ productNumber: "", name: "", category: data.recipeCategories[0] || "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" });
+    setForm({ productNumber: "", name: "", category: data.recipeCategories[0] || "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg", showOnBaseProductionSheet: false });
     setDraftLines([]);
     setDraftSteps([]);
     setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
@@ -2908,7 +2982,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   function editRecipe(r: Recipe) {
     setSelectedId(r.id);
     setMode("edit");
-    setForm({ productNumber: r.productNumber || "", name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit });
+    setForm({ productNumber: r.productNumber || "", name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit, showOnBaseProductionSheet: !!r.showOnBaseProductionSheet });
     setDraftLines(r.lines.map((l) => ({ ...l })));
     setDraftSteps((r.steps || []).map((s) => ({ ...s, inputs: s.inputs.map((i) => ({ ...i })) })));
     setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
@@ -2941,6 +3015,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
       yieldUnit: form.yieldUnit,
       lines: draftLines,
       steps: draftSteps,
+      showOnBaseProductionSheet: form.showOnBaseProductionSheet,
     };
     updateListRpc("recipes", { [recipe.id]: recipe });
     setSelectedId(recipe.id);
@@ -2949,6 +3024,25 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setDraftSteps([]);
     markClean();
     return true;
+  }
+
+  // Direkte parallell til copyProduct() i ProductsTab - samme mønster
+  // (nytt id, "kopi" lagt til i navnet, alle lines/steps dypkopiert).
+  function copyRecipe(r: Recipe) {
+    const copy: Recipe = {
+      ...r,
+      id: `${r.id}-copy-${Date.now()}`,
+      name: `${r.name} kopi`,
+      lines: r.lines.map((l) => ({ ...l })),
+      steps: (r.steps || []).map((s) => ({ ...s, inputs: s.inputs.map((i) => ({ ...i })) })),
+    };
+    updateListRpc("recipes", { [copy.id]: copy });
+    setForm({ productNumber: copy.productNumber, name: copy.name, category: copy.category, yieldAmount: String(copy.yieldAmount), yieldUnit: copy.yieldUnit, showOnBaseProductionSheet: !!copy.showOnBaseProductionSheet });
+    setDraftLines(copy.lines.map((l) => ({ ...l })));
+    setDraftSteps((copy.steps || []).map((s) => ({ ...s, inputs: s.inputs.map((i) => ({ ...i })) })));
+    setSelectedId(copy.id);
+    setMode("edit");
+    markClean();
   }
 
   function lineItemName(itemType: RecipeLine["itemType"], itemId: string) {
@@ -3082,6 +3176,36 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     w.focus();
   }
 
+  // DEL C: "Print grunnproduksjon" - alle grunnoppskrifter merket
+  // showOnBaseProductionSheet (f.eks. surdeig), hver med sin FASTE, ujusterte
+  // mengde rett fra recipe.lines/yieldAmount (ikke skalert av noen ordre).
+  // Tvunget sideskift FORAN hver enkelt, slik at hver alltid får sin egen
+  // side - page-break-before:always på det aller første elementet i
+  // dokumentet produserer ikke en ekstra blank førsteside i praksis.
+  function printBaseProduction() {
+    const flagged = data.recipes.filter((r) => r.showOnBaseProductionSheet);
+    if (!flagged.length) { alert("Ingen grunnoppskrifter er merket for egen produksjonsliste ennå."); return; }
+    const pages = flagged.map((recipe) => {
+      let lastGroup: string | undefined = undefined;
+      const rows = recipe.lines.map((l) => {
+        const name = lineItemName(l.itemType, l.itemId) || "Ukjent";
+        const waste = l.wastePercent ? ` (${l.wastePercent}% svinn)` : "";
+        const groupHeader = l.groupLabel && l.groupLabel !== lastGroup
+          ? `<tr><td colspan="3" style="background:#e2e8f0;font-weight:700;padding:8px 9px">${escapeHtml(l.groupLabel)}</td></tr>`
+          : "";
+        lastGroup = l.groupLabel;
+        return `${groupHeader}<tr><td>${escapeHtml(name)}${waste}</td><td>${formatAmountUnit(l.amount, "kg", 3)}</td><td>${currency(lineCost(l))}</td></tr>`;
+      }).join("");
+      const allergens = recipeAllergens(recipe).join(", ") || "Ingen registrert";
+      return `<div class="page-break"></div><div class="top"><div class="logo">GRUNNPRODUKSJON</div><h1>${escapeHtml(recipe.name)}</h1><p>${escapeHtml(recipe.category)}</p></div><div class="metrics"><div class="metric">Total kost eks. mva<b>${currency(recipeCost(recipe))}</b></div><div class="metric">Totalvekt / yield<b>${num(recipeTotalAmount(recipe), 3)} ${recipe.yieldUnit}</b></div><div class="metric">Pris per ${recipe.yieldUnit}<b>${currency(recipeUnitCost(recipe))}</b></div><div class="metric">Allergener<b>${allergens}</b></div></div><h2>Ingredienser</h2><table><thead><tr><th>Navn</th><th>Mengde</th><th>Kost</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }).join("");
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Grunnproduksjon</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#f1f5f9;border-radius:12px;padding:12px}.metric b{display:block;font-size:20px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}@media print{button{display:none}body{padding:18px}.page-break{page-break-before:always}}</style></head><body><button onclick="window.print()">Print</button>${pages}</body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
   if (mode !== "view") {
     return (
       <section className="card product-editor-page">
@@ -3105,6 +3229,11 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             </select>
           </label>
         </div>
+
+        <label className="check" style={{ marginTop: 4 }}>
+          <input type="checkbox" disabled={readOnly} checked={!!form.showOnBaseProductionSheet} onChange={(e) => setForm({ ...form, showOnBaseProductionSheet: e.target.checked })} />
+          Vis på egen produksjonsliste (egen side ved print)
+        </label>
 
         {activeRecipe && (
           <div className="metric-row">
@@ -3324,7 +3453,8 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     <section className="grid two">
       <div className="card">
         {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
-        <div className="between" style={{ justifyContent: "flex-end" }}>
+        <div className="between" style={{ justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn" onClick={printBaseProduction}>Print grunnproduksjon</button>
           <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={startNewRecipe}>Ny grunnoppskrift</button>
         </div>
         <div className="chips">
@@ -3382,6 +3512,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
               </div>
               <div>
                 <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => editRecipe(selected)}>Rediger</button>
+                <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => copyRecipe(selected)}>Dupliser</button>
                 <button className="btn" onClick={() => printRecipe(selected)}>Print</button>
               </div>
             </div>
@@ -3449,6 +3580,7 @@ unitWeightKg: "1",
   isDeliveryProduct: false,
   instructions: "",
   showWholegrainInDeclaration: defaultShowWholegrainForCategory("Søtbakst"),
+  productionCategory: guessProductionCategory("Søtbakst") as ProductionCategory | undefined,
 });
 const [draftLines, setDraftLines] = useState<ProductLine[]>([]);
 const [draftPackaging, setDraftPackaging] = useState<ProductPackagingLine[]>([]);
@@ -3533,6 +3665,7 @@ unitWeightKg: Number(form.unitWeightKg) || 0,
   menuCourses: form.type === "selskapsmeny" ? draftMenuCourses : undefined,
   instructions: form.instructions || undefined,
   showWholegrainInDeclaration: form.showWholegrainInDeclaration,
+  productionCategory: form.productionCategory,
   };
 
   const activeProduct = mode === "view" ? selected : draftProduct;
@@ -3563,6 +3696,7 @@ unitWeightKg: "1",
   isDeliveryProduct: false,
   instructions: "",
   showWholegrainInDeclaration: defaultShowWholegrainForCategory("Søtbakst"),
+  productionCategory: guessProductionCategory("Søtbakst"),
 });
 setDraftLines([]);
     setDraftPackaging([]);
@@ -3587,6 +3721,7 @@ setForm((f) => {
     ...next,
     productNumber: mode === "new" ? getNextProductNumber(next.category || f.category) : f.productNumber,
     showWholegrainInDeclaration: mode === "new" ? defaultShowWholegrainForCategory(next.category || f.category) : f.showWholegrainInDeclaration,
+    productionCategory: mode === "new" ? guessProductionCategory(next.category || f.category) : f.productionCategory,
   };
 });  }
 
@@ -3706,6 +3841,7 @@ unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
       isDeliveryProduct: !!p.isDeliveryProduct,
       instructions: p.instructions || "",
       showWholegrainInDeclaration: p.showWholegrainInDeclaration !== false,
+      productionCategory: p.productionCategory || guessProductionCategory(p.category),
     });
     setDraftLines(p.lines.map((l) => ({ ...l })));
     setDraftPackaging(p.packaging.map((x) => ({ ...x })));
@@ -3773,6 +3909,7 @@ unitWeightKg: "1",
     isDeliveryProduct: !!copy.isDeliveryProduct,
     instructions: copy.instructions || "",
     showWholegrainInDeclaration: copy.showWholegrainInDeclaration !== false,
+    productionCategory: copy.productionCategory || guessProductionCategory(copy.category),
   });
 
   setDraftLines(copy.lines.map((l) => ({ ...l })));
@@ -4514,6 +4651,19 @@ th{background:#f3f4f6}
     >
       {data.productCategories.map((c) => (
         <option key={c}>{c}</option>
+      ))}
+    </select>
+  </label>
+
+  <label>Produksjonskategori (bakeriprint)
+    <select
+      value={form.productionCategory || ""}
+      disabled={readOnly}
+      onChange={(e) => setForm({ ...form, productionCategory: (e.target.value || undefined) as ProductionCategory | undefined })}
+    >
+      <option value="">Uspesifisert</option>
+      {PRODUCTION_CATEGORY_ORDER.map((c) => (
+        <option key={c.id} value={c.id}>{c.name}</option>
       ))}
     </select>
   </label>
@@ -5390,8 +5540,15 @@ function parseNorwegianDateGlobal(text: string): { date: string; time: string } 
 // kilden er en ekte Order eller en syntetisk en bygget fra en prognose).
 // data sendes nå eksplisitt som parameter i stedet for lukket over - alle
 // kallsteder inni OrdersTab er oppdatert til å sende med sin egen data.
-function expandProductForProduction(data: AppData, product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string, forceExpandBakery = false): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number }[] {
+function expandProductForProduction(data: AppData, product: Product, multiplier: number, path: string[] = [], menuSelections?: MenuCourseSelection[], courseName?: string, forceExpandBakery = false): { name: string; amount: number; unit: string; source: string; courseName?: string; perUnit?: number; productionCategory?: ProductionCategory }[] {
   if (path.includes(product.id)) return [];
+
+  // DEL B: hver rad DENNE kallet returnerer direkte (ikke rader fra det
+  // rekursive selskapsmeny-kallet under, som regner ut sin EGEN kategori for
+  // den valgte retten) merkes med produksjonskategorien til PRODUKTET dette
+  // kallet gjelder - slik arver f.eks. ingrediens-/råvarelinjene til et
+  // brød-produkt (ved forceExpandBakery) "Brød"-kategorien til selve brødet.
+  const rowCategory = product.productionCategory || guessProductionCategory(product.category);
 
   // Bakeri-produkter (Søtbakst, Bakeri-egenprodusert) skal som hovedregel kun vises
   // som navn i catering/selskapsmeny-produksjon, ikke brettes ut til ingrediensnivå
@@ -5400,13 +5557,13 @@ function expandProductForProduction(data: AppData, product: Product, multiplier:
   // faktisk ER poenget med utskriften (se printOrder for detaljer).
   const bakeryNoExpandCategories = ["Søtbakst", "Bakeri, egenprodusert"];
   if (bakeryNoExpandCategories.includes(product.category) && !forceExpandBakery) {
-    return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+    return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName, productionCategory: rowCategory }];
   }
 
   // Selskapsmeny: bruk faktiske valgte alternativer per rettkategori, hver vektet med antall gjester som valgte det
   if (product.type === "selskapsmeny" && (product.menuCourses || []).length) {
     if (!menuSelections || !menuSelections.length) {
-      return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+      return [{ name: `${product.name} (ingen menyvalg registrert)`, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName, productionCategory: rowCategory }];
     }
     return menuSelections.flatMap((sel) => {
       const chosenProduct = data.products.find((x) => x.id === sel.productId);
@@ -5416,42 +5573,63 @@ function expandProductForProduction(data: AppData, product: Product, multiplier:
     });
   }
 
-  if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName }];
+  if (!product.lines.length) return [{ name: product.name, amount: multiplier, unit: product.yieldUnit, source: product.name, courseName, productionCategory: rowCategory }];
   const batchMultiplier = product.unitWeightKg && product.recipeYieldAmount
     ? (multiplier * product.unitWeightKg) / product.recipeYieldAmount
     : multiplier;
   return product.lines.flatMap((line) => {
     const amount = line.amount * batchMultiplier;
     const effectiveCourseName = line.groupLabel || courseName;
-    if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
-    if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }]; }
+    if (line.itemType === "material") { const m = data.materials.find((x) => x.id === line.itemId); return [{ name: m?.name || "Ukjent råvare", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount, productionCategory: rowCategory }]; }
+    if (line.itemType === "recipe") { const r = data.recipes.find((x) => x.id === line.itemId); return [{ name: r?.name || "Ukjent grunnoppskrift", amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount, productionCategory: rowCategory }]; }
     const p = data.products.find((x) => x.id === line.itemId);
     if (!p) return [];
     // Underprodukter vises som egen linje (f.eks. "Chimichurri 0,2 kg") i stedet for å flates ut til råvarer.
     // Oppskriften for å lage mengden vises som egen skalert blokk i printen (scaledRecipeHtml).
-    return [{ name: p.name, amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount }];
+    return [{ name: p.name, amount, unit: line.unit, source: product.name, courseName: effectiveCourseName, perUnit: line.amount, productionCategory: rowCategory }];
   });
 }
 
-function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
-  type Group = { key?: string; rows: typeof items };
-  const groups: Group[] = [];
+function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number; productionCategory?: ProductionCategory }[]) {
+  type Row = (typeof items)[number];
+  type Group = { key?: string; categoryHeader?: string; rows: Row[] };
+
+  // DEL B: bucket radene etter productionCategory, i FAST rekkefølge
+  // (smabakst → brod → spesialbrod → pasmuurt), med uspesifiserte til slutt
+  // under "Ukategorisert" - aldri utelatt. Kategori-overskrifter vises kun
+  // når det faktisk er mer enn én kategori representert (unngår å legge til
+  // en meningsløs enslig "Ukategorisert"-overskrift på f.eks. et vanlig
+  // cateringoppsett der ingen av radene har noen produksjonskategori).
+  const buckets: Partial<Record<string, Row[]>> = {};
   items.forEach((r) => {
-    const last = groups[groups.length - 1];
-    if (!last || last.key !== r.courseName) {
-      groups.push({ key: r.courseName, rows: [r] });
-    } else {
-      last.rows.push(r);
-    }
+    const key = r.productionCategory || "__ukategorisert";
+    (buckets[key] ||= []).push(r);
   });
+  const orderedKeys = [...PRODUCTION_CATEGORY_ORDER.map((c) => c.id), "__ukategorisert"].filter((k) => (buckets[k] || []).length > 0);
+  const showCategoryHeaders = orderedKeys.length > 1;
+
+  const groups: Group[] = [];
+  orderedKeys.forEach((key) => {
+    const label = key === "__ukategorisert" ? "Ukategorisert" : PRODUCTION_CATEGORY_ORDER.find((c) => c.id === key)!.name;
+    (buckets[key] || []).forEach((r, i) => {
+      const last = groups[groups.length - 1];
+      if (i > 0 && last && last.key === r.courseName) {
+        last.rows.push(r);
+      } else {
+        groups.push({ key: r.courseName, categoryHeader: i === 0 && showCategoryHeaders ? label : undefined, rows: [r] });
+      }
+    });
+  });
+
   const colA: Group[] = []; const colB: Group[] = [];
   let heightA = 0; let heightB = 0;
   groups.forEach((g) => {
-    const h = g.rows.length + (g.key ? 1 : 0);
+    const h = g.rows.length + (g.key ? 1 : 0) + (g.categoryHeader ? 1 : 0);
     if (heightA <= heightB) { colA.push(g); heightA += h; } else { colB.push(g); heightB += h; }
   });
   function renderGroups(list: Group[]) {
     return list.map((g) => {
+      const categoryHeaderHtml = g.categoryHeader ? `<div style="font-weight:900;font-size:12px;text-transform:uppercase;border-bottom:2px solid #111827;padding:4px 0 2px;margin:6px 0 2px">${escapeHtml(g.categoryHeader)}</div>` : "";
       const header = g.key ? `<tr><td colspan="3" style="font-weight:700;padding:2px 0;font-size:10px">${escapeHtml(g.key)}</td></tr>` : "";
       const rows = g.rows.map((r) => {
         const perUnitHtml = r.perUnit != null ? `<br><span style="color:#94a3b8;font-size:8px">à ${escapeHtml(formatAmountUnit(r.perUnit, r.unit, 3))}</span>` : "";
@@ -5459,7 +5637,7 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
         return `<tr>${checkbox}<td style="padding:1px 6px 1px 0">${escapeHtml(r.name)}${perUnitHtml}</td><td style="text-align:right;padding:1px 0;white-space:nowrap;vertical-align:top">${escapeHtml(formatAmountUnit(r.amount, r.unit))}</td></tr>`;
       }).join("");
       const groupTable = `<table style="width:100%;border-collapse:collapse">${header}${rows}</table>`;
-      return `<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
+      return `${categoryHeaderHtml}<div style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 4px;margin-bottom:4px">${groupTable}</div>`;
     }).join("");
   }
   return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px"><tr><td style="vertical-align:top;width:50%;padding-right:8px;border-right:1px solid #e5e7eb;font-size:10px">${renderGroups(colA)}</td><td style="vertical-align:top;width:50%;padding-left:8px;font-size:10px">${renderGroups(colB)}</td></tr></table>`;
@@ -7048,6 +7226,8 @@ function ProductionTab({
   productAllergens,
   pendingDate,
   clearPendingDate,
+  pendingOpenStorkjokkenCustomers,
+  clearPendingOpenStorkjokkenCustomers,
   readOnly,
 }: {
   data: AppData;
@@ -7055,6 +7235,8 @@ function ProductionTab({
   productAllergens: (p: Product) => string[];
   pendingDate?: string | null;
   clearPendingDate?: () => void;
+  pendingOpenStorkjokkenCustomers?: boolean;
+  clearPendingOpenStorkjokkenCustomers?: () => void;
   readOnly: boolean;
 }) {
   const productionCategories: { id: ProductionCategory; name: string }[] = [
@@ -7078,7 +7260,7 @@ function ProductionTab({
   const [invoiceFrom, setInvoiceFrom] = useState(today());
   const [invoiceTo, setInvoiceTo] = useState(today());
   const [invoiceWarning, setInvoiceWarning] = useState("");
-  const [newCustomer, setNewCustomer] = useState({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "" });
+  const [newCustomer, setNewCustomer] = useState({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "", email: "" });
   const [newTemplateProductId, setNewTemplateProductId] = useState("");
   const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>("smabakst");
   const [expandedCateringOrderId, setExpandedCateringOrderId] = useState<string | null>(null);
@@ -7308,17 +7490,17 @@ function ProductionTab({
     const pin = generateUniquePin();
     const customer: StorkjokkenCustomer = {
       id: `customer-${Date.now()}`, name: newCustomer.name.trim(), orgNumber: newCustomer.orgNumber,
-      address: newCustomer.address, deliveryAddress: newCustomer.deliveryAddress, phone: newCustomer.phone, active: true,
+      address: newCustomer.address, deliveryAddress: newCustomer.deliveryAddress, phone: newCustomer.phone, email: newCustomer.email, active: true,
       pin,
     };
     updateData({ storkjokkenCustomers: [...(data.storkjokkenCustomers || []), customer] });
-    setNewCustomer({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "" });
+    setNewCustomer({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "", email: "" });
     alert(`Kunde opprettet. Kundenummer/PIN: ${pin}`);
   }
 
   function startEditCustomer(customer: StorkjokkenCustomer) {
     setEditingCustomerId(customer.id);
-    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, internal: customer.internal, pin: customer.pin, allowedProductIds: customer.allowedProductIds, deliveryAvailable: customer.deliveryAvailable, fastTransportProductId: customer.fastTransportProductId });
+    setCustomerDraft({ name: customer.name, orgNumber: customer.orgNumber, address: customer.address, deliveryAddress: customer.deliveryAddress, phone: customer.phone, email: customer.email, internal: customer.internal, pin: customer.pin, allowedProductIds: customer.allowedProductIds, deliveryAvailable: customer.deliveryAvailable, fastTransportProductId: customer.fastTransportProductId });
     setFastTransportEnabled(!!customer.fastTransportProductId);
   }
 
@@ -7439,6 +7621,62 @@ function ProductionTab({
     updateData({ pendingPortalOrders: (data.pendingPortalOrders || []).map((p) => p.id === id ? { ...p, status: "rejected" } : p) });
   }
 
+  // DEL F: godkjent endring av en storkjøkken-bestilling ETTER frist.
+  function invoiceOverrideFor(customerId: string, date: string): StorkjokkenInvoiceOverride | undefined {
+    return (data.storkjokkenInvoiceOverrides || []).find((o) => o.customerId === customerId && o.date === date);
+  }
+
+  // "Opprinnelig" mengde for én kunde/dato/produkt, uansett kilde (override
+  // hvis satt, ellers produksjonsgriden + henteordre) - brukes til å
+  // sammenligne mot en endringsforespørsels requestedLines og avgjøre om en
+  // linje er et NYTT produkt (finnes ikke fra før i det hele tatt).
+  function existingQtyForProduct(customerId: string, date: string, productId: string): number {
+    const override = invoiceOverrideFor(customerId, date);
+    if (override) return override.lines.find((l) => l.productId === productId)?.quantity || 0;
+    const day = productionDays[date];
+    const dayQty = Number(day?.quantities?.[productId]?.[customerId] || 0);
+    const pickupQty = (data.storkjokkenPickupOrders || [])
+      .filter((p) => p.customerId === customerId && p.productId === productId && p.date === date)
+      .reduce((sum, p) => sum + p.quantity, 0);
+    return dayQty + pickupQty;
+  }
+
+  function approveOrderChangeRequest(req: PendingOrderChangeRequest) {
+    // For hver linje som IKKE finnes fra før (uansett kilde) for denne
+    // kunden/datoen: spør admin om den også skal inn i selve produksjonen
+    // (produksjonsgriden - den ekte produksjons-sannhetskilden). Linjer som
+    // allerede fantes (kun endret mengde) rører ALDRI produksjonen - kun
+    // fakturagrunnlaget via storkjokkenInvoiceOverrides under.
+    let dayPatch: BakeryProductionDay | null = null;
+    req.requestedLines.forEach((line) => {
+      if (existingQtyForProduct(req.customerId, req.date, line.productId) > 0) return;
+      const product = data.products.find((p) => p.id === line.productId);
+      const addToProduction = confirm(`${product?.name || "Produktet"} er ikke del av produksjonen ennå for ${formatDateNo(req.date)}. Legg det til i produksjonen også?`);
+      if (!addToProduction) return;
+      const baseDay: BakeryProductionDay = dayPatch || productionDays[req.date] || { date: req.date, approved: false, quantities: recurringQuantitiesForDate(req.date) };
+      const nextQuantities = { ...baseDay.quantities };
+      const productQty = { ...(nextQuantities[line.productId] || {}) };
+      productQty[req.customerId] = Number(productQty[req.customerId] || 0) + line.quantity;
+      nextQuantities[line.productId] = productQty;
+      dayPatch = { ...baseDay, quantities: nextQuantities };
+    });
+
+    const nextOverrides = [
+      ...(data.storkjokkenInvoiceOverrides || []).filter((o) => !(o.customerId === req.customerId && o.date === req.date)),
+      { id: `siov-${req.customerId}-${req.date}`, customerId: req.customerId, date: req.date, lines: req.requestedLines, approvedAt: new Date().toISOString() },
+    ];
+
+    updateData({
+      storkjokkenInvoiceOverrides: nextOverrides,
+      pendingOrderChangeRequests: (data.pendingOrderChangeRequests || []).map((r) => r.id === req.id ? { ...r, status: "approved" as const } : r),
+      ...(dayPatch ? { bakeryProductionDays: { ...productionDays, [req.date]: dayPatch as BakeryProductionDay } } : {}),
+    });
+  }
+
+  function rejectOrderChangeRequest(id: string) {
+    updateData({ pendingOrderChangeRequests: (data.pendingOrderChangeRequests || []).map((r) => r.id === id ? { ...r, status: "rejected" } : r) });
+  }
+
   function approveRecurringRequest(id: string) {
     const req = (data.pendingRecurringOrderRequests || []).find((r) => r.id === id);
     if (!req) return;
@@ -7471,6 +7709,17 @@ function ProductionTab({
 
   const [newException, setNewException] = useState({ date: "", closed: true, cutoffTime: "12:00" });
   const [openBlock, setOpenBlock] = useState<string | null>(null);
+
+  // DEL A: Henteordre-snarveier (dashbord/produksjon) - naviger hit og åpne
+  // Kunder-listen, klar til å velge riktig kunde. Hopper ALDRI til et
+  // ferdig utfylt henteordre-skjema for en bestemt kunde.
+  useEffect(() => {
+    if (!pendingOpenStorkjokkenCustomers) return;
+    setMainPanel("bakeri");
+    setPanel("customers");
+    setOpenBlock("list");
+    clearPendingOpenStorkjokkenCustomers?.();
+  }, [pendingOpenStorkjokkenCustomers]);
 
   function dismissCancelNotification(id: string) {
     updateData({ cancelledOrderNotifications: (data.cancelledOrderNotifications || []).filter((n) => n.id !== id) });
@@ -7612,6 +7861,18 @@ function ProductionTab({
         let quantity = 0;
         let sumExVat = 0;
         dates.forEach((date) => {
+          // DEL F: en godkjent endringsforespørsel overstyrer HELE
+          // fakturagrunnlaget for nettopp denne kunden/datoen - den vanlige
+          // produksjonsgriden telles da IKKE med i tillegg for denne datoen.
+          const override = invoiceOverrideFor(customer.id, date);
+          if (override) {
+            const line = override.lines.find((l) => l.productId === product.id);
+            if (line && line.quantity > 0) {
+              quantity += line.quantity;
+              sumExVat += line.quantity * priceForCustomerOnDate(product.id, customer.id, date);
+            }
+            return;
+          }
           const day = productionDays[date];
           if (!day?.approved) return;
           const qty = Number(day.quantities?.[product.id]?.[customer.id] || 0);
@@ -7619,7 +7880,7 @@ function ProductionTab({
           quantity += qty;
           sumExVat += qty * priceForCustomerOnDate(product.id, customer.id, date);
         });
-        (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customer.id && p.productId === product.id && p.date >= from && p.date <= to).forEach((p) => {
+        (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === customer.id && p.productId === product.id && p.date >= from && p.date <= to && !invoiceOverrideFor(customer.id, p.date)).forEach((p) => {
           quantity += p.quantity;
           sumExVat += p.quantity * (p.priceExVat != null ? p.priceExVat : priceForCustomer(product.id, customer.id));
         });
@@ -8621,6 +8882,7 @@ ${orderPages}`;
                 <button className="btn" onClick={() => setPanel("day")}>Dagens produksjon</button>
                 <button className="btn" onClick={() => setPanel("template")}>Produktmal</button>
                 <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
+                <button className="btn active" onClick={() => { setPanel("customers"); setOpenBlock("list"); }}>🛍️ Henteordre</button>
                 <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
                 <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
                 <button className="btn" onClick={() => setPanel("stats")}>Salgsstatistikk</button>
@@ -8634,7 +8896,8 @@ ${orderPages}`;
           {panel === "day" && (
             <>
               {((data.pendingPortalOrders || []).filter((p) => p.status === "pending").length > 0 ||
-                (data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length > 0) && (
+                (data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length > 0 ||
+                (data.pendingOrderChangeRequests || []).filter((r) => r.status === "pending").length > 0) && (
                 <div className="card" style={{ background: "#eef2ff", border: "1px solid #6366f1" }}>
                   <b style={{ fontSize: 14 }}>📋 Fra kundeportalen</b>
                   {(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length > 0 && (
@@ -8650,6 +8913,14 @@ ${orderPages}`;
                       <div className="between">
                         <span>{(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length} fastordre-forespørsel(er) venter på godkjenning</span>
                         <button className="btn" onClick={() => { setPanel("customers"); setOpenBlock("recurring"); }}>Se og godkjenn →</button>
+                      </div>
+                    </div>
+                  )}
+                  {(data.pendingOrderChangeRequests || []).filter((r) => r.status === "pending").length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <div className="between">
+                        <span>{(data.pendingOrderChangeRequests || []).filter((r) => r.status === "pending").length} endringsforespørsel(er) venter på godkjenning</span>
+                        <button className="btn" onClick={() => { setPanel("customers"); setOpenBlock("changeRequests"); }}>Se og godkjenn →</button>
                       </div>
                     </div>
                   )}
@@ -8861,6 +9132,60 @@ ${orderPages}`;
                 })
               ))}
 
+              <div className="section-toggle" style={{ marginTop: 16 }} onClick={() => setOpenBlock(openBlock === "changeRequests" ? null : "changeRequests")}>
+                <h3>Endringsforespørsler (etter frist)</h3>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="section-toggle-count">{(data.pendingOrderChangeRequests || []).filter((r) => r.status === "pending").length}</span>
+                  {openBlock === "changeRequests" ? "▲" : "▼"}
+                </span>
+              </div>
+              {openBlock === "changeRequests" && ((data.pendingOrderChangeRequests || []).filter((r) => r.status === "pending").length === 0 ? (
+                <p className="muted">Ingen ventende endringsforespørsler.</p>
+              ) : (
+                (data.pendingOrderChangeRequests || []).filter((r) => r.status === "pending").map((req) => {
+                  const cust = (data.storkjokkenCustomers || []).find((c) => c.id === req.customerId);
+                  const removedProducts = data.products.filter((p) => existingQtyForProduct(req.customerId, req.date, p.id) > 0 && !req.requestedLines.some((l) => l.productId === p.id));
+                  return (
+                    <div key={req.id} className="soft-box" style={{ marginBottom: 10 }}>
+                      <div className="between">
+                        <b>{cust?.name || "Ukjent kunde"} · levering {formatDateNo(req.date)}</b>
+                        <span style={{ color: "#94a3b8", fontSize: 12 }}>Sendt {new Date(req.submittedAt).toLocaleString("no-NO")}</span>
+                      </div>
+                      <table style={{ marginTop: 8 }}>
+                        <thead><tr><th>Produkt</th><th style={{ textAlign: "right" }}>Var</th><th style={{ textAlign: "right" }}>Ønsket</th><th></th></tr></thead>
+                        <tbody>
+                          {req.requestedLines.map((l, i) => {
+                            const existingQty = existingQtyForProduct(req.customerId, req.date, l.productId);
+                            const isNew = existingQty === 0;
+                            const changed = existingQty !== l.quantity;
+                            return (
+                              <tr key={i} style={isNew ? { background: "#fef3c7" } : undefined}>
+                                <td>{data.products.find((p) => p.id === l.productId)?.name || "Ukjent produkt"}</td>
+                                <td style={{ textAlign: "right" }}>{existingQty || "-"}</td>
+                                <td style={{ textAlign: "right", fontWeight: changed ? 800 : undefined }}>{l.quantity}</td>
+                                <td style={{ fontSize: 12, color: "#92400e", fontWeight: 700 }}>{isNew ? "NYTT produkt - ikke del av produksjonen ennå" : ""}</td>
+                              </tr>
+                            );
+                          })}
+                          {removedProducts.map((p) => (
+                            <tr key={`removed-${p.id}`} style={{ color: "#94a3b8" }}>
+                              <td style={{ textDecoration: "line-through" }}>{p.name}</td>
+                              <td style={{ textAlign: "right" }}>{existingQtyForProduct(req.customerId, req.date, p.id)}</td>
+                              <td style={{ textAlign: "right" }}>0</td>
+                              <td style={{ fontSize: 12 }}>Fjernet</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                        <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => approveOrderChangeRequest(req)}>Godkjenn</button>
+                        <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => rejectOrderChangeRequest(req.id)}>Avslå</button>
+                      </div>
+                    </div>
+                  );
+                })
+              ))}
+
               <div className="soft-box" style={{ marginTop: 16 }}>
                 <h3>Ny kunde</h3>
                 <div className="form-grid five">
@@ -8869,6 +9194,7 @@ ${orderPages}`;
                   <input value={newCustomer.address} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })} placeholder="Fakturaadresse" />
                   <input value={newCustomer.deliveryAddress} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
                   <input value={newCustomer.phone} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="Telefon" />
+                  <input type="email" value={newCustomer.email} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })} placeholder="E-post (for varsel om ugodkjent ordre)" />
                 </div>
                 <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomer}>Legg til kunde</button>
               </div>
@@ -8919,6 +9245,7 @@ ${orderPages}`;
                                   <input value={customerDraft.address || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, address: e.target.value })} placeholder="Fakturaadresse" />
                                   <input value={customerDraft.deliveryAddress || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, deliveryAddress: e.target.value })} placeholder="Leveringsadresse" />
                                   <input value={customerDraft.phone || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, phone: e.target.value })} placeholder="Telefon" />
+                                  <input type="email" value={customerDraft.email || ""} disabled={readOnly} onChange={(e) => setCustomerDraft({ ...customerDraft, email: e.target.value })} placeholder="E-post (for varsel om ugodkjent ordre)" />
                                 </div>
                                 <div style={{ marginTop: 8, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
                                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>

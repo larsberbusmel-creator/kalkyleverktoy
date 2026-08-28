@@ -65,6 +65,14 @@ export default function BestillingPortal() {
   const [recNote, setRecNote] = useState("");
   const [recMsg, setRecMsg] = useState("");
 
+  // DEL F: "Be om endring" - kunden kan be om endring av en bestilling for
+  // en dato der fristen er passert (redigering er da blokkert som normalt).
+  // Sender en PendingOrderChangeRequest, IKKE en direkte endring.
+  const [changeRequestDate, setChangeRequestDate] = useState<string | null>(null);
+  const [changeRequestQuantities, setChangeRequestQuantities] = useState<Record<string, string>>({});
+  const [changeRequestSubmitting, setChangeRequestSubmitting] = useState(false);
+  const [changeRequestMsg, setChangeRequestMsg] = useState("");
+
   async function refresh() {
     const json = await fetch("/api/kunde/data", {
       method: "POST",
@@ -220,6 +228,43 @@ export default function BestillingPortal() {
     await refresh();
   }
 
+  function openChangeRequestForm(group: HistoryGroup) {
+    const q: Record<string, string> = {};
+    group.lines.forEach((l) => { q[l.productId] = String(l.quantity); });
+    setChangeRequestQuantities(q);
+    setChangeRequestDate(group.date);
+    setChangeRequestMsg("");
+  }
+
+  async function submitChangeRequest(date: string) {
+    const lines = Object.entries(changeRequestQuantities)
+      .map(([productId, qty]) => ({ productId, quantity: Number(qty) || 0 }))
+      .filter((l) => l.quantity > 0);
+    if (!lines.length) {
+      setChangeRequestMsg("Velg minst én vare med antall før du sender.");
+      return;
+    }
+    setChangeRequestSubmitting(true);
+    setChangeRequestMsg("");
+    try {
+      const res = await fetch("/api/kunde/request-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin, date, lines }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setChangeRequestMsg(json.error || "Kunne ikke sende endringsforespørselen.");
+      } else {
+        setChangeRequestMsg("Endringsforespørselen er sendt inn og venter på godkjenning fra oss.");
+        setChangeRequestQuantities({});
+      }
+    } catch {
+      setChangeRequestMsg("Noe gikk galt. Prøv igjen.");
+    }
+    setChangeRequestSubmitting(false);
+  }
+
   function printPakkseddel(group: HistoryGroup) {
     let sumExVat = 0;
     const rows = group.lines
@@ -345,6 +390,12 @@ async function toggleFavorite(productId: string) {
         </div>
         <button onClick={logout} style={{ background: "none", border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}>Logg ut</button>
       </div>
+
+      {pending.length > 0 && (
+        <div style={{ background: "#eef2ff", border: "1px solid #6366f1", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 14, color: "#3730a3" }}>
+          📋 Du har {pending.length} bestilling{pending.length > 1 ? "er" : ""} som venter på godkjenning ({pending.map((p) => p.date).join(", ")}).
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <button
@@ -555,7 +606,50 @@ async function toggleFavorite(productId: string) {
                     ))}
                   </tbody>
                 </table>
-                {!canCancel && <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>Fristen for denne datoen er passert, kan ikke lenger avbestilles.</p>}
+                {!canCancel && (
+                  <div style={{ marginTop: 8 }}>
+                    <p style={{ fontSize: 12, color: "#94a3b8", margin: 0 }}>Fristen for denne datoen er passert, kan ikke lenger avbestilles eller endres direkte.</p>
+                    {changeRequestDate === group.date ? (
+                      <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 12, marginTop: 8 }}>
+                        <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>Juster antall under og send inn - endringen må godkjennes av oss før den gjelder.</p>
+                        {products.map((p) => (
+                          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+                            <span style={{ fontSize: 13 }}>{p.name}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={changeRequestQuantities[p.id] || ""}
+                              onChange={(e) => setChangeRequestQuantities({ ...changeRequestQuantities, [p.id]: e.target.value })}
+                              style={{ width: 70, padding: 4, borderRadius: 6, border: "1px solid #cbd5e1" }}
+                            />
+                          </div>
+                        ))}
+                        {changeRequestMsg && (
+                          <p style={{ fontSize: 13, color: changeRequestMsg.includes("sendt inn") ? "#166534" : "#dc2626", marginTop: 8 }}>{changeRequestMsg}</p>
+                        )}
+                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <button
+                            onClick={() => submitChangeRequest(group.date)}
+                            disabled={changeRequestSubmitting}
+                            style={{ background: "#111827", color: "white", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}
+                          >
+                            {changeRequestSubmitting ? "Sender..." : "Send endringsforespørsel"}
+                          </button>
+                          <button onClick={() => setChangeRequestDate(null)} style={{ background: "none", border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
+                            Avbryt
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => openChangeRequestForm(group)}
+                        style={{ background: "none", border: "1px solid #2563eb", color: "#2563eb", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 13, marginTop: 4 }}
+                      >
+                        Be om endring
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
