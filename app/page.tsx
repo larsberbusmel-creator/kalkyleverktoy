@@ -8197,12 +8197,30 @@ function collectProductionMaterials(): Record<string, { name: string; category: 
 }
 
 function printProductionDay() {
-    const summaryRows = activeRows.map((row) => {
-      const qtyRow = activeDay.quantities[row.product.id] || {};
-      const parts = columns.filter((col) => Number(qtyRow[col.id] || 0) > 0).map((col) => `${escapeHtml(col.name)} ${qtyRow[col.id]} stk`);
-      const ordersQty = ordersQuantityForProduct(row.product.id, activeDate);
-      if (ordersQty > 0) parts.push(`Bestillinger ${ordersQty} stk`);
-      return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td>${parts.join("<br>")}</td><td class="right"><b>${row.quantity} stk</b></td></tr>`;
+    // Grupperer etter row.line.category (BakeryProductionTemplateLine sin
+    // kategori - SAMME kilde som "Dagens produksjon" allerede aktivt
+    // vedlikeholder), i fast rekkefølge, med egne overskriftsrader mellom
+    // gruppene - matcher inndelingen brukeren faktisk ser på skjermen.
+    const rowsByCategory: Partial<Record<string, typeof activeRows>> = {};
+    activeRows.forEach((row) => {
+      const key = row.line.category || "__ukategorisert";
+      (rowsByCategory[key] ||= []).push(row);
+    });
+    const orderedCatKeys = [...PRODUCTION_CATEGORY_ORDER.map((c) => c.id), "__ukategorisert"].filter((k) => (rowsByCategory[k] || []).length > 0);
+    const showSummaryCategoryHeaders = orderedCatKeys.length > 1;
+    const summaryRows = orderedCatKeys.map((key) => {
+      const label = key === "__ukategorisert" ? "Ukategorisert" : PRODUCTION_CATEGORY_ORDER.find((c) => c.id === key)!.name;
+      const headerRow = showSummaryCategoryHeaders
+        ? `<tr><td colspan="3" style="background:#e2e8f0;font-weight:900;padding:6px 8px;text-transform:uppercase">${escapeHtml(label)}</td></tr>`
+        : "";
+      const rows = (rowsByCategory[key] || []).map((row) => {
+        const qtyRow = activeDay.quantities[row.product.id] || {};
+        const parts = columns.filter((col) => Number(qtyRow[col.id] || 0) > 0).map((col) => `${escapeHtml(col.name)} ${qtyRow[col.id]} stk`);
+        const ordersQty = ordersQuantityForProduct(row.product.id, activeDate);
+        if (ordersQty > 0) parts.push(`Bestillinger ${ordersQty} stk`);
+        return `<tr><td><b>${escapeHtml(row.product.name)}</b></td><td>${parts.join("<br>")}</td><td class="right"><b>${row.quantity} stk</b></td></tr>`;
+      }).join("");
+      return headerRow + rows;
     }).join("");
 
     const recipeMap: Record<string, { recipe: Recipe; totalAmount: number; unit: string; sources: { productName: string; quantity: number; amount: number; unit: string; unitWeightKg?: number; extraLines: { name: string; amount: number; unit: string }[] }[] }> = {};
