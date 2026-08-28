@@ -7412,14 +7412,9 @@ function ProductionTab({
     }
   }
 
-    function ordersQuantityForProduct(productId: string, date: string) {
+      function ordersQuantityForProduct(productId: string, date: string) {
     let directUnits = 0;
     let consumedWholeUnits = 0;
-    // Divisor skal styres av PRODUKTET SOM FAKTISK DELES OPP (f.eks. Focaccia,
-    // 12 biter per brød) - ikke av den bestilte retten som bruker det som
-    // ingrediens. Slås derfor opp én gang her, uavhengig av parent.
-    const producedProduct = data.products.find((p) => p.id === productId);
-    const divisor = producedProduct?.type === "pasmuurt" && Number(producedProduct.portionsPerWhole) > 0 ? Number(producedProduct.portionsPerWhole) : 1;
     data.orders.filter((o) => o.date === date && !o.deletedAt).forEach((order) => {
       (order.orderLines || []).forEach((ol) => {
         const orderedQty = Number(ol.quantity || 0);
@@ -7427,6 +7422,11 @@ function ProductionTab({
         if (ol.productId === productId) { directUnits += orderedQty; return; }
         const parent = data.products.find((p) => p.id === ol.productId);
         if (!parent) return;
+        // Divisor styres av DEN BESTILTE RETTEN (parent) sin egen "deles i X"-
+        // egenskap - f.eks. "Focaccia Kylling i Urtemajones" er selv en Påsmurt-
+        // oppskrift som gir 12 porsjoner per batch, og DEN har "Focaccia" (hele
+        // brødet) som ingrediens i batch-oppskriften sin.
+        const divisor = parent.type === "pasmuurt" && Number(parent.portionsPerWhole) > 0 ? Number(parent.portionsPerWhole) : 1;
         parent.lines.forEach((line) => {
           if (line.itemType === "product" && line.itemId === productId) {
             consumedWholeUnits += (Number(line.amount || 0) * orderedQty) / divisor;
