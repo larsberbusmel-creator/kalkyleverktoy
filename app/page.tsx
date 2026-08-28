@@ -7258,7 +7258,7 @@ function ProductionTab({
     clearPendingDate?.();
   }, [pendingDate]);
   const [mainPanel, setMainPanel] = useState<"bakeri" | "catering">("bakeri");
-  const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice" | "stats">("day");
+  const [panel, setPanel] = useState<"day" | "template" | "customers" | "recurring" | "invoice" | "stats" | "pickup">("day");
   const [categoryFilter, setCategoryFilter] = useState<"alle" | ProductionCategory>("alle");
   const [gridSearch, setGridSearch] = useState("");
   const [invoiceFrom, setInvoiceFrom] = useState(today());
@@ -7279,9 +7279,10 @@ function ProductionTab({
   const [recurringLineQty, setRecurringLineQty] = useState("1");
   const [recurringCustomerSearch, setRecurringCustomerSearch] = useState("");
   const [templateProductSearch, setTemplateProductSearch] = useState("");
-  const [pickupProductSearch, setPickupProductSearch] = useState("");
+    const [pickupProductSearch, setPickupProductSearch] = useState("");
   const [pickupProductId, setPickupProductId] = useState("");
   const [pickupQty, setPickupQty] = useState("1");
+  const [pickupPanelCustomerId, setPickupPanelCustomerId] = useState("");
   const [statsMode, setStatsMode] = useState<"week" | "month" | "year">("month");
   const [statsAnchor, setStatsAnchor] = useState(today());
   const [statsCustomerId, setStatsCustomerId] = useState<string | null>(null);
@@ -8904,7 +8905,7 @@ ${orderPages}`;
                 <button className="btn" onClick={() => setPanel("day")}>Dagens produksjon</button>
                 <button className="btn" onClick={() => setPanel("template")}>Produktmal</button>
                 <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
-                <button className="btn active" onClick={() => { setPanel("customers"); setOpenBlock("list"); }}>🛍️ Henteordre</button>
+                <button className={mainPanel === "bakeri" && panel === "pickup" ? "btn active" : "btn"} onClick={() => setPanel("pickup")}>🛍️ Henteordre</button>
                 <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
                 <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
                 <button className="btn" onClick={() => setPanel("stats")}>Salgsstatistikk</button>
@@ -9839,6 +9840,75 @@ ${orderPages}`;
       )}
 
       {/* ── CATERING-PANEL ──────────────────────────────────────────────────── */}
+            {mainPanel === "bakeri" && panel === "pickup" && (() => {
+                const activeCustomers = (data.storkjokkenCustomers || []).filter((c) => c.active !== false);
+        const selectedCustomer = activeCustomers.find((c) => c.id === pickupPanelCustomerId);
+        const pickupHistory = selectedCustomer
+          ? (data.storkjokkenPickupOrders || []).filter((p) => p.customerId === selectedCustomer.id).sort((a, b) => b.date.localeCompare(a.date))
+          : [];
+        return (
+          <div className="card">
+            <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12, marginBottom: 16 }}>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Henteordre</h3>
+              <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Registrer et direkte uttak/salg til en storkjøkkenkunde, uten å gå via full ordre.</p>
+            </div>
+            <div className="search-picker" style={{ maxWidth: 360, marginBottom: 16 }}>
+              <select value={pickupPanelCustomerId} disabled={readOnly} onChange={(e) => setPickupPanelCustomerId(e.target.value)}>
+                <option value="">Velg kunde...</option>
+                {activeCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            {selectedCustomer && (
+              <div className="soft-box">
+                <h4 style={{ marginTop: 0 }}>Registrer henteordre – {selectedCustomer.name}</h4>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div className="search-picker" style={{ maxWidth: 320, position: "relative" }}>
+                    <input
+                      value={pickupProductId ? (data.products.find((p) => p.id === pickupProductId)?.name || "") : pickupProductSearch}
+                      disabled={readOnly}
+                      onChange={(e) => { setPickupProductSearch(e.target.value); setPickupProductId(""); }}
+                      placeholder="Søk produkt, f.eks. Fransk Landbrød"
+                    />
+                    {pickupProductSearch && !pickupProductId && (
+                      <div className="search-dropdown inline">
+                        {data.products.filter((p) => p.name.toLowerCase().includes(pickupProductSearch.toLowerCase())).slice(0, 12).map((p) => (
+                          <button key={p.id} type="button" className="search-result" onClick={() => { setPickupProductId(p.id); setPickupProductSearch(""); }}>
+                            <b>{p.name}</b>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <input type="number" value={pickupQty} disabled={readOnly} onChange={(e) => setPickupQty(e.target.value)} style={{ maxWidth: 90 }} placeholder="Antall" />
+                  <button
+                    className="btn active"
+                    disabled={readOnly}
+                    title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
+                    onClick={() => { if (pickupProductId && Number(pickupQty) > 0) { addPickupOrder(selectedCustomer.id, pickupProductId, Number(pickupQty)); setPickupProductId(""); setPickupQty("1"); } }}
+                  >
+                    Lagre henteordre
+                  </button>
+                </div>
+                {pickupHistory.length > 0 && (
+                  <table style={{ marginTop: 10 }}>
+                    <thead><tr><th>Dato</th><th>Produkt</th><th>Antall</th></tr></thead>
+                    <tbody>
+                      {pickupHistory.map((p) => (
+                        <tr key={p.id}>
+                          <td>{formatDateNo(p.date)}</td>
+                          <td>{data.products.find((pr) => pr.id === p.productId)?.name || "Ukjent"}</td>
+                          <td>{p.quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {mainPanel === "catering" && (
         <>
           <div className="card">
