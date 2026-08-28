@@ -153,6 +153,7 @@ note?: string;
   rungInAt?: string;
   confirmedName?: string;
   confirmedAt?: string;
+  attachmentIds?: string[]; // valgte dokumenter fra Dokumentbanken (se DocumentBankEntry)
   packingListEnabled?: boolean;
   selectedPackingListTemplateIds?: string[];
   extraPackingListItems?: string[];
@@ -296,6 +297,7 @@ type RentalOffer = {
   rungInAt?: string;
   confirmedName?: string;
   confirmedAt?: string;
+  attachmentIds?: string[]; // valgte dokumenter fra Dokumentbanken (se DocumentBankEntry)
   selectedPackingListTemplateIds?: string[];
   extraPackingListItems?: string[];
   teardownAt?: string;
@@ -350,6 +352,20 @@ type RentalAddon = { id: string; name: string; price: number; perUnit?: boolean;
 
 type PackingListItem = { id: string; label: string };
 type PackingListTemplate = { id: string; name: string; items: PackingListItem[] };
+
+// Dokumentbank: PDF-filer lastet opp til Supabase Storage-bucketen "documents"
+// (klientens egen innloggingsøkt, ikke en service-nøkkel-rute). Flere
+// dokumenter kan kobles til SAMME produkt (f.eks. meny med/uten pris) -
+// hvert dokument eier sin egen linkedProductIds-liste, ikke omvendt.
+type DocumentBankEntry = {
+  id: string;
+  name: string;
+  fileName: string;
+  storagePath: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  linkedProductIds?: string[];
+};
 
 // itemType/refId peker til et Product eller Material - navn/pris hentes ALLTID
 // live derfra ved rendering (se barItemDisplay), aldri lagret på selve BarItem.
@@ -596,6 +612,7 @@ type AppData = {
   eventCalculations: EventCalculation[];
   seenOrderIds: string[];
   userAccess: UserAccessEntry[];
+  documentBank: DocumentBankEntry[];
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
@@ -746,6 +763,25 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+// Dokumentbank: bucketen "documents" har kun "select" for AUTHENTICATED
+// (ikke public/anon), så filen kan ikke åpnes via en enkel public URL - en
+// midlertidig signert URL må hentes via klientens egen innloggingsøkt. For
+// å unngå popup-blokkering (nettlesere krever at window.open() skjer
+// synkront fra selve klikket) åpnes en tom fane MED EN GANG, og navigeres
+// til den signerte URL-en så snart den er hentet.
+function openDocumentBankFile(storagePath: string) {
+  const w = window.open("", "_blank");
+  supabase.storage.from("documents").createSignedUrl(storagePath, 60 * 15).then(({ data, error }) => {
+    if (error || !data?.signedUrl) {
+      w?.close();
+      alert(`Kunne ikke åpne filen: ${error?.message || "ukjent feil"}`);
+      return;
+    }
+    if (w) w.location.href = data.signedUrl;
+    else window.open(data.signedUrl, "_blank");
+  });
 }
 
 // Delt hjelpefunksjon for å bygge sjekklisteseksjonen fra valgte pakkelistemaler,
@@ -900,6 +936,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   rentalOffers: [], rooms: [], tableTypes: [], roomLayoutTemplates: [], coverItems: [],
   userAccess: [],
   packingListTemplates: [],
+  documentBank: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1047,6 +1084,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     tableTypes: raw.tableTypes || [],
     roomLayoutTemplates: raw.roomLayoutTemplates || [],
     coverItems: raw.coverItems || [],
+    documentBank: (raw as any).documentBank || [],
   };
 }
 
@@ -1070,6 +1108,99 @@ function PageHeader({ icon, title, color }: { icon: string; title: string; color
   );
 }
 
+// Gjenbrukbar søkbar multi-select (dokumentbank: koble produkter til et
+// dokument, og koble dokumenter som vedlegg på en ordre/utleie) - bygger på
+// samme .search-picker/.search-dropdown/.search-result-mønster som brukes
+// for enkelt-valg andre steder i appen, men lar flere valg stå samtidig
+// (dropdown lukkes ikke, allerede valgte vises som fjernbare chips under).
+function SearchMultiSelect({ items, selectedIds, onAdd, onRemove, placeholder, readOnly, emptyLabel }: {
+  items: { id: string; label: string; sublabel?: string }[];
+  selectedIds: string[];
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
+  placeholder: string;
+  readOnly?: boolean;
+  emptyLabel?: string;
+}) {
+  const [search, setSearch] = useState("");
+  const filtered = search
+    ? items.filter((i) => !selectedIds.includes(i.id) && i.label.toLowerCase().includes(search.toLowerCase())).slice(0, 50)
+    : [];
+  const selectedItems = items.filter((i) => selectedIds.includes(i.id));
+  return (
+    <div>
+      <div className="search-picker" style={{ maxWidth: 360 }}>
+        <input
+          value={search}
+          disabled={readOnly}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={placeholder}
+        />
+        {search && (
+          <div className="search-dropdown inline">
+            {filtered.length === 0 && <div className="search-result" style={{ color: "#94a3b8", cursor: "default" }}>Ingen treff</div>}
+            {filtered.map((i) => (
+              <button
+                key={i.id}
+                type="button"
+                className="search-result"
+                onClick={() => { onAdd(i.id); setSearch(""); }}
+              >
+                <b>{i.label}</b>
+                {i.sublabel && <small>{i.sublabel}</small>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        {selectedItems.length === 0 && emptyLabel && <span className="muted" style={{ fontSize: 13 }}>{emptyLabel}</span>}
+        {selectedItems.map((i) => (
+          <span key={i.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 999, padding: "3px 6px 3px 10px", fontSize: 13 }}>
+            {i.label}
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => onRemove(i.id)}
+                style={{ border: "none", background: "transparent", cursor: "pointer", fontWeight: 900, color: "#4338ca", fontSize: 14, lineHeight: 1, padding: 0 }}
+                title="Fjern"
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Delt "har ulagrede endringer"-sporing for "vil du lagre før du avslutter"-
+// dialogen (se Page(): dirtyTabs/pendingTabChange). `active` er om et
+// redigeringsskjema faktisk er åpent (f.eks. mode !== "view"), `deps` er
+// verdiene som skal overvåkes for endring (form/draftLines/...). markClean()
+// MÅ kalles rett etter at et skjema lastes med data (ny/rediger) og etter
+// vellykket lagring/avbryt, slik at selve DATA-LASTINGEN ikke i seg selv
+// telles som en brukerendring.
+function useFormDirtyTracking(active: boolean, onDirtyChange: (dirty: boolean) => void, deps: any[]) {
+  const skipNextRef = React.useRef(true);
+  const activeRef = React.useRef(active);
+  activeRef.current = active;
+
+  useEffect(() => {
+    if (skipNextRef.current) { skipNextRef.current = false; return; }
+    if (activeRef.current) onDirtyChange(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  function markClean() {
+    skipNextRef.current = true;
+    onDirtyChange(false);
+  }
+
+  return { markClean };
+}
+
 export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -1080,6 +1211,75 @@ export default function Page() {
   const [eventCalculationToOpen, setEventCalculationToOpen] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
+
+  // "Vil du lagre før du avslutter"-mekanisme (foreløpig kun Ordre/Produkter/
+  // Grunnoppskrifter) - dirtyTabs er kildesannheten for om en fane har
+  // ulagrede endringer, satt av fanen selv via onDirtyChange. saveActiveTabRef
+  // peker til DEN AKTIVE fanens lagre-funksjon (kun én av de tre er montet om
+  // gangen), registrert av fanen selv via registerSave.
+  const [dirtyTabs, setDirtyTabs] = useState<Set<Tab>>(new Set());
+  const [pendingTabChange, setPendingTabChange] = useState<Tab | null>(null);
+  const saveActiveTabRef = React.useRef<(() => boolean) | null>(null);
+
+  function registerSave(fn: (() => boolean) | null) {
+    saveActiveTabRef.current = fn;
+  }
+
+  function onDirtyChangeFor(t: Tab) {
+    return (dirty: boolean) => {
+      setDirtyTabs((prev) => {
+        const already = prev.has(t);
+        if (dirty === already) return prev;
+        const next = new Set(prev);
+        if (dirty) next.add(t); else next.delete(t);
+        return next;
+      });
+    };
+  }
+
+  // Kun for hoved-fanebytte fra sidemeny/toppmeny - la
+  // pendingOrderId/pendingOfferId/pendingDate-navigasjon (setTab direkte
+  // andre steder) stå uendret.
+  function requestTabChange(newTab: Tab) {
+    if (dirtyTabs.has(tab)) { setPendingTabChange(newTab); return; }
+    setTab(newTab);
+  }
+
+  function confirmPendingSaveAndSwitch() {
+    if (!pendingTabChange) return;
+    const ok = saveActiveTabRef.current ? saveActiveTabRef.current() : true;
+    if (ok) {
+      setTab(pendingTabChange);
+      setPendingTabChange(null);
+    } else {
+      // Lagring stoppet av validering (alert() vises av selve lagre-
+      // funksjonen) - lukk kun dialogen, bli værende i skjemaet med feilen.
+      setPendingTabChange(null);
+    }
+  }
+
+  function discardPendingAndSwitch() {
+    if (!pendingTabChange) return;
+    setDirtyTabs((prev) => {
+      if (!prev.has(tab)) return prev;
+      const next = new Set(prev);
+      next.delete(tab);
+      return next;
+    });
+    setTab(pendingTabChange);
+    setPendingTabChange(null);
+  }
+
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (dirtyTabs.size > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirtyTabs]);
 
   // Nettleser-historikk på fane-nivå: hvert fanebytte (setTab) skal kunne
   // navigeres med nettleserens Tilbake/Frem-knapper (og Android sin
@@ -1649,7 +1849,7 @@ return (
           {tabConfig.map(({ key, label, icon }) => (
             <button
               key={key}
-              onClick={() => setTab(key)}
+              onClick={() => requestTabChange(key)}
               className={tab === key ? "sidebar-btn active" : "sidebar-btn"}
             >
               <span className="sidebar-icon">{icon}</span>
@@ -1677,7 +1877,7 @@ return (
         <img src="/logo.png" alt="Logo" style={{ height: 44, width: "auto", objectFit: "contain" }} />
         <select
           value={tab}
-          onChange={(e) => setTab(e.target.value as Tab)}
+          onChange={(e) => requestTabChange(e.target.value as Tab)}
           style={{ flex: 1, marginLeft: 10, fontSize: 15, padding: "8px 10px", borderRadius: 10, border: "1px solid #cbd5e1" }}
         >
           {tabConfig.map(({ key, label, icon }) => (
@@ -1704,15 +1904,15 @@ return (
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
-        {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} />}
-        {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} />}
+        {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} isDirty={dirtyTabs.has("recipes")} onDirtyChange={onDirtyChangeFor("recipes")} registerSave={registerSave} />}
+        {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} readOnly={!canEdit("production")} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
         {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
-        {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} />}
+        {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} userEmail={userEmail} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
 
@@ -1823,6 +2023,19 @@ html.dark-mode video {
   filter: invert(1) hue-rotate(180deg);
 }
     `}</style>
+    {pendingTabChange !== null && (
+      <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div style={{ background: "white", borderRadius: 16, padding: 24, maxWidth: 380, width: "100%", boxShadow: "0 20px 40px rgba(0,0,0,0.25)" }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 800 }}>Vil du lagre før du avslutter?</h3>
+          <p style={{ margin: "0 0 20px", color: "#64748b", fontSize: 14 }}>Du har ulagrede endringer i denne fanen.</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button className="btn" onClick={() => setPendingTabChange(null)}>Avbryt</button>
+            <button className="btn danger" onClick={discardPendingAndSwitch}>Nei</button>
+            <button className="btn active" onClick={confirmPendingSaveAndSwitch}>Ja</button>
+          </div>
+        </div>
+      </div>
+    )}
   </main>
 );
 }
@@ -2639,7 +2852,7 @@ function defaultRetailMargin(category: string) {
   </section>;
 }
 
-function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean }) {
+function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens, readOnly, isDirty, onDirtyChange, registerSave }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; isDirty: boolean; onDirtyChange: (dirty: boolean) => void; registerSave: (fn: (() => boolean) | null) => void }) {
   const [selectedId, setSelectedId] = useState(data.recipes[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
   const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit });
@@ -2653,6 +2866,8 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newStep, setNewStep] = useState<{ action: string; inputs: RecipeStepInput[] }>({ action: "", inputs: [] });
   const [showSteps, setShowSteps] = useState(false);
+
+  const { markClean } = useFormDirtyTracking(mode !== "view", onDirtyChange, [form, draftLines, draftSteps]);
 
   const selected = data.recipes.find((r) => r.id === selectedId);
   const activeRecipe: Recipe | undefined = mode === "view" ? selected : {
@@ -2681,6 +2896,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
     setLineSearch("");
     setNewStep({ action: "", inputs: [] });
+    markClean();
   }
 
   function editRecipe(r: Recipe) {
@@ -2692,6 +2908,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
     setLineSearch("");
     setNewStep({ action: "", inputs: [] });
+    markClean();
   }
 
   function cancelEdit() {
@@ -2699,10 +2916,16 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setDraftLines([]);
     setDraftSteps([]);
     setLineSearch("");
+    markClean();
   }
 
-  function saveRecipe() {
-    if (!form.name.trim()) return alert("Legg inn navn på grunnoppskrift.");
+  useEffect(() => {
+    registerSave(() => saveRecipe());
+    return () => registerSave(null);
+  });
+
+  function saveRecipe(): boolean {
+    if (!form.name.trim()) { alert("Legg inn navn på grunnoppskrift."); return false; }
     const recipe: Recipe = {
       id: mode === "edit" && selected ? selected.id : `${idFromName(form.name)}-${Date.now()}`,
       productNumber: form.productNumber,
@@ -2718,6 +2941,8 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
     setMode("view");
     setDraftLines([]);
     setDraftSteps([]);
+    markClean();
+    return true;
   }
 
   function lineItemName(itemType: RecipeLine["itemType"], itemId: string) {
@@ -3197,7 +3422,7 @@ function hashCode(str: string) {
   return hash;
 }
 
-function ProductsTab({ data, updateData, updateListRpc, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number; readOnly: boolean }) {
+function ProductsTab({ data, updateData, updateListRpc, recipeUnitCost, productCost, productUnitCost, productAllergens, recommendedPriceIncVat, readOnly, isDirty, onDirtyChange, registerSave }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeUnitCost: (r: Recipe) => number; productCost: (p: Product) => number; productUnitCost: (p: Product) => number; productAllergens: (p: Product) => string[]; recommendedPriceIncVat: (cost: number, margin: number) => number; readOnly: boolean; isDirty: boolean; onDirtyChange: (dirty: boolean) => void; registerSave: (fn: (() => boolean) | null) => void }) {
   const [selectedId, setSelectedId] = useState(data.products[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
 const [form, setForm] = useState({
@@ -3255,6 +3480,8 @@ const [lineSearch, setLineSearch] = useState("");
   const [listName, setListName] = useState("Ny produktliste");
   const [listIntroText, setListIntroText] = useState("");
   const [listSelectedIds, setListSelectedIds] = useState<string[]>([]);
+
+  const { markClean } = useFormDirtyTracking(mode !== "view", onDirtyChange, [form, draftLines, draftPackaging, draftMenuCourses]);
 
   const pageSize = 20;
   const selected = data.products.find((p) => p.id === selectedId);
@@ -3336,6 +3563,7 @@ setDraftLines([]);
     setDraftMenuCourses([]);
     setLine({ itemType: "material", itemId: "", amount: "0", unit: "kg", wastePercent: "", groupLabel: "" });
     setLineSearch("");
+    markClean();
   }
 
   function blankFor(type: ProductType) {
@@ -3407,13 +3635,18 @@ setForm((f) => {
     setShowPriceEditor(false);
   }
 
-  function saveProduct() {
-    if (!form.name.trim()) return alert("Legg inn produktnavn.");
+  useEffect(() => {
+    registerSave(() => saveProduct());
+    return () => registerSave(null);
+  });
+
+  function saveProduct(): boolean {
+    if (!form.name.trim()) { alert("Legg inn produktnavn."); return false; }
     const product: Product = {
       ...draftProduct,
       id: mode === "edit" && selected ? selected.id : `${idFromName(form.name)}-${Date.now()}`,
       name: form.name.trim(),
-      
+
     };
 const exists =
   product.productNumber?.trim() &&
@@ -3424,7 +3657,8 @@ const exists =
   );
 
 if (exists) {
-  return alert("Produktnummer finnes allerede!");
+  alert("Produktnummer finnes allerede!");
+  return false;
 }
 
     updateListRpc("products", { [product.id]: product });
@@ -3444,6 +3678,8 @@ if (exists) {
 
     setSelectedId(product.id);
     setMode("view");
+    markClean();
+    return true;
   }
 
   function editProduct(p: Product) {
@@ -3470,6 +3706,7 @@ unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
     setDraftMenuCourses((p.menuCourses || []).map((c) => ({ ...c, options: c.options.map((o) => ({ ...o })) })));
     setSelectedId(p.id);
     setMode("edit");
+    markClean();
   }
 
   function categoryPrefix(category: string) {
@@ -4230,7 +4467,7 @@ th{background:#f3f4f6}
           <h1>{mode === "edit" ? "Rediger produkt" : "Nytt produkt"}</h1>
           <div>
             <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={saveProduct}>{mode === "edit" ? "Lagre endringer" : "Lagre produkt"}</button>
-            <button className="btn" onClick={() => setMode("view")}>Avbryt</button>
+            <button className="btn" onClick={() => { markClean(); setMode("view"); }}>Avbryt</button>
           </div>
         </div>
 
@@ -5337,7 +5574,7 @@ function scaledRecipeHtmlForOrder(data: AppData, product: Product, quantity: num
   return html;
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, setEventCalculationToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, setEventCalculationToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin, isDirty, onDirtyChange, registerSave }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "customerDirectory", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -5353,6 +5590,9 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   readOnly: boolean;
   userEmail: string;
   isSuperadmin: boolean;
+  isDirty: boolean;
+  onDirtyChange: (dirty: boolean) => void;
+  registerSave: (fn: (() => boolean) | null) => void;
 }) {
   const emptyOrder = (): Order => ({
     id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
@@ -5374,6 +5614,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   const [addProductSearch, setAddProductSearch] = useState("");
   const [menuSelectionDraft, setMenuSelectionDraft] = useState<Record<string, { productId: string; guestCount: number }[]>>({});
   const [showNewOrder, setShowNewOrder] = useState(false);
+  const { markClean } = useFormDirtyTracking(showNewOrder, onDirtyChange, [form]);
   const [showWebshopImport, setShowWebshopImport] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [webshopRawText, setWebshopRawText] = useState("");
@@ -5567,18 +5808,27 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     setForm({ ...form, orderLines: form.orderLines.filter((_, i) => i !== index) });
   }
 
+  // Auto-vedlegg: alle dokumentbank-oppføringer koblet til dette produktet
+  // legges automatisk til attachmentIds (unngår duplikater) - flere
+  // dokumenter kan være koblet til samme produkt, så ALLE tas med.
+  function attachmentIdsWithAutoAdd(currentIds: string[] | undefined, productId: string): string[] {
+    const matching = (data.documentBank || []).filter((d) => (d.linkedProductIds || []).includes(productId)).map((d) => d.id);
+    return [...new Set([...(currentIds || []), ...matching])];
+  }
+
   function addOrderLine() {
     if (!lineToAdd.productId) return;
     const selectedProduct = data.products.find((p) => p.id === lineToAdd.productId);
+    const attachmentIds = attachmentIdsWithAutoAdd(form.attachmentIds, lineToAdd.productId);
     if (selectedProduct?.type === "selskapsmeny" && (selectedProduct.menuCourses || []).length > 0) {
       const menuSelections: MenuCourseSelection[] = (selectedProduct.menuCourses || []).flatMap((course) =>
         (menuSelectionDraft[course.id] || [])
           .filter((row) => row.productId && row.guestCount > 0)
           .map((row) => ({ courseId: course.id, productId: row.productId, guestCount: Number(row.guestCount) }))
       );
-      setForm({ ...form, orderLines: [...form.orderLines, { ...lineToAdd, menuSelections }] });
+      setForm({ ...form, orderLines: [...form.orderLines, { ...lineToAdd, menuSelections }], attachmentIds });
     } else {
-      setForm({ ...form, orderLines: [...form.orderLines, lineToAdd] });
+      setForm({ ...form, orderLines: [...form.orderLines, lineToAdd], attachmentIds });
     }
     setLineToAdd({ productId: "", quantity: form.guests || 1 });
     setAddProductSearch("");
@@ -5608,11 +5858,16 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     return (menuSelectionDraft[courseId] || []).reduce((sum, row) => sum + (Number(row.guestCount) || 0), 0);
   }
 
-  function saveOrder() {
+  useEffect(() => {
+    registerSave(() => saveOrder());
+    return () => registerSave(null);
+  });
+
+  function saveOrder(): boolean {
     const cleanLines = form.orderLines.filter((l) => l.productId && Number(l.quantity) > 0);
-    if (!form.customer.trim() && form.customerType === "privat") return alert("Legg inn kundenavn.");
-    if (!form.companyName?.trim() && form.customerType === "bedrift") return alert("Legg inn bedriftsnavn.");
-    if (!cleanLines.length) return alert("Legg inn minst ett produkt/meny i ordren.");
+    if (!form.customer.trim() && form.customerType === "privat") { alert("Legg inn kundenavn."); return false; }
+    if (!form.companyName?.trim() && form.customerType === "bedrift") { alert("Legg inn bedriftsnavn."); return false; }
+    if (!cleanLines.length) { alert("Legg inn minst ett produkt/meny i ordren."); return false; }
     // Fast transport: for NYE ordre av type storkjøkken, se om kundenavnet matcher
     // en registrert storkjøkkenkunde med fastTransportProductId satt (samme
     // navne-match-mønster som brukes andre steder for storkjøkken-priser på
@@ -5635,6 +5890,8 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     updateListRpc("orders", { [savedOrder.id]: savedOrder });
     upsertCustomerDirectoryEntry(savedOrder);
     setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false);
+    markClean();
+    return true;
   }
 
   // Kundebibliotek: bygges automatisk opp av hver ordre-lagring, ingen egen
@@ -5679,6 +5936,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     setShowNewOrder(true);
     setLineToAdd({ productId: "", quantity: order.guests || 1 });
     window.scrollTo({ top: 0, behavior: "smooth" });
+    markClean();
   }
 
   useEffect(() => {
@@ -5699,6 +5957,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     setEditingOrderId(null);
     setShowNewOrder(true);
     setLineToAdd({ productId: "", quantity: 1 });
+    markClean();
   }
 
   // Autofyll fra kundebiblioteket - kun ved opprettelse av NY ordre, og kun
@@ -6165,7 +6424,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
                   Print
                 </button>
               )}
-              <button className="btn" onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); }}>Avbryt</button>
+              <button className="btn" onClick={() => { setForm(emptyOrder()); setEditingOrderId(null); setShowNewOrder(false); markClean(); }}>Avbryt</button>
               <button
                 className="btn active"
                 style={{ background: "#16a34a", borderColor: "#16a34a", color: "white" }}
@@ -6447,6 +6706,40 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
               </div>
             </div>
           )}
+
+          <div className="soft-box" style={{ marginTop: 12 }}>
+            <h3>Vedlegg</h3>
+            <p className="muted" style={{ fontSize: 12 }}>Foreslås automatisk ut fra produktene i ordren (Dokumentbank i Innstillinger), og kan suppleres manuelt.</p>
+            {(form.attachmentIds || []).length > 0 && (
+              <div>
+                {(form.attachmentIds || []).map((docId) => {
+                  const doc = (data.documentBank || []).find((d) => d.id === docId);
+                  if (!doc) return null;
+                  return (
+                    <div key={docId} className="editable-row">
+                      <span>{doc.name} <small style={{ color: "#64748b" }}>({doc.fileName})</small></span>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button className="btn" onClick={() => openDocumentBankFile(doc.storagePath)}>Åpne</button>
+                        <button className="btn" onClick={() => openDocumentBankFile(doc.storagePath)}>Print</button>
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setForm({ ...form, attachmentIds: (form.attachmentIds || []).filter((id) => id !== docId) })}>Fjern</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ marginTop: 8 }}>
+              <SearchMultiSelect
+                items={(data.documentBank || []).map((d) => ({ id: d.id, label: d.name, sublabel: d.fileName }))}
+                selectedIds={form.attachmentIds || []}
+                onAdd={(docId) => setForm({ ...form, attachmentIds: [...new Set([...(form.attachmentIds || []), docId])] })}
+                onRemove={(docId) => setForm({ ...form, attachmentIds: (form.attachmentIds || []).filter((id) => id !== docId) })}
+                placeholder="+ Legg til vedlegg..."
+                readOnly={readOnly}
+              />
+            </div>
+          </div>
+
           <h3>Allergier i ordren</h3>
           <div className="chips">
             {defaultAllergens.map((a) => {
@@ -11153,6 +11446,14 @@ Følgende vilkår gjelder ved leie av lokaler på Bodøgaard:
     if (rental.id === offer.id) setRental(updated);
   }
 
+  // Auto-vedlegg: alle dokumentbank-oppføringer koblet til dette produktet
+  // legges automatisk til attachmentIds (unngår duplikater) - flere
+  // dokumenter kan være koblet til samme produkt, så ALLE tas med.
+  function attachmentIdsWithAutoAdd(currentIds: string[] | undefined, productId: string): string[] {
+    const matching = (data.documentBank || []).filter((d) => (d.linkedProductIds || []).includes(productId)).map((d) => d.id);
+    return [...new Set([...(currentIds || []), ...matching])];
+  }
+
   function toggleConfirmed(offer: RentalOffer) {
     const linkedOrderId = `rental-order-${offer.id}`;
     const linkedOrder = (data.orders || []).find((o) => o.id === linkedOrderId);
@@ -13088,7 +13389,7 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                       {filteredProducts.length === 0 && <p style={{ padding: 10, color: "#64748b" }}>Ingen treff</p>}
                       {filteredProducts.map((p) => (
                         <button key={p.id} style={{ width: "100%", textAlign: "left", padding: "8px 12px", border: 0, borderBottom: "1px solid #f1f5f9", background: "white", cursor: "pointer" }}
-                          onClick={() => { setRental({ ...rental, productLines: [...rental.productLines, { productId: p.id, guests: 1 }] }); setProductSearch(""); }}>
+                          onClick={() => { setRental({ ...rental, productLines: [...rental.productLines, { productId: p.id, guests: 1 }], attachmentIds: attachmentIdsWithAutoAdd(rental.attachmentIds, p.id) }); setProductSearch(""); }}>
                           <b>{p.name}</b> <span style={{ color: "#64748b", fontSize: 13 }}>· {currency(p.customerPrice)}/pers</span>
                         </button>
                       ))}
@@ -13360,6 +13661,39 @@ body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:0}
                     </div>
                   </div>
                 )}
+
+                <div className="soft-box" style={{ marginTop: 16 }}>
+                  <h3>Vedlegg</h3>
+                  <p className="muted" style={{ fontSize: 12 }}>Foreslås automatisk ut fra produktene i tilbudet (Dokumentbank i Innstillinger), og kan suppleres manuelt.</p>
+                  {(rental.attachmentIds || []).length > 0 && (
+                    <div>
+                      {(rental.attachmentIds || []).map((docId) => {
+                        const doc = (data.documentBank || []).find((d) => d.id === docId);
+                        if (!doc) return null;
+                        return (
+                          <div key={docId} className="editable-row">
+                            <span>{doc.name} <small style={{ color: "#64748b" }}>({doc.fileName})</small></span>
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button className="btn" onClick={() => openDocumentBankFile(doc.storagePath)}>Åpne</button>
+                              <button className="btn" onClick={() => openDocumentBankFile(doc.storagePath)}>Print</button>
+                              <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => setRental({ ...rental, attachmentIds: (rental.attachmentIds || []).filter((id) => id !== docId) })}>Fjern</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8 }}>
+                    <SearchMultiSelect
+                      items={(data.documentBank || []).map((d) => ({ id: d.id, label: d.name, sublabel: d.fileName }))}
+                      selectedIds={rental.attachmentIds || []}
+                      onAdd={(docId) => setRental({ ...rental, attachmentIds: [...new Set([...(rental.attachmentIds || []), docId])] })}
+                      onRemove={(docId) => setRental({ ...rental, attachmentIds: (rental.attachmentIds || []).filter((id) => id !== docId) })}
+                      placeholder="+ Legg til vedlegg..."
+                      readOnly={readOnly}
+                    />
+                  </div>
+                </div>
 
                 {(() => {
                   const checklistRows = packingChecklistRows();
@@ -16412,6 +16746,7 @@ const SettingsTab = React.memo(function SettingsTab({
   importData,
   setTab,
   readOnly,
+  userEmail,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -16419,6 +16754,7 @@ const SettingsTab = React.memo(function SettingsTab({
   importData: (file: File | null) => void;
   setTab: (t: Tab) => void;
   readOnly: boolean;
+  userEmail: string;
 }) {
   const [open, setOpen] = useState("personell");
   const [newMaterialCategory, setNewMaterialCategory] = useState("");
@@ -16435,6 +16771,10 @@ const [expandedAddonId, setExpandedAddonId] = useState<string | null>(null);
 const [addonPackingForm, setAddonPackingForm] = useState({ name: "", unit: "stk", qty: "1" });
 const [newNotifyEmail, setNewNotifyEmail] = useState("");
 const [newPackingListTemplateName, setNewPackingListTemplateName] = useState("");
+const [docUploadFile, setDocUploadFile] = useState<File | null>(null);
+const [docUploadName, setDocUploadName] = useState("");
+const [docUploading, setDocUploading] = useState(false);
+const [docSearch, setDocSearch] = useState("");
 const [expandedPackingTemplateId, setExpandedPackingTemplateId] = useState<string | null>(null);
 const [newPackingTemplateItemLabel, setNewPackingTemplateItemLabel] = useState("");
 
@@ -16465,6 +16805,52 @@ function removeAddonPackingItem(addonId: string, itemId: string) {
   const next = localRentalAddons.map((a) => a.id === addonId ? { ...a, packingItems: (a.packingItems || []).filter((p) => p.id !== itemId) } : a);
   setLocalRentalAddons(next);
   updateData({ rentalAddons: next });
+}
+
+async function uploadDocumentBankFile() {
+  if (!docUploadFile) return;
+  const name = docUploadName.trim() || docUploadFile.name;
+  setDocUploading(true);
+  try {
+    const path = `${Date.now()}-${docUploadFile.name}`;
+    const { error } = await supabase.storage.from("documents").upload(path, docUploadFile);
+    if (error) { alert(`Opplasting feilet: ${error.message}`); return; }
+    const entry: DocumentBankEntry = {
+      id: `doc-${Date.now()}`,
+      name,
+      fileName: docUploadFile.name,
+      storagePath: path,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: userEmail,
+      linkedProductIds: [],
+    };
+    updateData({ documentBank: [entry, ...(data.documentBank || [])] });
+    setDocUploadFile(null);
+    setDocUploadName("");
+  } finally {
+    setDocUploading(false);
+  }
+}
+
+async function deleteDocumentBankEntry(entry: DocumentBankEntry) {
+  if (!confirm(`Slette dokumentet "${entry.name}"? Dette kan ikke angres.`)) return;
+  const { error } = await supabase.storage.from("documents").remove([entry.storagePath]);
+  if (error) { alert(`Kunne ikke slette filen: ${error.message}`); return; }
+  updateData({ documentBank: (data.documentBank || []).filter((d) => d.id !== entry.id) });
+}
+
+function linkDocumentToProduct(entryId: string, productId: string) {
+  const next = (data.documentBank || []).map((d) => d.id === entryId
+    ? { ...d, linkedProductIds: [...new Set([...(d.linkedProductIds || []), productId])] }
+    : d);
+  updateData({ documentBank: next });
+}
+
+function unlinkDocumentFromProduct(entryId: string, productId: string) {
+  const next = (data.documentBank || []).map((d) => d.id === entryId
+    ? { ...d, linkedProductIds: (d.linkedProductIds || []).filter((id) => id !== productId) }
+    : d);
+  updateData({ documentBank: next });
 }
 
 function addPackingListTemplate() {
@@ -16836,6 +17222,73 @@ function removeBarTemplateItem(templateId: string, itemId: string) {
         <div className="form-grid two">
           <input placeholder="Ny mal (f.eks. Standard bar)" value={newBarTemplateName} onChange={(e) => setNewBarTemplateName(e.target.value)} disabled={readOnly} />
           <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addBarTemplate}>+ Ny mal</button>
+        </div>
+      </Section>
+
+      <Section id="documentBank" title="Dokumentbank">
+        <p className="muted" style={{ fontSize: 12 }}>
+          PDF-er (menyer, fremgangsmåter osv.) som kan kobles til produkter for automatisk forslag som vedlegg på ordre/utleie, og legges til manuelt derfra.
+        </p>
+        <div className="form-grid three">
+          <input
+            type="file"
+            accept="application/pdf"
+            disabled={readOnly || docUploading}
+            onChange={(e) => {
+              const file = e.target.files?.[0] || null;
+              setDocUploadFile(file);
+              if (file && !docUploadName.trim()) setDocUploadName(file.name.replace(/\.pdf$/i, ""));
+            }}
+          />
+          <input
+            placeholder="Visningsnavn, f.eks. Meny med pris"
+            value={docUploadName}
+            disabled={readOnly || docUploading}
+            onChange={(e) => setDocUploadName(e.target.value)}
+          />
+          <button className="btn active" disabled={readOnly || docUploading || !docUploadFile} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={uploadDocumentBankFile}>
+            {docUploading ? "Laster opp…" : "Last opp"}
+          </button>
+        </div>
+
+        <input
+          style={{ marginTop: 12, maxWidth: 320 }}
+          placeholder="Søk i dokumentbank..."
+          value={docSearch}
+          onChange={(e) => setDocSearch(e.target.value)}
+        />
+
+        <div style={{ marginTop: 12 }}>
+          {(data.documentBank || [])
+            .filter((d) => docSearch === "" || `${d.name} ${d.fileName}`.toLowerCase().includes(docSearch.toLowerCase()))
+            .map((entry) => (
+              <div key={entry.id} className="soft-box" style={{ marginBottom: 10 }}>
+                <div className="between">
+                  <div>
+                    <b>{entry.name}</b>
+                    <br />
+                    <small style={{ color: "#64748b" }}>{entry.fileName} · lastet opp {formatDateNo(entry.uploadedAt.slice(0, 10))}{entry.uploadedBy ? ` av ${entry.uploadedBy}` : ""}</small>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" onClick={() => openDocumentBankFile(entry.storagePath)}>Åpne</button>
+                    <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteDocumentBankEntry(entry)}>Slett</button>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <small style={{ color: "#64748b" }}>Koblet til produkter (auto-vedlegg når produktet legges til en ordre/utleie):</small>
+                  <SearchMultiSelect
+                    items={data.products.map((p) => ({ id: p.id, label: p.name, sublabel: p.category }))}
+                    selectedIds={entry.linkedProductIds || []}
+                    onAdd={(productId) => linkDocumentToProduct(entry.id, productId)}
+                    onRemove={(productId) => unlinkDocumentFromProduct(entry.id, productId)}
+                    placeholder="Søk og koble til produkt..."
+                    readOnly={readOnly}
+                    emptyLabel="Ingen produkter koblet ennå."
+                  />
+                </div>
+              </div>
+            ))}
+          {(data.documentBank || []).length === 0 && <p className="muted" style={{ fontSize: 13 }}>Ingen dokumenter lastet opp ennå.</p>}
         </div>
       </Section>
 
