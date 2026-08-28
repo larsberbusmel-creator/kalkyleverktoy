@@ -1746,10 +1746,16 @@ if (line.itemType === "material") {
       return sum + recipeUnitCost(r) * adjustedAmount;
     }
 
-    const p = data.products.find((x) => x.id === line.itemId);
+        const p = data.products.find((x) => x.id === line.itemId);
     if (!p) return sum;
 
-return sum + productKgCost(p, [...visited, product.id]) * adjustedAmount;
+// Når linjens enhet er "stk" (et helt antall av underproduktet, f.eks. "1 stk
+// Bolleemne"), skal PRIS PER STK brukes - ikke pris per kg ganget med
+// "1" som om det var kg. Kg/liter-linjer (f.eks. "0,3 kg deig") bruker
+// fortsatt pris per kg som før - samme prinsipp som lineCost() allerede
+// bruker riktig for selve visningen i tabellen.
+const subCostPerUnit = line.unit === "stk" ? productUnitCost(p, [...visited, product.id]) : productKgCost(p, [...visited, product.id]);
+return sum + subCostPerUnit * adjustedAmount;
   }, 0);
 
   const packagingCost = product.packaging.reduce((sum, p) => {
