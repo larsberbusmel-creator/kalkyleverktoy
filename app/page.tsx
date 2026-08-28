@@ -5548,7 +5548,11 @@ function expandProductForProduction(data: AppData, product: Product, multiplier:
   // den valgte retten) merkes med produksjonskategorien til PRODUKTET dette
   // kallet gjelder - slik arver f.eks. ingrediens-/råvarelinjene til et
   // brød-produkt (ved forceExpandBakery) "Brød"-kategorien til selve brødet.
-  const rowCategory = product.productionCategory || guessProductionCategory(product.category);
+  // Bruker SAMME kategori-tildeling som "Dagens produksjon" allerede aktivt
+  // vedlikeholder (bakeryProductionTemplateLines), ikke et separat felt på
+  // selve produktet - dette er den ekte, allerede etablerte sannhetskilden.
+  const templateLine = (data.bakeryProductionTemplateLines || []).find((l) => l.productId === product.id);
+  const rowCategory = templateLine?.category;
 
   // Bakeri-produkter (Søtbakst, Bakeri-egenprodusert) skal som hovedregel kun vises
   // som navn i catering/selskapsmeny-produksjon, ikke brettes ut til ingrediensnivå
