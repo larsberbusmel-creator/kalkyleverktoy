@@ -2388,7 +2388,7 @@ function CalendarDashboard({
 const hasRental = orders.some((o) => isRentalOrder(o));
 const dayBackground = isToday ? "#dcfce7" : holidayName || isSunday ? "#fee2e2" : hasRental ? "#fef9c3" : isPast ? "#f5efe3" : inMonth ? "white" : "#f1f5f9";                  return (
                     <button key={date} onClick={() => handleDayClick(date)}
-                      style={{ minHeight: 110, textAlign: "left", padding: 10, borderRadius: 14, border: isToday ? "2px solid #166534" : unseenWebshop ? "2px solid #f59e0b" : holidayName ? "2px solid #dc2626" : "1px solid #dbe4ef", background: dayBackground, opacity: inMonth ? 1 : 0.55, cursor: "pointer", position: "relative" }}>
+                      style={{ height: 150, overflow: "hidden", textAlign: "left", padding: 10, borderRadius: 14, border: isToday ? "2px solid #166534" : unseenWebshop ? "2px solid #f59e0b" : holidayName ? "2px solid #dc2626" : "1px solid #dbe4ef", background: dayBackground, opacity: inMonth ? 1 : 0.55, cursor: "pointer", position: "relative" }}>
                       <b>{Number(date.slice(8, 10))}</b>
                       {unseenWebshop && <div style={{ position: "absolute", top: 8, right: 8, background: "#f59e0b", color: "white", borderRadius: "999px", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 }}>🔔</div>}
                       {holidayName && <div style={{ marginTop: 4, fontSize: 11, color: "#991b1b", fontWeight: 800 }}>{holidayName}</div>}
@@ -8196,6 +8196,16 @@ function ProductionTab({
   const activeRows = dayRows.filter((r) => r.quantity > 0);
   const totalUnits = activeRows.reduce((sum, row) => sum + row.quantity, 0);
 
+  function rowsForDate(date: string) {
+    const day: BakeryProductionDay = productionDays[date] || { date, approved: false, quantities: recurringQuantitiesForDate(date) };
+    return templateLines.map((line) => {
+      const product = data.products.find((p) => p.id === line.productId);
+      if (!product) return null;
+      const quantity = totalForProduct(product.id, day);
+      return { line, product, quantity, kg: kgForProduct(product, quantity) };
+    }).filter(Boolean) as { line: BakeryProductionTemplateLine; product: Product; quantity: number; kg: number }[];
+  }
+
   function addTemplateLine() {
     if (!newTemplateProductId) return alert("Velg et produkt først.");
     const exists = (data.bakeryProductionTemplateLines || []).some((line) => line.productId === newTemplateProductId);
@@ -8892,7 +8902,7 @@ ${orderPages}`;
 
   printWindow(`Catering ${formatDateNo(order.date)} – ${customerName}`, body);
 }
-function collectProductionMaterials(): Record<string, { name: string; category: string; amount: number; unit: string }> {
+function collectProductionMaterials(rows: { product: Product; quantity: number }[] = activeRows): Record<string, { name: string; category: string; amount: number; unit: string }> {
   const acc: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
   function addMaterial(id: string, amount: number, fallbackUnit: string) {
     const m = data.materials.find((x) => x.id === id);
@@ -8926,7 +8936,7 @@ function collectProductionMaterials(): Record<string, { name: string; category: 
       }
     });
   }
-  activeRows.forEach((row) => expandProduct(row.product, row.quantity, []));
+  rows.forEach((row) => expandProduct(row.product, row.quantity, []));
   return acc;
 }
 
@@ -9302,6 +9312,41 @@ ${orderPages}`;
     }
   }
 
+  function isoWeekNumberForDate(date: string) {
+    const d = new Date(`${date}T12:00:00`);
+    const utcDate = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = utcDate.getUTCDay() || 7;
+    utcDate.setUTCDate(utcDate.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+    return Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  }
+
+  // Summerer collectProductionMaterials() (samme funksjon som "Print produksjon"
+  // allerede bruker for én dag) over alle 7 dagene i uken activeDate tilhører -
+  // samme uke-beregning (startOfWeek + addDays) som "Kopiér denne uken"-knappen.
+  function printWeeklyShoppingList() {
+    const monday = startOfWeek(activeDate);
+    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+    const combined: Record<string, { name: string; category: string; amount: number; unit: string }> = {};
+    weekDates.forEach((date) => {
+      const rows = rowsForDate(date).filter((r) => r.quantity > 0);
+      const materials = collectProductionMaterials(rows);
+      Object.entries(materials).forEach(([id, m]) => {
+        if (!combined[id]) combined[id] = { ...m, amount: 0 };
+        combined[id].amount += m.amount;
+      });
+    });
+    const shoppingCheckbox = `<span style="display:inline-block;width:9px;height:9px;border:1px solid #334155;border-radius:2px"></span>`;
+    const sortedMaterials = Object.values(combined).sort((a, b) => a.name.localeCompare(b.name, "no-NO"));
+    const rows = sortedMaterials
+      .map((e) => `<tr><td style="width:14px">${shoppingCheckbox}</td><td>${escapeHtml(e.name)}</td><td class="right">${formatAmountUnit(e.amount, e.unit, 3)}</td></tr>`)
+      .join("");
+    const sunday = addDays(monday, 6);
+    const weekNo = isoWeekNumberForDate(monday);
+    const body = `<div class="page"><div class="top"><div><h1>Varebestilling – uke ${weekNo}, ${formatDateNo(monday)} til ${formatDateNo(sunday)}</h1></div></div><table><thead><tr><th></th><th>Råvare</th><th class="right">Total mengde</th></tr></thead><tbody>${rows || '<tr><td colspan="3">Ingen råvarer å bestille denne uken.</td></tr>'}</tbody></table></div>`;
+    printWindow(`Varebestilling uke ${weekNo}`, body);
+  }
+
   function saveCurrentDayAsTemplate() {
     const name = window.prompt("Navn på malen:");
     if (!name || !name.trim()) return;
@@ -9645,7 +9690,10 @@ ${orderPages}`;
                 <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={copyProductionWeekToNext}>Kopiér denne uken → neste uke</button>
                 <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={copyProductionWeekFromPrevious}>← Hent forrige uke inn her</button>
               </div>
-              <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn active" onClick={printProductionDay}>Print produksjon</button>
+                <button className="btn active" onClick={printWeeklyShoppingList}>🛒 Print bestilling hel uke</button>
+              </div>
             </div>
           </div>
 
