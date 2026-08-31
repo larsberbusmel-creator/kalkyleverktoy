@@ -7958,7 +7958,8 @@ function ProductionTab({
     const [pickupProductSearch, setPickupProductSearch] = useState("");
   const [pickupProductId, setPickupProductId] = useState("");
   const [pickupQty, setPickupQty] = useState("1");
-  const [pickupPanelCustomerId, setPickupPanelCustomerId] = useState("");
+    const [pickupPanelCustomerId, setPickupPanelCustomerId] = useState("");
+  const [pickupPanelDate, setPickupPanelDate] = useState(today());
   const [statsMode, setStatsMode] = useState<"week" | "month" | "year">("month");
   const [statsAnchor, setStatsAnchor] = useState(today());
   const [statsCustomerId, setStatsCustomerId] = useState<string | null>(null);
@@ -8237,9 +8238,9 @@ function ProductionTab({
     updateData({ storkjokkenCustomers: list });
   }
 
-  function addPickupOrder(customerId: string, productId: string, quantity: number) {
+    function addPickupOrder(customerId: string, productId: string, quantity: number, selectedDate?: string) {
     if (!productId || !quantity) return;
-    const date = today();
+    const date = selectedDate || today();
     const entry: StorkjokkenPickupOrder = { id: `pickup-${Date.now()}`, customerId, productId, quantity, date, createdAt: new Date().toISOString(), priceExVat: priceForCustomer(productId, customerId) };
     const newEntries: StorkjokkenPickupOrder[] = [entry];
 
@@ -10533,9 +10534,14 @@ ${orderPages}`;
                 {activeCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            {selectedCustomer && (
+                        {selectedCustomer && (
               <div className="soft-box">
                 <h4 style={{ marginTop: 0 }}>Registrer henteordre – {selectedCustomer.name}</h4>
+                <div style={{ maxWidth: 200, marginBottom: 10 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600 }}>Dato for henteordre
+                    <input type="date" value={pickupPanelDate} onChange={(e) => setPickupPanelDate(e.target.value)} />
+                  </label>
+                </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <div className="search-picker" style={{ maxWidth: 320, position: "relative" }}>
                     <input
@@ -10559,7 +10565,7 @@ ${orderPages}`;
                     className="btn active"
                     disabled={readOnly}
                     title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                    onClick={() => { if (pickupProductId && Number(pickupQty) > 0) { addPickupOrder(selectedCustomer.id, pickupProductId, Number(pickupQty)); setPickupProductId(""); setPickupQty("1"); } }}
+                    onClick={() => { if (pickupProductId && Number(pickupQty) > 0) { addPickupOrder(selectedCustomer.id, pickupProductId, Number(pickupQty), pickupPanelDate); setPickupProductId(""); setPickupQty("1"); } }}
                   >
                     Lagre henteordre
                   </button>
