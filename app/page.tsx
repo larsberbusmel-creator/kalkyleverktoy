@@ -2443,7 +2443,7 @@ const bg = isToday ? "#dcfce7"
 
               {setWantsOpenStorkjokkenCustomers && (
                 <div className="soft-box">
-                  <h3>Henteordre</h3>
+                  <h3>Henteordre Storkjøkken</h3>
                   <button className="btn active" onClick={() => { setWantsOpenStorkjokkenCustomers(true); setTab("production"); }}>
                     🛍️ Gå til Storkjøkkenkunder
                   </button>
@@ -7718,11 +7718,10 @@ function ProductionTab({
   // DEL A: Henteordre-snarveier (dashbord/produksjon) - naviger hit og åpne
   // Kunder-listen, klar til å velge riktig kunde. Hopper ALDRI til et
   // ferdig utfylt henteordre-skjema for en bestemt kunde.
-  useEffect(() => {
+    useEffect(() => {
     if (!pendingOpenStorkjokkenCustomers) return;
     setMainPanel("bakeri");
-    setPanel("customers");
-    setOpenBlock("list");
+    setPanel("pickup");
     clearPendingOpenStorkjokkenCustomers?.();
   }, [pendingOpenStorkjokkenCustomers]);
 
@@ -8905,7 +8904,7 @@ ${orderPages}`;
                 <button className="btn" onClick={() => setPanel("day")}>Dagens produksjon</button>
                 <button className="btn" onClick={() => setPanel("template")}>Produktmal</button>
                 <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
-                <button className={mainPanel === "bakeri" && panel === "pickup" ? "btn active" : "btn"} onClick={() => setPanel("pickup")}>🛍️ Henteordre</button>
+                <button className={mainPanel === "bakeri" && panel === "pickup" ? "btn active" : "btn"} onClick={() => setPanel("pickup")}>🛍️ Henteordre Storkjøkken</button>
                 <button className="btn" onClick={() => setPanel("recurring")}>Fastordre</button>
                 <button className="btn" onClick={() => setPanel("invoice")}>Fakturagrunnlag</button>
                 <button className="btn" onClick={() => setPanel("stats")}>Salgsstatistikk</button>
@@ -9074,7 +9073,7 @@ ${orderPages}`;
               )}
 
               <div className="section-toggle" onClick={() => setOpenBlock(openBlock === "pending" ? null : "pending")}>
-                <h3>Bestillinger til godkjenning</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Bestillinger til godkjenning</h3>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span className="section-toggle-count">{(data.pendingPortalOrders || []).filter((p) => p.status === "pending").length}</span>
                   {openBlock === "pending" ? "▲" : "▼"}
@@ -9116,7 +9115,7 @@ ${orderPages}`;
               ))}
 
               <div className="section-toggle" style={{ marginTop: 16 }} onClick={() => setOpenBlock(openBlock === "recurring" ? null : "recurring")}>
-                <h3>Fastordre-forespørsler</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Fastordre-forespørsler</h3>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span className="section-toggle-count">{(data.pendingRecurringOrderRequests || []).filter((r) => r.status === "pending").length}</span>
                   {openBlock === "recurring" ? "▲" : "▼"}
@@ -9156,7 +9155,7 @@ ${orderPages}`;
               ))}
 
               <div className="section-toggle" style={{ marginTop: 16 }} onClick={() => setOpenBlock(openBlock === "changeRequests" ? null : "changeRequests")}>
-                <h3>Endringsforespørsler (etter frist)</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Endringsforespørsler (etter frist)</h3>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span className="section-toggle-count">{(data.pendingOrderChangeRequests || []).filter((r) => r.status === "pending").length}</span>
                   {openBlock === "changeRequests" ? "▲" : "▼"}
@@ -9210,7 +9209,7 @@ ${orderPages}`;
               ))}
 
               <div className="soft-box" style={{ marginTop: 16 }}>
-                <h3>Ny kunde</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Ny kunde</h3>
                 <div className="form-grid five">
                   <input value={newCustomer.name} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} placeholder="Kundenavn" />
                   <input value={newCustomer.orgNumber} disabled={readOnly} onChange={(e) => setNewCustomer({ ...newCustomer, orgNumber: e.target.value })} placeholder="Org.nr" />
@@ -9849,7 +9848,7 @@ ${orderPages}`;
         return (
           <div className="card">
             <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12, marginBottom: 16 }}>
-              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Henteordre</h3>
+              <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Henteordre Storkjøkken</h3>
               <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Registrer et direkte uttak/salg til en storkjøkkenkunde, uten å gå via full ordre.</p>
             </div>
             <div className="search-picker" style={{ maxWidth: 360, marginBottom: 16 }}>
