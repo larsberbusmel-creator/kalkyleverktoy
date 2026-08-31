@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "reports" | "settings" | "rombibliotek" | "users" | "eventkalkyle";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "reports" | "settings" | "rombibliotek" | "users" | "eventkalkyle" | "priceAgreements";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert" | "selskapsmeny";
@@ -42,6 +42,9 @@ type Material = {
 breadScaleFlourPercent?: number;
   updatedAt?: string;
   priceUpdatedAt?: string;
+  supplierItemNumber?: string; // synkroniseres FRA koblet avtale når lenket - se linkMaterialToAgreement
+  supplierProductName?: string; // "Leverandørens råvarenavn" - KUN synkronisert visning, aldri manuelt redigerbar
+  lockedByAgreementId?: string; // peker til PriceAgreementEntry.id - satt/fjernet KUN via link/unlinkMaterialToAgreement
 };
 
 
@@ -369,6 +372,27 @@ type DocumentBankEntry = {
   linkedProductIds?: string[];
 };
 
+type PriceAgreementType = { id: string; name: string };
+
+// Avtalepriser: leverandøravtaler for råvarer, med valgfri TOVEIS kobling
+// mot en Material (1:1 - en råvare kan kun styres av én avtale om gangen,
+// og en avtale kan kun style én råvare om gangen). Selve koblingen er
+// alltid et eksplisitt brukervalg (søk+klikk), ALDRI automatisk basert på
+// matchende tekst/tall - se linkMaterialToAgreement/unlinkMaterialFromAgreement.
+type PriceAgreementEntry = {
+  id: string;
+  productName: string; // leverandørens navn på varen
+  materialId?: string; // peker til koblet Material
+  goodsGroup?: string;
+  supplier?: string;
+  itemNumber?: string; // leverandørens varenr PÅ AVTALEN
+  agreedPrice: number;
+  unit?: Unit;
+  agreementTypeId?: string;
+  note?: string;
+  updatedAt: string;
+};
+
 // itemType/refId peker til et Product eller Material - navn/pris hentes ALLTID
 // live derfra ved rendering (se barItemDisplay), aldri lagret på selve BarItem.
 // Eldre BarItem-oppføringer (fra før denne ombyggingen) manglet itemType/refId
@@ -668,6 +692,8 @@ type AppData = {
   documentBank: DocumentBankEntry[];
   pendingOrderChangeRequests: PendingOrderChangeRequest[];
   storkjokkenInvoiceOverrides: StorkjokkenInvoiceOverride[];
+  priceAgreements: PriceAgreementEntry[];
+  priceAgreementTypes: PriceAgreementType[];
 };
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
@@ -994,6 +1020,8 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   documentBank: [],
   pendingOrderChangeRequests: [],
   storkjokkenInvoiceOverrides: [],
+  priceAgreements: [],
+  priceAgreementTypes: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1146,6 +1174,8 @@ rentalOffers: (raw as any).rentalOffers || [],
     documentBank: (raw as any).documentBank || [],
     pendingOrderChangeRequests: (raw as any).pendingOrderChangeRequests || [],
     storkjokkenInvoiceOverrides: (raw as any).storkjokkenInvoiceOverrides || [],
+    priceAgreements: (raw as any).priceAgreements || [],
+    priceAgreementTypes: (raw as any).priceAgreementTypes || [],
   };
 }
 
@@ -1271,6 +1301,8 @@ export default function Page() {
   const [wantsOpenStorkjokkenCustomers, setWantsOpenStorkjokkenCustomers] = useState(false);
   const [wantsNewOrder, setWantsNewOrder] = useState(false);
   const [eventCalculationToOpen, setEventCalculationToOpen] = useState<string | null>(null);
+  const [materialToOpen, setMaterialToOpen] = useState<string | null>(null);
+  const [priceAgreementToOpen, setPriceAgreementToOpen] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(initialData);
   const isSavingRef = React.useRef(false);
 
@@ -1701,7 +1733,7 @@ export default function Page() {
     });
   }, []);
 
-  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries" | "customerDirectory" | "eventCalculations", itemsPatch: Record<string, any>) => {
+  const updateListRpc = React.useCallback((listKey: "products" | "recipes" | "orders" | "rentalOffers" | "barTallyEntries" | "customerDirectory" | "eventCalculations" | "priceAgreements", itemsPatch: Record<string, any>) => {
     setData((prev) => {
       const list = (prev as any)[listKey] as any[];
       const next = { ...prev } as any;
@@ -1723,6 +1755,77 @@ export default function Page() {
       return next;
     });
   }, []);
+
+  // Avtalepriser ↔ Råvarer: DELT koble-/synk-logikk, brukt fra BEGGE
+  // retninger (MaterialsTab og PriceAgreementsTab) for å unngå duplisert
+  // logikk. Selve koblingen (hvilke to poster hører sammen) er alltid et
+  // eksplisitt brukervalg gjort FØR disse kalles - ingen automatikk her.
+  function syncMaterialFromAgreement(agreement: PriceAgreementEntry, material: Material): Partial<Material> {
+    const patch: Partial<Material> = {
+      supplierProductName: agreement.productName,
+      supplierItemNumber: agreement.itemNumber,
+    };
+    const unitsMatch = !agreement.unit || agreement.unit === material.unit;
+    if (unitsMatch) {
+      patch.pricePerUnit = agreement.agreedPrice;
+      patch.lockedByAgreementId = agreement.id;
+    } else if (confirm(`Avtalen er i ${agreement.unit}, råvaren spores i ${material.unit} - fortsett likevel?`)) {
+      patch.pricePerUnit = agreement.agreedPrice;
+      patch.lockedByAgreementId = agreement.id;
+    }
+    return patch;
+  }
+
+  function linkMaterialToAgreement(materialId: string, agreementId: string) {
+    const material = data.materials.find((m) => m.id === materialId);
+    const agreement = data.priceAgreements.find((a) => a.id === agreementId);
+    if (!material || !agreement) return;
+
+    const agreementPatch: Record<string, any> = {};
+    const materialPatch: Record<string, any> = {};
+
+    // 1. Fjern evt. TIDLIGERE agreement koblet til denne materialId - en
+    // Material kan kun ha ÉN aktiv avtale om gangen.
+    const oldAgreementForMaterial = material.lockedByAgreementId && material.lockedByAgreementId !== agreementId
+      ? data.priceAgreements.find((a) => a.id === material.lockedByAgreementId)
+      : undefined;
+    if (oldAgreementForMaterial) agreementPatch[oldAgreementForMaterial.id] = { ...oldAgreementForMaterial, materialId: undefined };
+
+    // 2. Fjern evt. TIDLIGERE material koblet til DENNE agreementId - en
+    // avtale kan kun styre ÉN råvare om gangen.
+    const oldMaterialForAgreement = agreement.materialId && agreement.materialId !== materialId
+      ? data.materials.find((m) => m.id === agreement.materialId)
+      : undefined;
+    if (oldMaterialForAgreement) materialPatch[oldMaterialForAgreement.id] = { ...oldMaterialForAgreement, lockedByAgreementId: undefined, supplierProductName: undefined };
+
+    // 3 + 4: sett selve koblingen og kjør feltsynkroniseringen.
+    agreementPatch[agreement.id] = { ...agreement, materialId };
+    materialPatch[material.id] = { ...material, ...syncMaterialFromAgreement(agreement, material) };
+
+    updateListRpc("priceAgreements", agreementPatch);
+    updateMaterialsRpc(materialPatch);
+  }
+
+  function unlinkMaterialFromAgreement(agreementId: string) {
+    const agreement = data.priceAgreements.find((a) => a.id === agreementId);
+    if (!agreement) return;
+    if (agreement.materialId) {
+      const material = data.materials.find((m) => m.id === agreement.materialId);
+      // Behold supplierItemNumber/pricePerUnit på sin siste kjente verdi,
+      // men lås dem opp for redigering igjen.
+      if (material) updateMaterialsRpc({ [material.id]: { ...material, lockedByAgreementId: undefined, supplierProductName: undefined } });
+    }
+    updateListRpc("priceAgreements", { [agreement.id]: { ...agreement, materialId: undefined } });
+  }
+
+  // Kjøres på nytt hver gang en ALLEREDE koblet avtale redigeres (ikke bare
+  // ved selve koblingsøyeblikket) - se PriceAgreementsTab sin saveAgreement.
+  function resyncMaterialForAgreement(agreement: PriceAgreementEntry) {
+    if (!agreement.materialId) return;
+    const material = data.materials.find((m) => m.id === agreement.materialId);
+    if (!material) return;
+    updateMaterialsRpc({ [material.id]: { ...material, ...syncMaterialFromAgreement(agreement, material) } });
+  }
 
   function exportData() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
@@ -1889,6 +1992,7 @@ function productCost(product: Product, visited: string[] = []) {
   { key: "inventory",  label: "Varetelling",        icon: "📦", color: "#0891b2" },
   { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
   { key: "eventkalkyle", label: "Eventkalkyle",     icon: "🎪", color: "#c026d3" },
+  { key: "priceAgreements", label: "Avtalepriser",  icon: "🏷️", color: "#65a30d" },
   { key: "reports",    label: "Rapporter",          icon: "📊", color: "#0d9488" },
   { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
   { key: "users",      label: "Brukere",            icon: "🔑", color: "#9333ea" },
@@ -1971,7 +2075,7 @@ return (
       <div className="main-content">
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
         {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} setWantsOpenStorkjokkenCustomers={setWantsOpenStorkjokkenCustomers} />}
-        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} />}
+        {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} setTab={setTab} setPriceAgreementToOpen={setPriceAgreementToOpen} pendingMaterialId={materialToOpen} clearPendingMaterialId={() => setMaterialToOpen(null)} linkMaterialToAgreement={linkMaterialToAgreement} unlinkMaterialFromAgreement={unlinkMaterialFromAgreement} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} isDirty={dirtyTabs.has("recipes")} onDirtyChange={onDirtyChangeFor("recipes")} registerSave={registerSave} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} />}
@@ -1979,6 +2083,7 @@ return (
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
+        {tab === "priceAgreements" && <PriceAgreementsTab data={data} updateData={updateData} updateListRpc={updateListRpc} readOnly={!canEdit("priceAgreements")} setTab={setTab} setMaterialToOpen={setMaterialToOpen} pendingAgreementId={priceAgreementToOpen} clearPendingAgreementId={() => setPriceAgreementToOpen(null)} linkMaterialToAgreement={linkMaterialToAgreement} unlinkMaterialFromAgreement={unlinkMaterialFromAgreement} resyncMaterialForAgreement={resyncMaterialForAgreement} />}
         {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} userEmail={userEmail} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
@@ -2539,11 +2644,24 @@ const bg = isToday ? "#dcfce7"
   );
 }
 
-function MaterialsTab({ data, updateData, updateMaterialsRpc, updateListRpc, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateMaterialsRpc: (patch: Record<string, any>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; readOnly: boolean }) {
+function MaterialsTab({ data, updateData, updateMaterialsRpc, updateListRpc, readOnly, setTab, setPriceAgreementToOpen, pendingMaterialId, clearPendingMaterialId, linkMaterialToAgreement, unlinkMaterialFromAgreement }: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  updateMaterialsRpc: (patch: Record<string, any>) => void;
+  updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void;
+  readOnly: boolean;
+  setTab: (t: Tab) => void;
+  setPriceAgreementToOpen: (id: string | null) => void;
+  pendingMaterialId?: string | null;
+  clearPendingMaterialId?: () => void;
+  linkMaterialToAgreement: (materialId: string, agreementId: string) => void;
+  unlinkMaterialFromAgreement: (agreementId: string) => void;
+}) {
   const blank = {
     id: "",
     name: "",
     supplier: "",
+    supplierItemNumber: "",
     category: data.materialCategories[0] || "Mat",
     unit: "kg" as Unit,
     packageSize: "1",
@@ -2574,10 +2692,11 @@ breadScaleFlourPercent: "0",
   const [categoryFilter, setCategoryFilter] = useState("Alle");
   const [materialPage, setMaterialPage] = useState(1);
   const [showRecentMaterials, setShowRecentMaterials] = useState(false);
+  const [agreementSearch, setAgreementSearch] = useState("");
   const pageSize = 50;
 
   const filtered = data.materials
-    .filter((m) => `${m.name} ${m.category} ${m.supplier || ""}`.toLowerCase().includes(search.toLowerCase()))
+    .filter((m) => `${m.name} ${m.category} ${m.supplier || ""} ${m.supplierItemNumber || ""}`.toLowerCase().includes(search.toLowerCase()))
     .filter((m) => categoryFilter === "Alle" || m.category === categoryFilter)
     .sort((a, b) => `${a.category} ${a.name}`.localeCompare(`${b.category} ${b.name}`, "no-NO"));
 
@@ -2648,6 +2767,7 @@ breadScaleFlourPercent: "0",
       id: m.id,
       name: m.name,
       supplier: m.supplier || "",
+      supplierItemNumber: m.supplierItemNumber || "",
       category: m.category,
       unit: m.unit,
       packageSize: String(m.packageSize),
@@ -2673,6 +2793,18 @@ breadScaleFlourPercent: String(m.breadScaleFlourPercent || 0),
     setShowForm(true);
   }
 
+  // Toveis-navigasjon: hopp hit fra en avtale i Avtalepriser-fanen og åpne
+  // riktig råvare direkte i redigeringsskjemaet.
+  useEffect(() => {
+    if (!pendingMaterialId) return;
+    const material = data.materials.find((m) => m.id === pendingMaterialId);
+    if (material) {
+      edit(material);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    clearPendingMaterialId?.();
+  }, [pendingMaterialId]);
+
   function save() {
     if (!form.name.trim()) return;
     const id = editingId || `${idFromName(form.name)}-${Date.now()}`;
@@ -2682,8 +2814,12 @@ breadScaleFlourPercent: String(m.breadScaleFlourPercent || 0),
     const oldPrice = oldMaterial?.pricePerUnit || 0;
     const newPrice = packageSize ? packagePrice / packageSize : 0;
     const priceChanged = !oldMaterial || Math.abs(oldPrice - newPrice) > 0.0001;
+    // Prisen styres av en avtalepris (se linkMaterialToAgreement) - denne
+    // formen kan da aldri overskrive pricePerUnit/supplierItemNumber, uansett
+    // hva som (fortsatt) står i de deaktiverte feltene.
+    const isLocked = !!oldMaterial?.lockedByAgreementId;
 
-    const m = {
+    const m: Material = {
       ...makeMaterial(id, form.name, form.category, form.unit, packageSize, packagePrice, form.allergens.split(",").map(normalizeAllergen).filter(Boolean), Number(form.kcal) || 0, Number(form.protein) || 0, Number(form.carbs) || 0, Number(form.fat) || 0, Number(form.kj) || 0, Number(form.saturatedFat) || 0, Number(form.fiber) || 0, Number(form.sugars) || 0, Number(form.addedSugar) || 0, Number(form.salt) || 0, form.isWholegrain),
       retailPrice: Number(form.retailPrice) || undefined,
       isForResale: form.category === "Deli",
@@ -2703,6 +2839,10 @@ breadScaleFlourPercent:
   .filter(Boolean),
       updatedAt: new Date().toISOString(),
       priceUpdatedAt: priceChanged ? new Date().toISOString() : oldMaterial?.priceUpdatedAt,
+      supplierItemNumber: isLocked ? oldMaterial?.supplierItemNumber : (form.supplierItemNumber.trim() || undefined),
+      supplierProductName: oldMaterial?.supplierProductName,
+      lockedByAgreementId: oldMaterial?.lockedByAgreementId,
+      ...(isLocked ? { pricePerUnit: oldMaterial?.pricePerUnit } : {}),
     };
 
     const finalMaterial = withResaleProductNumber(m);
@@ -2735,6 +2875,10 @@ function defaultRetailMargin(category: string) {
   return data.settings.retailMargins?.[category] ?? 50;
 }
 
+  const editingMaterial = editingId ? data.materials.find((m) => m.id === editingId) : undefined;
+  const isLocked = !!editingMaterial?.lockedByAgreementId;
+  const lockedAgreement = isLocked ? data.priceAgreements.find((a) => a.id === editingMaterial!.lockedByAgreementId) : undefined;
+
   return <section className="card">
     {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
     <div className="between" style={{ justifyContent: "flex-end" }}><button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { reset(); setShowForm(true); }}>Ny råvare</button></div>
@@ -2743,12 +2887,71 @@ function defaultRetailMargin(category: string) {
       <div className="form-grid">
         <input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Navn" />
         <label>Leverandør<input value={form.supplier || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label>
+        <label>Leverandørens varenr<input value={form.supplierItemNumber} disabled={readOnly || isLocked} title={isLocked ? "Styres av koblet avtalepris" : undefined} onChange={(e) => setForm({ ...form, supplierItemNumber: e.target.value })} placeholder="Varenr hos leverandør" /></label>
         <select value={form.category} disabled={readOnly} onChange={(e) => setForm({ ...form, category: e.target.value })}>{data.materialCategories.map((c) => <option key={c}>{c}</option>)}</select>
         <select value={form.unit} disabled={readOnly} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}><option value="kg">kg</option><option value="liter">liter</option><option value="stk">stk</option></select>
-        <label>Pakningsstørrelse<input type="number" value={form.packageSize} disabled={readOnly} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label>
-        <label>Pakningspris eks. mva<input type="number" value={form.packagePrice} disabled={readOnly} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label>
-        <Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} />
+        {isLocked ? (
+          <Metric label={`Pris per ${form.unit} (låst av avtale)`} value={currency(editingMaterial?.pricePerUnit || 0)} />
+        ) : (
+          <>
+            <label>Pakningsstørrelse<input type="number" value={form.packageSize} disabled={readOnly} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} /></label>
+            <label>Pakningspris eks. mva<input type="number" value={form.packagePrice} disabled={readOnly} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} /></label>
+            <Metric label={`Pris per ${form.unit}`} value={currency((Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1))} />
+          </>
+        )}
       </div>
+
+      {editingMaterial?.supplierProductName && (
+        <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+          🔒 Leverandørens navn (fra avtale): <b>{editingMaterial.supplierProductName}</b>
+        </p>
+      )}
+
+      {isLocked && (
+        <div style={{ background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8, padding: "10px 14px", marginTop: 8, fontSize: 13, color: "#92400e" }}>
+          🔒 Prisen styres av en avtalepris ({lockedAgreement?.productName || "ukjent avtale"} · {currency(lockedAgreement?.agreedPrice || 0)}/{lockedAgreement?.unit || form.unit}).{" "}
+          <button type="button" className="link" onClick={() => { setPriceAgreementToOpen(editingMaterial!.lockedByAgreementId!); setTab("priceAgreements"); }}>Åpne avtalen →</button>
+        </div>
+      )}
+
+      {editingId && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ borderLeft: "4px solid #65a30d", paddingLeft: 10, marginBottom: 8 }}>
+            <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>Avtalepris</h4>
+          </div>
+          {editingMaterial?.lockedByAgreementId ? (
+            <div className="between">
+              <span>Koblet til: <b>{lockedAgreement?.productName || "Ukjent avtale"}</b>{lockedAgreement?.supplier ? ` (${lockedAgreement.supplier})` : ""}</span>
+              <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => unlinkMaterialFromAgreement(editingMaterial!.lockedByAgreementId!)}>Fjern kobling</button>
+            </div>
+          ) : (
+            <div className="search-picker" style={{ maxWidth: 420 }}>
+              <input
+                value={agreementSearch}
+                disabled={readOnly}
+                onChange={(e) => setAgreementSearch(e.target.value)}
+                placeholder="Koble til avtalepris..."
+              />
+              {agreementSearch && (
+                <div className="search-dropdown inline">
+                  {(data.priceAgreements || [])
+                    .filter((a) => `${a.productName} ${a.supplier || ""} ${a.itemNumber || ""}`.toLowerCase().includes(agreementSearch.toLowerCase()))
+                    .slice(0, 50)
+                    .map((a) => (
+                      <button key={a.id} type="button" className="search-result" onClick={() => { linkMaterialToAgreement(editingId!, a.id); setAgreementSearch(""); }}>
+                        <b>{a.productName}</b>
+                        <small>{a.supplier || "Ukjent leverandør"} · {a.itemNumber || "intet varenr"}</small>
+                      </button>
+                    ))}
+                  {(data.priceAgreements || []).filter((a) => `${a.productName} ${a.supplier || ""} ${a.itemNumber || ""}`.toLowerCase().includes(agreementSearch.toLowerCase())).length === 0 && (
+                    <div className="search-result" style={{ color: "#94a3b8", cursor: "default" }}>Ingen treff</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {["Deli", "Mineralvann", "Øl", "Vin", "Brennevin", "Cider"].includes(form.category) && (() => {
         const costExVat = (Number(form.packagePrice) || 0) / (Number(form.packageSize) || 1);
@@ -2929,6 +3132,322 @@ function defaultRetailMargin(category: string) {
     </table>
     <div className="pager"><button className="btn" disabled={materialPage <= 1} onClick={() => setMaterialPage(materialPage - 1)}>Forrige</button><span>Side {materialPage} av {totalPages}</span><button className="btn" disabled={materialPage >= totalPages} onClick={() => setMaterialPage(materialPage + 1)}>Neste</button></div>
   </section>;
+}
+
+// Avtalepriser: leverandøravtaler for råvarer, med toveis søkbar kobling mot
+// Råvarer (kan lenkes fra begge sider - se linkMaterialToAgreement/
+// unlinkMaterialFromAgreement i Page(), delt med MaterialsTab for å unngå
+// duplisert logikk).
+function PriceAgreementsTab({ data, updateData, updateListRpc, readOnly, setTab, setMaterialToOpen, pendingAgreementId, clearPendingAgreementId, linkMaterialToAgreement, unlinkMaterialFromAgreement, resyncMaterialForAgreement }: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  updateListRpc: (listKey: "priceAgreements", itemsPatch: Record<string, any>) => void;
+  readOnly: boolean;
+  setTab: (t: Tab) => void;
+  setMaterialToOpen: (id: string | null) => void;
+  pendingAgreementId?: string | null;
+  clearPendingAgreementId?: () => void;
+  linkMaterialToAgreement: (materialId: string, agreementId: string) => void;
+  unlinkMaterialFromAgreement: (agreementId: string) => void;
+  resyncMaterialForAgreement: (agreement: PriceAgreementEntry) => void;
+}) {
+  const THEME_COLOR = "#65a30d";
+
+  const blank = {
+    productName: "",
+    goodsGroup: "",
+    supplier: "",
+    itemNumber: "",
+    agreedPrice: "0",
+    unit: "kg" as Unit,
+    agreementTypeId: "",
+    note: "",
+  };
+
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [customGoodsGroupMode, setCustomGoodsGroupMode] = useState(false);
+  const [materialSearch, setMaterialSearch] = useState("");
+  const [listSearch, setListSearch] = useState("");
+  const [sortField, setSortField] = useState<"productName" | "goodsGroup" | "supplier" | "itemNumber" | "agreedPrice" | "agreementTypeId">("productName");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  function reset() {
+    setForm(blank);
+    setEditingId(null);
+    setCustomGoodsGroupMode(false);
+    setMaterialSearch("");
+  }
+
+  function edit(a: PriceAgreementEntry) {
+    setForm({
+      productName: a.productName,
+      goodsGroup: a.goodsGroup || "",
+      supplier: a.supplier || "",
+      itemNumber: a.itemNumber || "",
+      agreedPrice: String(a.agreedPrice),
+      unit: a.unit || "kg",
+      agreementTypeId: a.agreementTypeId || "",
+      note: a.note || "",
+    });
+    setEditingId(a.id);
+    setShowForm(true);
+    setCustomGoodsGroupMode(false);
+    setMaterialSearch("");
+  }
+
+  // Toveis-navigasjon: hopp hit fra en koblet råvare i Råvarer-fanen og åpne
+  // riktig avtale direkte i redigeringsskjemaet.
+  useEffect(() => {
+    if (!pendingAgreementId) return;
+    const agreement = data.priceAgreements.find((a) => a.id === pendingAgreementId);
+    if (agreement) {
+      edit(agreement);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    clearPendingAgreementId?.();
+  }, [pendingAgreementId]);
+
+  function save() {
+    if (!form.productName.trim()) return;
+    const id = editingId || `pa-${Date.now()}`;
+    const existing = editingId ? data.priceAgreements.find((a) => a.id === editingId) : undefined;
+    const entry: PriceAgreementEntry = {
+      id,
+      productName: form.productName.trim(),
+      materialId: existing?.materialId,
+      goodsGroup: form.goodsGroup || undefined,
+      supplier: form.supplier || undefined,
+      itemNumber: form.itemNumber || undefined,
+      agreedPrice: Number(form.agreedPrice) || 0,
+      unit: form.unit,
+      agreementTypeId: form.agreementTypeId || undefined,
+      note: form.note || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    updateListRpc("priceAgreements", { [entry.id]: entry });
+    // DEL E: kjør synkroniseringen på nytt hver gang en ALLEREDE koblet
+    // avtale redigeres - ikke bare ved selve koblingsøyeblikket.
+    resyncMaterialForAgreement(entry);
+    reset();
+    setShowForm(false);
+  }
+
+  function deleteEntry(id: string) {
+    if (!confirm("Slette avtaleprisen?")) return;
+    const entry = data.priceAgreements.find((a) => a.id === id);
+    if (entry?.materialId) unlinkMaterialFromAgreement(id);
+    updateData({ priceAgreements: (data.priceAgreements || []).filter((a) => a.id !== id) });
+    if (editingId === id) reset();
+  }
+
+  function toggleSort(field: typeof sortField) {
+    if (sortField === field) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  }
+  function sortIcon(field: typeof sortField) {
+    if (sortField !== field) return " ↕";
+    return sortDir === "asc" ? " ↑" : " ↓";
+  }
+
+  const existingGoodsGroups = Array.from(new Set(data.materials.map((m) => m.category).filter(Boolean)));
+
+  const filteredAgreements = (data.priceAgreements || [])
+    .filter((a) => {
+      if (!listSearch) return true;
+      const linkedMat = a.materialId ? data.materials.find((m) => m.id === a.materialId) : undefined;
+      const haystack = `${a.productName} ${a.supplier || ""} ${a.itemNumber || ""} ${a.goodsGroup || ""} ${linkedMat?.supplierItemNumber || ""}`.toLowerCase();
+      return haystack.includes(listSearch.toLowerCase());
+    })
+    .sort((a, b) => {
+      if (sortField === "agreedPrice") return sortDir === "asc" ? a.agreedPrice - b.agreedPrice : b.agreedPrice - a.agreedPrice;
+      let valA = ""; let valB = "";
+      if (sortField === "productName") { valA = a.productName; valB = b.productName; }
+      if (sortField === "goodsGroup") { valA = a.goodsGroup || ""; valB = b.goodsGroup || ""; }
+      if (sortField === "supplier") { valA = a.supplier || ""; valB = b.supplier || ""; }
+      if (sortField === "itemNumber") { valA = a.itemNumber || ""; valB = b.itemNumber || ""; }
+      if (sortField === "agreementTypeId") {
+        valA = data.priceAgreementTypes.find((t) => t.id === a.agreementTypeId)?.name || "";
+        valB = data.priceAgreementTypes.find((t) => t.id === b.agreementTypeId)?.name || "";
+      }
+      return sortDir === "asc" ? valA.localeCompare(valB, "no-NO") : valB.localeCompare(valA, "no-NO");
+    });
+
+  function printAvtalepriser() {
+    const rows = filteredAgreements.map((a) => {
+      const typeName = data.priceAgreementTypes.find((t) => t.id === a.agreementTypeId)?.name || "-";
+      return `<tr><td>${escapeHtml(a.productName)}</td><td>${escapeHtml(a.goodsGroup || "-")}</td><td>${escapeHtml(a.supplier || "-")}</td><td>${escapeHtml(a.itemNumber || "-")}</td><td class="right">${currency(a.agreedPrice)}${a.unit ? `/${a.unit}` : ""}</td><td>${escapeHtml(typeName)}</td></tr>`;
+    }).join("");
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Avtalepriser</title><style>body{font-family:Arial,sans-serif;color:#111827;padding:36px;line-height:1.4}.top{border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:24px}.logo{font-size:26px;font-weight:900}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #e5e7eb;padding:9px;text-align:left}th{background:#f3f4f6}.right{text-align:right}@media print{button{display:none}body{padding:18px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div class="logo">AVTALEPRISER</div><p>Utskriftsdato: ${formatDateNo(today())}</p>${listSearch ? `<p>Filtrert på: ${escapeHtml(listSearch)}</p>` : ""}</div><table><thead><tr><th>Produkt/vare</th><th>Varegruppe</th><th>Leverandør</th><th>Leverandørvarenr</th><th class="right">Avtalepris</th><th>Avtaletype</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
+  const editingAgreement = editingId ? data.priceAgreements.find((a) => a.id === editingId) : undefined;
+  const linkedMaterial = editingAgreement?.materialId ? data.materials.find((m) => m.id === editingAgreement.materialId) : undefined;
+
+  return (
+    <section className="card">
+      {readOnly && <div className="warning">🔒 Du har kun visningstilgang til denne fanen — endringer kan ikke lagres.</div>}
+
+      <div style={{ borderLeft: `4px solid ${THEME_COLOR}`, paddingLeft: 12 }}>
+        <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Avtalepriser</h3>
+        <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Leverandøravtaler for råvarer, med valgfri kobling mot en råvare for automatisk pris- og varenr-synkronisering.</p>
+      </div>
+
+      <div className="between" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+        <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => { reset(); setShowForm(true); }}>Ny avtalepris</button>
+      </div>
+
+      {showForm && (
+        <div className="soft-box" style={{ marginTop: 12 }}>
+          <div className="between">
+            <h4 style={{ margin: 0 }}>{editingId ? "Rediger avtalepris" : "Ny avtalepris"}</h4>
+            <button className="btn" onClick={() => { reset(); setShowForm(false); }}>Lukk</button>
+          </div>
+          <div className="form-grid">
+            <input value={form.productName} disabled={readOnly} onChange={(e) => setForm({ ...form, productName: e.target.value })} placeholder="Leverandørens navn på varen" />
+            <label>Leverandør<input value={form.supplier} disabled={readOnly} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label>
+            <label>Leverandørvarenr<input value={form.itemNumber} disabled={readOnly} onChange={(e) => setForm({ ...form, itemNumber: e.target.value })} placeholder="Varenr på avtalen" /></label>
+            {customGoodsGroupMode ? (
+              <input value={form.goodsGroup} disabled={readOnly} onChange={(e) => setForm({ ...form, goodsGroup: e.target.value })} placeholder="Nytt gruppenavn" autoFocus />
+            ) : (
+              <select
+                value={existingGoodsGroups.includes(form.goodsGroup) ? form.goodsGroup : ""}
+                disabled={readOnly}
+                onChange={(e) => {
+                  if (e.target.value === "__new__") { setCustomGoodsGroupMode(true); setForm({ ...form, goodsGroup: "" }); }
+                  else setForm({ ...form, goodsGroup: e.target.value });
+                }}
+              >
+                <option value="">Ingen varegruppe</option>
+                {existingGoodsGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+                <option value="__new__">+ Ny gruppe...</option>
+              </select>
+            )}
+            <select value={form.unit} disabled={readOnly} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}>
+              <option value="kg">kg</option>
+              <option value="liter">liter</option>
+              <option value="stk">stk</option>
+            </select>
+            <label>Avtalepris<input type="number" value={form.agreedPrice} disabled={readOnly} onChange={(e) => setForm({ ...form, agreedPrice: e.target.value })} /></label>
+            <select
+              value={form.agreementTypeId}
+              disabled={readOnly}
+              onChange={(e) => {
+                if (e.target.value === "__new__") {
+                  const name = window.prompt("Navn på ny avtaletype");
+                  if (name && name.trim()) {
+                    const newType: PriceAgreementType = { id: `pat-${Date.now()}`, name: name.trim() };
+                    updateData({ priceAgreementTypes: [...(data.priceAgreementTypes || []), newType] });
+                    setForm({ ...form, agreementTypeId: newType.id });
+                  }
+                } else {
+                  setForm({ ...form, agreementTypeId: e.target.value });
+                }
+              }}
+            >
+              <option value="">Ingen avtaletype</option>
+              {(data.priceAgreementTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value="__new__">+ Ny avtaletype...</option>
+            </select>
+            <label>Notat<input value={form.note} disabled={readOnly} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Valgfritt" /></label>
+          </div>
+
+          {editingId && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ borderLeft: `4px solid ${THEME_COLOR}`, paddingLeft: 10, marginBottom: 8 }}>
+                <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>Koblet råvare</h4>
+              </div>
+              {linkedMaterial ? (
+                <div className="between">
+                  <span>Koblet til: <b>{linkedMaterial.name}</b> ({linkedMaterial.supplierItemNumber || "intet varenr"})</span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" onClick={() => { setMaterialToOpen(linkedMaterial.id); setTab("materials"); }}>Åpne råvaren →</button>
+                    <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => unlinkMaterialFromAgreement(editingId!)}>Fjern kobling</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="search-picker" style={{ maxWidth: 420 }}>
+                  <input
+                    value={materialSearch}
+                    disabled={readOnly}
+                    onChange={(e) => setMaterialSearch(e.target.value)}
+                    placeholder="Koble til råvare..."
+                  />
+                  {materialSearch && (
+                    <div className="search-dropdown inline">
+                      {data.materials
+                        .filter((m) => `${m.name} ${m.supplierItemNumber || ""} ${m.supplier || ""}`.toLowerCase().includes(materialSearch.toLowerCase()))
+                        .slice(0, 50)
+                        .map((m) => (
+                          <button key={m.id} type="button" className="search-result" onClick={() => { linkMaterialToAgreement(m.id, editingId!); setMaterialSearch(""); }}>
+                            <b>{m.name}</b>
+                            <small>{m.supplierItemNumber || "intet varenr"}</small>
+                          </button>
+                        ))}
+                      {data.materials.filter((m) => `${m.name} ${m.supplierItemNumber || ""} ${m.supplier || ""}`.toLowerCase().includes(materialSearch.toLowerCase())).length === 0 && (
+                        <div className="search-result" style={{ color: "#94a3b8", cursor: "default" }}>Ingen treff</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <button className="btn active" style={{ marginTop: 12, background: "#16a34a", borderColor: "#16a34a", color: "white" }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={save}>
+            {editingId ? "Lagre endringer" : "Lagre avtalepris"}
+          </button>
+        </div>
+      )}
+
+      <div className="between" style={{ marginTop: 18 }}>
+        <input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Søk i avtalepriser..." style={{ maxWidth: 320 }} />
+        <button className="btn" onClick={printAvtalepriser}>🖨️ Skriv ut</button>
+      </div>
+
+      <div style={{ overflowX: "auto", marginTop: 8 }}>
+        <table>
+          <thead>
+            <tr>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("productName")}>Produkt/vare{sortIcon("productName")}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("goodsGroup")}>Varegruppe{sortIcon("goodsGroup")}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("supplier")}>Leverandør{sortIcon("supplier")}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("itemNumber")}>Leverandørvarenr{sortIcon("itemNumber")}</th>
+              <th style={{ textAlign: "right", cursor: "pointer" }} onClick={() => toggleSort("agreedPrice")}>Avtalepris{sortIcon("agreedPrice")}</th>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("agreementTypeId")}>Avtaletype{sortIcon("agreementTypeId")}</th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredAgreements.map((a) => (
+              <tr key={a.id}>
+                <td>{a.productName}</td>
+                <td>{a.goodsGroup || "-"}</td>
+                <td>{a.supplier || "-"}</td>
+                <td>{a.itemNumber || "-"}</td>
+                <td style={{ textAlign: "right" }}>{currency(a.agreedPrice)}{a.unit ? `/${a.unit}` : ""}</td>
+                <td>{data.priceAgreementTypes.find((t) => t.id === a.agreementTypeId)?.name || "-"}</td>
+                <td title={a.materialId ? "Koblet til råvare" : undefined}>{a.materialId ? "🔗" : ""}</td>
+                <td>
+                  <button className="btn" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => edit(a)}>Rediger</button>
+                  <button className="btn danger" style={{ marginLeft: 8 }} disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteEntry(a.id)}>Slett</button>
+                </td>
+              </tr>
+            ))}
+            {filteredAgreements.length === 0 && (
+              <tr><td colSpan={8} style={{ color: "#64748b" }}>Ingen avtalepriser funnet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens, readOnly, isDirty, onDirtyChange, registerSave }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; isDirty: boolean; onDirtyChange: (dirty: boolean) => void; registerSave: (fn: (() => boolean) | null) => void }) {
