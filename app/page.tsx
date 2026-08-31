@@ -3253,6 +3253,124 @@ function PriceAgreementsTab({ data, updateData, updateListRpc, readOnly, setTab,
 
   const existingGoodsGroups = Array.from(new Set(data.materials.map((m) => m.category).filter(Boolean)));
 
+  // Delt "velg eksisterende ELLER + Ny gruppe..."-mønster (del C), brukt
+  // både i hovedskjemaet og i import-skjemaet (del I) - unngår duplisering.
+  function renderGoodsGroupPicker(value: string, customMode: boolean, setCustomMode: (v: boolean) => void, onChange: (v: string) => void) {
+    return customMode ? (
+      <input value={value} disabled={readOnly} onChange={(e) => onChange(e.target.value)} placeholder="Nytt gruppenavn" autoFocus />
+    ) : (
+      <select
+        value={existingGoodsGroups.includes(value) ? value : ""}
+        disabled={readOnly}
+        onChange={(e) => {
+          if (e.target.value === "__new__") { setCustomMode(true); onChange(""); }
+          else onChange(e.target.value);
+        }}
+      >
+        <option value="">Ingen varegruppe</option>
+        {existingGoodsGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+        <option value="__new__">+ Ny gruppe...</option>
+      </select>
+    );
+  }
+
+  function renderAgreementTypePicker(value: string, onChange: (id: string) => void) {
+    return (
+      <select
+        value={value}
+        disabled={readOnly}
+        onChange={(e) => {
+          if (e.target.value === "__new__") {
+            const name = window.prompt("Navn på ny avtaletype");
+            if (name && name.trim()) {
+              const newType: PriceAgreementType = { id: `pat-${Date.now()}`, name: name.trim() };
+              updateData({ priceAgreementTypes: [...(data.priceAgreementTypes || []), newType] });
+              onChange(newType.id);
+            }
+          } else {
+            onChange(e.target.value);
+          }
+        }}
+      >
+        <option value="">Ingen avtaletype</option>
+        {(data.priceAgreementTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        <option value="__new__">+ Ny avtaletype...</option>
+      </select>
+    );
+  }
+
+  // DEL I: importer vareliste - upsert (aldri full overskriving). Matcher
+  // på itemNumber OG supplier BEGGE (to ulike leverandører kan i prinsippet
+  // ha samme varenummer).
+  const [importSupplier, setImportSupplier] = useState("");
+  const [importGoodsGroup, setImportGoodsGroup] = useState("");
+  const [importCustomGoodsGroupMode, setImportCustomGoodsGroupMode] = useState(false);
+  const [importAgreementTypeId, setImportAgreementTypeId] = useState("");
+  const [importText, setImportText] = useState("");
+  const [importPreview, setImportPreview] = useState<{
+    updates: { entry: PriceAgreementEntry; newName: string; newPrice: number }[];
+    news: { name: string; itemNumber: string; price: number }[];
+    unparsed: string[];
+  } | null>(null);
+
+  function parseImportText(text: string) {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+    const parsed: { name: string; itemNumber: string; price: number }[] = [];
+    const unparsed: string[] = [];
+    lines.forEach((line) => {
+      const parts = (line.includes("\t") ? line.split("\t") : line.split(";")).map((p) => p.trim());
+      if (parts.length < 3) { unparsed.push(line); return; }
+      const [name, itemNumber, rawPrice] = parts;
+      const price = Number(rawPrice.replace(/\s/g, "").replace(",", "."));
+      if (!name || !itemNumber || !isFinite(price) || isNaN(price)) { unparsed.push(line); return; }
+      parsed.push({ name, itemNumber, price });
+    });
+    return { parsed, unparsed };
+  }
+
+  function buildImportPreview() {
+    const { parsed, unparsed } = parseImportText(importText);
+    const updates: { entry: PriceAgreementEntry; newName: string; newPrice: number }[] = [];
+    const news: { name: string; itemNumber: string; price: number }[] = [];
+    parsed.forEach((line) => {
+      const match = (data.priceAgreements || []).find((a) => a.itemNumber === line.itemNumber && a.supplier === importSupplier);
+      if (match) updates.push({ entry: match, newName: line.name, newPrice: line.price });
+      else news.push(line);
+    });
+    setImportPreview({ updates, news, unparsed });
+  }
+
+  function confirmImport() {
+    if (!importPreview) return;
+    const agreementPatch: Record<string, any> = {};
+    importPreview.updates.forEach(({ entry, newName, newPrice }) => {
+      agreementPatch[entry.id] = { ...entry, productName: newName, agreedPrice: newPrice, supplier: importSupplier, updatedAt: new Date().toISOString() };
+    });
+    importPreview.news.forEach((line, i) => {
+      const id = `pa-import-${Date.now()}-${i}`;
+      const newEntry: PriceAgreementEntry = {
+        id,
+        productName: line.name,
+        itemNumber: line.itemNumber,
+        agreedPrice: line.price,
+        supplier: importSupplier || undefined,
+        goodsGroup: importGoodsGroup || undefined,
+        agreementTypeId: importAgreementTypeId || undefined,
+        updatedAt: new Date().toISOString(),
+      };
+      agreementPatch[id] = newEntry;
+    });
+    updateListRpc("priceAgreements", agreementPatch);
+    // DEL E: re-kjør synk for oppdaterte oppføringer som allerede er koblet
+    // til en råvare, slik at råvarens pris følger med automatisk.
+    importPreview.updates.forEach(({ entry, newName, newPrice }) => {
+      if (entry.materialId) resyncMaterialForAgreement({ ...entry, productName: newName, agreedPrice: newPrice, supplier: importSupplier });
+    });
+    alert(`${importPreview.updates.length} oppdatert, ${importPreview.news.length} nye lagt til.`);
+    setImportText("");
+    setImportPreview(null);
+  }
+
   const filteredAgreements = (data.priceAgreements || [])
     .filter((a) => {
       if (!listSearch) return true;
@@ -3312,48 +3430,14 @@ function PriceAgreementsTab({ data, updateData, updateListRpc, readOnly, setTab,
             <input value={form.productName} disabled={readOnly} onChange={(e) => setForm({ ...form, productName: e.target.value })} placeholder="Leverandørens navn på varen" />
             <label>Leverandør<input value={form.supplier} disabled={readOnly} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="F.eks ASKO" /></label>
             <label>Leverandørvarenr<input value={form.itemNumber} disabled={readOnly} onChange={(e) => setForm({ ...form, itemNumber: e.target.value })} placeholder="Varenr på avtalen" /></label>
-            {customGoodsGroupMode ? (
-              <input value={form.goodsGroup} disabled={readOnly} onChange={(e) => setForm({ ...form, goodsGroup: e.target.value })} placeholder="Nytt gruppenavn" autoFocus />
-            ) : (
-              <select
-                value={existingGoodsGroups.includes(form.goodsGroup) ? form.goodsGroup : ""}
-                disabled={readOnly}
-                onChange={(e) => {
-                  if (e.target.value === "__new__") { setCustomGoodsGroupMode(true); setForm({ ...form, goodsGroup: "" }); }
-                  else setForm({ ...form, goodsGroup: e.target.value });
-                }}
-              >
-                <option value="">Ingen varegruppe</option>
-                {existingGoodsGroups.map((g) => <option key={g} value={g}>{g}</option>)}
-                <option value="__new__">+ Ny gruppe...</option>
-              </select>
-            )}
+            {renderGoodsGroupPicker(form.goodsGroup, customGoodsGroupMode, setCustomGoodsGroupMode, (v) => setForm({ ...form, goodsGroup: v }))}
             <select value={form.unit} disabled={readOnly} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}>
               <option value="kg">kg</option>
               <option value="liter">liter</option>
               <option value="stk">stk</option>
             </select>
             <label>Avtalepris<input type="number" value={form.agreedPrice} disabled={readOnly} onChange={(e) => setForm({ ...form, agreedPrice: e.target.value })} /></label>
-            <select
-              value={form.agreementTypeId}
-              disabled={readOnly}
-              onChange={(e) => {
-                if (e.target.value === "__new__") {
-                  const name = window.prompt("Navn på ny avtaletype");
-                  if (name && name.trim()) {
-                    const newType: PriceAgreementType = { id: `pat-${Date.now()}`, name: name.trim() };
-                    updateData({ priceAgreementTypes: [...(data.priceAgreementTypes || []), newType] });
-                    setForm({ ...form, agreementTypeId: newType.id });
-                  }
-                } else {
-                  setForm({ ...form, agreementTypeId: e.target.value });
-                }
-              }}
-            >
-              <option value="">Ingen avtaletype</option>
-              {(data.priceAgreementTypes || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              <option value="__new__">+ Ny avtaletype...</option>
-            </select>
+            {renderAgreementTypePicker(form.agreementTypeId, (id) => setForm({ ...form, agreementTypeId: id }))}
             <label>Notat<input value={form.note} disabled={readOnly} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Valgfritt" /></label>
           </div>
 
@@ -3404,6 +3488,79 @@ function PriceAgreementsTab({ data, updateData, updateListRpc, readOnly, setTab,
           </button>
         </div>
       )}
+
+      <details className="soft-box" style={{ padding: 0, marginTop: 18 }}>
+        <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Importer vareliste</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+        </summary>
+        <div style={{ padding: "0 16px 16px" }}>
+          {readOnly ? (
+            <p className="muted">Du har ikke redigeringstilgang til import.</p>
+          ) : (
+            <>
+              <div style={{ borderLeft: `4px solid ${THEME_COLOR}`, paddingLeft: 10, marginBottom: 8 }}>
+                <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>Oppdaterer priser og legger til nye - sletter aldri</h4>
+                <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 12, margin: "2px 0 0" }}>Matcher på varenr OG leverandør. Oppføringer som ikke er med i listen, røres ikke.</p>
+              </div>
+              <div className="form-grid three">
+                <label>Leverandør (gjelder alle radene)<input value={importSupplier} onChange={(e) => setImportSupplier(e.target.value)} placeholder="F.eks ASKO" /></label>
+                {renderGoodsGroupPicker(importGoodsGroup, importCustomGoodsGroupMode, setImportCustomGoodsGroupMode, setImportGoodsGroup)}
+                {renderAgreementTypePicker(importAgreementTypeId, setImportAgreementTypeId)}
+              </div>
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Varegruppe og avtaletype over brukes KUN som standardverdi for NYE oppføringer - rører aldri disse feltene på oppføringer som kun får prisen oppdatert.</p>
+              <textarea
+                className="textarea"
+                rows={8}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder="Lim inn én vare per linje, format: Navn;Varenr;Pris (skilt med semikolon eller tab - begge støttes)."
+              />
+              <button className="btn active" style={{ marginTop: 8 }} disabled={!importText.trim()} onClick={buildImportPreview}>Tolk liste</button>
+
+              {importPreview && (
+                <div style={{ marginTop: 14 }}>
+                  <h4 style={{ margin: "0 0 4px" }}>Oppdateres ({importPreview.updates.length})</h4>
+                  {importPreview.updates.length === 0 ? (
+                    <p className="muted" style={{ fontSize: 13 }}>Ingen.</p>
+                  ) : (
+                    importPreview.updates.map(({ entry, newName, newPrice }) => (
+                      <div key={entry.id} style={{ fontSize: 13, padding: "3px 0" }}>
+                        {newName}: {currency(entry.agreedPrice)} → <b>{currency(newPrice)}</b> kr
+                      </div>
+                    ))
+                  )}
+
+                  <h4 style={{ margin: "12px 0 4px" }}>Nye ({importPreview.news.length})</h4>
+                  {importPreview.news.length === 0 ? (
+                    <p className="muted" style={{ fontSize: 13 }}>Ingen.</p>
+                  ) : (
+                    importPreview.news.map((line, i) => (
+                      <div key={i} style={{ fontSize: 13, padding: "3px 0" }}>
+                        {line.name} - {line.itemNumber} - {currency(line.price)} kr
+                      </div>
+                    ))
+                  )}
+
+                  {importPreview.unparsed.length > 0 && (
+                    <>
+                      <h4 style={{ margin: "12px 0 4px", color: "#dc2626" }}>Ikke tolket ({importPreview.unparsed.length})</h4>
+                      {importPreview.unparsed.map((line, i) => (
+                        <div key={i} style={{ fontSize: 13, padding: "3px 0", color: "#dc2626", fontFamily: "monospace" }}>{line}</div>
+                      ))}
+                    </>
+                  )}
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button className="btn active" style={{ background: "#16a34a", borderColor: "#16a34a", color: "white" }} onClick={confirmImport}>Bekreft import</button>
+                    <button className="btn" onClick={() => setImportPreview(null)}>Avbryt</button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </details>
 
       <div className="between" style={{ marginTop: 18 }}>
         <input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Søk i avtalepriser..." style={{ maxWidth: 320 }} />
