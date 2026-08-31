@@ -11329,8 +11329,13 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     const c = counts[m.id] as any || {};
     const packages = Number(c.packages || 0);
     const loose = Number(c.loose || 0);
-    const packagePrice = c.packagePrice ?? m.packagePrice;
-    const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+    // Number(...) || 0 sikrer at en manglende/ugyldig pris (undefined, NaN)
+    // aldri forgifter hele varetellingssummen stille - uten dette ville én
+    // enkelt vare med manglende pris gjort HELE total-summen til NaN, som
+    // igjen vises som "0,00 kr" (siden NaN || 0 er 0 i JavaScript) uten at
+    // noen oppdager det.
+    const packagePrice = Number(c.packagePrice ?? m.packagePrice) || 0;
+    const pricePerUnit = Number(c.pricePerUnit ?? m.pricePerUnit) || 0;
     const looseVal = m.category === "Brennevin" ? loose * packagePrice : loose * pricePerUnit;
     return packages * packagePrice + looseVal;
   }
