@@ -11340,6 +11340,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     return packages * packagePrice + looseVal;
   }
 
+  
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
     const item = counts[`product_${productId}`] as any;
     if (!item) return { cases: 0, loose: 0 };
