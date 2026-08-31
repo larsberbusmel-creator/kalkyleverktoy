@@ -156,7 +156,13 @@ if (customerInfoIndex >= 0) {
   const orderLines: ParsedOrderLine[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const productCodeMatch = lines[i].match(/^([A-ZÆØÅ]{1,4}\d{3,})$/i);
+    // Varenummeret kan stå alene på linjen ("PA000007"), ELLER sammen med
+    // annen tekst på samme linje (f.eks. "Endret    PA000002" - dette skjer
+    // typisk for den FØRSTE endrede varen i en "ordre endret"-e-post, der
+    // "Endret"-merkelappen havner på samme rad som selve varenummeret).
+    // Match derfor varenummeret som et avgrenset "ord" hvor som helst i
+    // linjen, ikke bare når det er hele linjens eneste innhold.
+    const productCodeMatch = lines[i].match(/(?:^|\s)([A-ZÆØÅ]{1,4}\d{3,})(?:\s|$)/i);
     if (!productCodeMatch) continue;
 
     const productCode = productCodeMatch[1];
