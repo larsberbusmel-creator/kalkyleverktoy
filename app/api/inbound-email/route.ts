@@ -59,6 +59,43 @@ export async function POST(req: NextRequest) {
   });
 }
 
+    if (result.type === "cancellation") {
+      const { orderNumber, reason } = result;
+      const existingIndex = appData.orders.findIndex(
+        (o: any) => o.orderNumber && o.orderNumber === orderNumber && !o.deletedAt
+      );
+
+      if (existingIndex < 0) {
+        console.warn(`Kanselleringsmail mottatt for ordrenr ${orderNumber} - ingen matchende, ikke-slettet ordre funnet.`);
+        return NextResponse.json({ ok: true, action: "cancelled", orderNumber, found: false });
+      }
+
+      const existing = appData.orders[existingIndex];
+      const cancelNote = reason ? `Kansellert av kunde: ${reason}` : "Kansellert av kunde";
+      const cancelledOrder = {
+        ...existing,
+        deletedAt: new Date().toISOString(),
+        note: [existing.note, cancelNote].filter(Boolean).join("\n\n"),
+      };
+      const updatedOrders = appData.orders.map((o: any, i: number) => (i === existingIndex ? cancelledOrder : o));
+
+      const { error: cancelSaveError } = await supabaseAdmin
+        .from("app_data")
+        .update({
+          data: { ...appData, orders: updatedOrders },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", "main");
+
+      if (cancelSaveError) {
+        console.error("Kunne ikke lagre kansellering:", cancelSaveError);
+        return NextResponse.json({ error: "Kunne ikke lagre kansellering" }, { status: 500 });
+      }
+
+      console.log(`❌ Ordre kansellert: ${orderNumber} | Årsak: ${reason || "(ikke oppgitt)"}`);
+      return NextResponse.json({ ok: true, action: "cancelled", orderNumber, found: true });
+    }
+
     const { order, unmatched } = result;
 
     // Sjekk om ordre med samme ordrenr allerede finnes

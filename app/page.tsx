@@ -6484,6 +6484,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   const [webshopRawText, setWebshopRawText] = useState("");
   const [webshopPreview, setWebshopPreview] = useState<Order | null>(null);
   const [webshopUnmatched, setWebshopUnmatched] = useState<string[]>([]);
+  const [webshopCancellation, setWebshopCancellation] = useState<{ orderNumber: string; reason: string } | null>(null);
   const [orderSearch, setOrderSearch] = useState("");
   const [sortField, setSortField] = useState<"date" | "customer" | "orderNumber">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -6519,6 +6520,25 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
 
     const orderNumberMatch = text.match(/Bestilling\s+(\d{4,})/i) || text.match(/\b(\d{6,})\b/);
     const orderNumber = orderNumberMatch?.[1] || String(Date.now());
+
+    // Kansellering - samme deteksjon som parseWebshopEmail()/inbound-e-post-
+    // rutene. Denne manuelle import-flyten har historisk sin egen, separate
+    // parsing (egne felt, bl.a. type "catering" i stedet for "bakeri") -
+    // bevisst IKKE lagt om til å kalle den delte lib-funksjonen her, for å
+    // unngå en utilsiktet endring av ordinære (ikke-kansellerte) ordre.
+    const isCancellation =
+      /Bestillingen er kansellert/i.test(text) ||
+      /kansellering/i.test(text) ||
+      /avbestilt/i.test(text);
+    if (isCancellation && orderNumberMatch) {
+      const reasonLabelIndex = lines.findIndex((l) => /årsak til avbestilling/i.test(l));
+      const reason = reasonLabelIndex >= 0 ? (lines[reasonLabelIndex + 1] || "") : "";
+      setWebshopCancellation({ orderNumber, reason });
+      setWebshopPreview(null);
+      setWebshopUnmatched([]);
+      return;
+    }
+    setWebshopCancellation(null);
 
     const phoneRaw =
       text.match(/Telefon:\s*(\+?[\d\s]{8,})/i)?.[1]?.trim() ||
@@ -6663,6 +6683,28 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     setWebshopRawText("");
     setWebshopPreview(null);
     setWebshopUnmatched([]);
+    setWebshopCancellation(null);
+  }
+
+  // DEL C: manuell import-flyt - brukeren ser meldingen og bekrefter selv
+  // (samme myk-slette-mønster som DEL B i inbound-e-post-rutene), i stedet
+  // for at det skjer automatisk her siden dette er en manuell arbeidsflyt.
+  function cancelWebshopOrder() {
+    if (!webshopCancellation) return;
+    const { orderNumber, reason } = webshopCancellation;
+    const existing = data.orders.find((o) => o.orderNumber && o.orderNumber === orderNumber && !o.deletedAt);
+    if (!existing) {
+      alert(`Fant ingen ordre med ordrenr ${orderNumber} å kansellere.`);
+      return;
+    }
+    const cancelNote = reason ? `Kansellert av kunde: ${reason}` : "Kansellert av kunde";
+    updateListRpc("orders", {
+      [existing.id]: { ...existing, deletedAt: new Date().toISOString(), note: [existing.note, cancelNote].filter(Boolean).join("\n\n") },
+    });
+    alert(`Ordre ${orderNumber} kansellert.`);
+    setShowWebshopImport(false);
+    setWebshopRawText("");
+    setWebshopCancellation(null);
   }
 
     function updateOrderLine(index: number, patch: Partial<OrderLine>) {
@@ -7233,8 +7275,23 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
           <textarea className="textarea" value={webshopRawText} disabled={readOnly} onChange={(e) => setWebshopRawText(e.target.value)} placeholder="Lim inn e-posttekst her..." style={{ minHeight: 200 }} />
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
             <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={parseWebshopOrder}>Les ordre</button>
-            <button className="btn" onClick={() => { setWebshopRawText(""); setWebshopPreview(null); setWebshopUnmatched([]); }}>Tøm</button>
+            <button className="btn" onClick={() => { setWebshopRawText(""); setWebshopPreview(null); setWebshopUnmatched([]); setWebshopCancellation(null); }}>Tøm</button>
           </div>
+          {webshopCancellation && (
+            <div className="soft-box" style={{ marginTop: 14, background: "#fef2f2", border: "1px solid #fca5a5" }}>
+              <h4 style={{ margin: 0 }}>⚠ Dette ser ut som en kansellering</h4>
+              <p style={{ marginTop: 8 }}>
+                Ordre <b>{webshopCancellation.orderNumber}</b>
+                {webshopCancellation.reason ? <> — årsak: <b>{webshopCancellation.reason}</b></> : ""}
+              </p>
+              {!data.orders.find((o) => o.orderNumber === webshopCancellation!.orderNumber && !o.deletedAt) && (
+                <p style={{ color: "#64748b", fontSize: 13 }}>Fant ingen matchende, aktiv ordre med dette ordrenummeret i Misemetrics ennå.</p>
+              )}
+              <button className="btn danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={cancelWebshopOrder}>
+                Kanseller ordre {webshopCancellation.orderNumber}
+              </button>
+            </div>
+          )}
           {webshopPreview && (
             <div className="soft-box" style={{ marginTop: 14 }}>
               <h4>Forhåndsvisning</h4>

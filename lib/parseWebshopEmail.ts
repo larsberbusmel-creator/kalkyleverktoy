@@ -79,10 +79,14 @@ function parseNorwegianDate(text: string): { date: string; time: string } {
   return { date: `${year}-${month}-${day}`, time };
 }
 
+export type ParseResult =
+  | { type: "order"; order: ParsedOrder; unmatched: string[] }
+  | { type: "cancellation"; orderNumber: string; reason: string };
+
 export function parseWebshopEmail(
   text: string,
   products: MatchableProduct[]
-): { order: ParsedOrder; unmatched: string[] } | null {
+): ParseResult | null {
 
   // Fjern SendGrid tracking-URLer og andre URLs før parsing
   const cleanText = text
@@ -94,12 +98,33 @@ export function parseWebshopEmail(
     .map((x) => x.trim())
     .filter(Boolean);
 
-  // ── Ordrenummer ──────────────────────────────────────────────────────────
+  // ── Ordrenummer ── (flyttet øverst - gjenbrukes av BÅDE kansellering og vanlig ordre)
   const orderNumberMatch =
     cleanText.match(/Bestilling\s+(\d{4,})/i) ||
     cleanText.match(/(?:Ordre|Order)\s*#?\s*(\d{4,})/i) ||
     cleanText.match(/\b(\d{6,})\b/);
   const orderNumber = orderNumberMatch?.[1] || String(Date.now());
+
+  // ── Kansellering ─────────────────────────────────────────────────────────
+  // "Bestillingen er kansellert" er den bekreftede, eksakte frasen som
+  // faktisk brukes - primærsjekk. "kansellering"/"avbestilt" er et bredere
+  // sikkerhetsnett i tillegg.
+  const isCancellation =
+    /Bestillingen er kansellert/i.test(cleanText) ||
+    /kansellering/i.test(cleanText) ||
+    /avbestilt/i.test(cleanText);
+
+  if (isCancellation && orderNumberMatch) {
+    // "Årsak til avbestilling" står alene på egen linje, med selve
+    // årsaksteksten på linjen RETT UNDER - samme "label alene på linje,
+    // verdi på neste linje"-mønster som Kundeinformasjon-blokken lenger ned.
+    const reasonLabelIndex = lines.findIndex((l) => /årsak til avbestilling/i.test(l));
+    const reason = reasonLabelIndex >= 0 ? (lines[reasonLabelIndex + 1] || "") : "";
+    return { type: "cancellation", orderNumber, reason };
+  }
+  // Kanselleringsmail UTEN gjenkjennbart ordrenummer (usannsynlig, men ikke
+  // gjett): faller videre til vanlig ordre-parsing som fallback i stedet for
+  // å returnere null blindt her.
 
   // Prøv Telefon:-feltet først, deretter telefonnummer fra Kundeinformasjon-blokken
 const phoneRaw =
@@ -256,5 +281,5 @@ const note = [
     dietOther: "",
   };
 
-  return { order, unmatched: nextUnmatched };
+  return { type: "order", order, unmatched: nextUnmatched };
 }
