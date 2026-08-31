@@ -11340,7 +11340,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     return packages * packagePrice + looseVal;
   }
 
-  
+
   function getProductCount(productId: string, location: string): { cases: number; loose: number } {
     const item = counts[`product_${productId}`] as any;
     if (!item) return { cases: 0, loose: 0 };
@@ -11365,10 +11365,16 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     updateInventoryRpc(inventoryMonth, { itemsPatch: { [key]: { ...existing, packages: totalCases, loose: totalLoose, packagePrice: 0, pricePerUnit: 0, locations: newLocations, countedAt: new Date().toISOString() } } });
   }
 
-  function productInventoryValue(product: Product, liveUnitCost: number): number {
+    function productInventoryValue(product: Product, liveUnitCost: number): number {
     const c = counts[`product_${product.id}`] as any || { packages: 0, loose: 0 };
     const unitCost = currentInventory.pricesFrozen && c.frozenUnitCost != null ? c.frozenUnitCost : liveUnitCost;
-    return (c.packages * Number(product.unitsPerCase || 1) + c.loose) * unitCost;
+    // Number(...) || 0 sikrer at manglende/ugyldig tellingsdata (undefined
+    // packages/loose for en måned som ikke er ferdig talt opp) aldri gjør
+    // hele varetellingssummen til NaN - samme prinsipp som i
+    // materialInventoryValue().
+    const packages = Number(c.packages) || 0;
+    const loose = Number(c.loose) || 0;
+    return (packages * Number(product.unitsPerCase || 1) + loose) * (Number(unitCost) || 0);
   }
   function egenprodusertBucketValue(bucket: string): number { return data.products.filter((p) => p.category === bucket).reduce((sum, p) => sum + productInventoryValue(p, productUnitCost(p)), 0); }
   function belongsToBucket(m: Material, bucket: string) {
