@@ -10003,7 +10003,7 @@ ${orderPages}`;
                 <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addCustomer}>Legg til kunde</button>
               </div>
               <div className="section-toggle" style={{ marginTop: 8 }} onClick={() => setOpenBlock(openBlock === "list" ? null : "list")}>
-                <h3>Kunder</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Kunder</h3>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span className="section-toggle-count">{(data.storkjokkenCustomers || []).length}</span>
                   {openBlock === "list" ? "▲" : "▼"}
@@ -10202,7 +10202,7 @@ ${orderPages}`;
               )}
 
               <div className="section-toggle" style={{ marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "deadlines" ? null : "deadlines")}>
-                <h3>Bestillingsfrister</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Bestillingsfrister</h3>
                 <span>{openBlock === "deadlines" ? "▲" : "▼"}</span>
               </div>
               {openBlock === "deadlines" && (
@@ -10253,7 +10253,7 @@ ${orderPages}`;
               )}
 
               <div className="section-toggle" style={{ marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "history" ? null : "history")}>
-                <h3>Tidligere bestillinger per kunde</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Tidligere bestillinger per kunde</h3>
                 <span>{openBlock === "history" ? "▲" : "▼"}</span>
               </div>
               {openBlock === "history" && storkjokkenCustomers.map((customer) => {
@@ -10303,7 +10303,7 @@ ${orderPages}`;
               })}
 
               <div className="section-toggle" style={{ marginTop: 24 }} onClick={() => setOpenBlock(openBlock === "prices" ? null : "prices")}>
-                <h3>Spesialpriser per kunde</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, borderLeft: "4px solid #ea580c", paddingLeft: 10 }}>Spesialpriser per kunde</h3>
                 <span>{openBlock === "prices" ? "▲" : "▼"}</span>
               </div>
               {openBlock === "prices" && storkjokkenCustomers.map((customer) => {
