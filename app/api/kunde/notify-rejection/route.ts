@@ -61,12 +61,16 @@ export async function POST(req: Request) {
 
     try {
       const result = await resend.emails.send({
-        from: "Misemetrics <onboarding@resend.dev>",
+        from: "Misemetrics <noreply@misemetrics.app>",
         to: [customer.email],
         subject: `Din bestilling for ${order.date} ble avvist`,
         html: `<p>Hei${customer.name ? ` ${customer.name}` : ""},</p><p>Din bestilling for levering <b>${order.date}</b> ble dessverre avvist. Logg inn i portalen for detaljer, eller ta kontakt med oss hvis du lurer på noe.</p>`,
       });
-      console.log("Resend-svar (avvisning):", JSON.stringify(result));
+      if (result.error) {
+        console.error("Resend avviste avvisning-varselet:", JSON.stringify(result.error));
+      } else {
+        console.log("Resend-svar (avvisning):", JSON.stringify(result));
+      }
     } catch (e) {
       console.error("Kunne ikke sende avvisning-varsel-e-post:", e);
     }
