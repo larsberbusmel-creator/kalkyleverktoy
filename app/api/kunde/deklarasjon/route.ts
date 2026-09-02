@@ -6,6 +6,13 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY as string
 );
 
+// Portalen er i dag knyttet til ÉTT bestemt sted (Berbusmel) via denne faste
+// rad-ID-en. Får dere et andre, reelt sted med egne storkjøkkenkunder senere,
+// holder ikke denne løsningen - da trengs en mer fleksibel mekanisme (f.eks.
+// egen portal-URL/subdomene per sted, eller søk etter PIN-kode på tvers av
+// alle site-rader). Bevisst utenfor omfanget av denne hastefiksen.
+const SITE_ROW_ID = process.env.PORTAL_SITE_ROW_ID || "main";
+
 function escapeHtml(s: string) {
   return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] || c));
 }
@@ -31,7 +38,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Mangler felt" }, { status: 400 });
     }
 
-    const { data: row, error } = await supabaseAdmin.from("app_data").select("data").eq("id", "main").single();
+    const { data: row, error } = await supabaseAdmin.from("app_data").select("data").eq("id", SITE_ROW_ID).single();
     if (error || !row) {
       return NextResponse.json({ error: "Kunne ikke hente data" }, { status: 500 });
     }
