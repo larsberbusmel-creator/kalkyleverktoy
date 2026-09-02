@@ -348,6 +348,7 @@ type InventoryMonthData = {
   waste?: Record<string, number>;
   items: Record<string, InventoryCount>;
   kassasvinn?: number;
+  cashCounts?: { inHouse?: number; deliveredLoomis?: number; bagsNotDelivered?: number };
   productWasteFromReport?: number;
   profitability?: ProfitabilityInput;
 };
@@ -1887,6 +1888,7 @@ export default function Page() {
     itemsPatch?: Record<string, any>;
     wastePatch?: Record<string, number>;
     kassasvinn?: number;
+    cashCounts?: { inHouse?: number; deliveredLoomis?: number; bagsNotDelivered?: number };
     locked?: boolean;
     pricesFrozen?: boolean;
     profitability?: any;
@@ -1899,6 +1901,7 @@ export default function Page() {
         waste: { ...(prevMonth.waste || {}), ...(patch.wastePatch || {}) },
       };
       if (patch.kassasvinn !== undefined) nextMonth.kassasvinn = patch.kassasvinn;
+      if (patch.cashCounts !== undefined) nextMonth.cashCounts = patch.cashCounts;
       if (patch.locked !== undefined) nextMonth.locked = patch.locked;
       if (patch.pricesFrozen !== undefined) nextMonth.pricesFrozen = patch.pricesFrozen;
       if (patch.profitability !== undefined) nextMonth.profitability = patch.profitability;
@@ -1912,6 +1915,7 @@ export default function Page() {
         p_items_patch: patch.itemsPatch || null,
         p_waste_patch: patch.wastePatch || null,
         p_kassasvinn: patch.kassasvinn ?? null,
+        p_cash_counts: patch.cashCounts ?? null,
         p_locked: patch.locked ?? null,
         p_prices_frozen: patch.pricesFrozen ?? null,
         p_profitability: patch.profitability ?? null,
@@ -2342,7 +2346,7 @@ return (
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} />}
         {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} />}
-        {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} />}
+        {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} siteName={activeSite?.name} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
         {tab === "priceAgreements" && <PriceAgreementsTab data={data} updateData={updateData} updateListRpc={updateListRpc} readOnly={!canEdit("priceAgreements")} setTab={setTab} setMaterialToOpen={setMaterialToOpen} pendingAgreementId={priceAgreementToOpen} clearPendingAgreementId={() => setPriceAgreementToOpen(null)} linkMaterialToAgreement={linkMaterialToAgreement} unlinkMaterialFromAgreement={unlinkMaterialFromAgreement} resyncMaterialForAgreement={resyncMaterialForAgreement} />}
@@ -11105,7 +11109,8 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
 // Formlene her er BYTTET IKKE, kun flyttet ut av InventoryTab sin lokale
 // closure og parameterisert på `month` i stedet for å lese `inventoryMonth`
 // direkte, slik at samme funksjon kan brukes for en hvilken som helst måned.
-type ProfitabilityCalcInventoryUpdater = (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void;
+type CashCounts = { inHouse?: number; deliveredLoomis?: number; bagsNotDelivered?: number };
+type ProfitabilityCalcInventoryUpdater = (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; cashCounts?: CashCounts; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void;
 
 function computeProfitability(data: AppData, month: string, productUnitCost: (p: Product) => number) {
   const egenprodusertCategories = ["Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
@@ -11485,7 +11490,7 @@ function InventoryVarianceReport({ data, month, productUnitCost }: {
   );
 }
 
-function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number; updateInventoryRpc: (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void; readOnly: boolean }) {
+function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, readOnly, siteName }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number; updateInventoryRpc: (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; cashCounts?: { inHouse?: number; deliveredLoomis?: number; bagsNotDelivered?: number }; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void; readOnly: boolean; siteName?: string }) {
   const currentYm = new Date().toISOString().slice(0, 7);
   const [inventoryMonth, setInventoryMonth] = useState(currentYm);
   const [inventorySearch, setInventorySearch] = useState("");
@@ -11498,10 +11503,14 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(true);
   const pageSize = 50;
 
-  const [wasteReportRows, setWasteReportRows] = useState<{ articleName: string; quantity: number; kostpris: number }[]>([]);
+  const [wasteReportRows, setWasteReportRows] = useState<{ id: string; articleName: string; quantity: number; kostpris: number }[]>([]);
   const [wasteReportError, setWasteReportError] = useState<string | null>(null);
   const [wasteReportParsing, setWasteReportParsing] = useState(false);
+  // Keyed på row.id (IKKE articleName - flere rader kan dele identisk vare-
+  // navn, f.eks. samme vare kastet flere ganger i perioden, og delte de
+  // tidligere nøkkel med articleName ville kun den første av dem fungert).
   const [wasteReportUnmatchedSelections, setWasteReportUnmatchedSelections] = useState<Record<string, string>>({});
+  const [wasteReportSearch, setWasteReportSearch] = useState<Record<string, string>>({});
 
   React.useEffect(() => {
     const channel = supabase.channel("inventory-presence")
@@ -11554,6 +11563,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
   const waste = currentInventory.waste || {};
   const isLocked = !!currentInventory.locked;
   const kassasvinn = currentInventory.kassasvinn || 0;
+  const cashCounts = currentInventory.cashCounts || {};
   const productWasteFromReport = currentInventory.productWasteFromReport || 0;
   const [year, month] = inventoryMonth.split("-");
 
@@ -11579,6 +11589,10 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
 
   function updateKassasvinn(val: number) {
     updateInventoryRpc(inventoryMonth, { kassasvinn: val });
+  }
+
+  function updateCashCount(field: "inHouse" | "deliveredLoomis" | "bagsNotDelivered", val: number) {
+    updateInventoryRpc(inventoryMonth, { cashCounts: { ...cashCounts, [field]: val } });
   }
 
   // productWasteFromReport lagres via updateData (helhetlig upsert), ikke via
@@ -11627,12 +11641,13 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
       const idxAntall = header.indexOf("Antall");
       const idxKostpris = header.indexOf("Kostpris");
 
-      const parsedRows: { articleName: string; quantity: number; kostpris: number }[] = [];
+      const parsedRows: { id: string; articleName: string; quantity: number; kostpris: number }[] = [];
       for (let i = headerRowIndex + 1; i < rows.length; i++) {
         const row = rows[i];
         const articleName = String(row[idxArtikkel] ?? "").trim();
         if (!articleName) continue;
         parsedRows.push({
+          id: `waste-row-${i}`,
           articleName,
           quantity: Number(row[idxAntall]) || 0,
           // Kostpris i rapporten er en LINJESUM for hele raden, ikke enhetspris -
@@ -11643,6 +11658,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
 
       setWasteReportRows(parsedRows);
       setWasteReportUnmatchedSelections({});
+      setWasteReportSearch({});
     } catch (e) {
       setWasteReportError("Kunne ikke lese filen. Sjekk at det er en gyldig Favn kastet vare-rapport (.xlsx).");
     } finally {
@@ -11650,19 +11666,25 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     }
   }
 
-  function saveWasteReportMapping(articleName: string) {
-    const productId = wasteReportUnmatchedSelections[articleName];
+  function saveWasteReportMapping(rowId: string) {
+    const productId = wasteReportUnmatchedSelections[rowId];
     if (!productId) return;
+    const row = wasteReportRows.find((r) => r.id === rowId);
+    if (!row) return;
     // Kastet vare-rapporten gjelder kun ferdigprodukter (Product), aldri råvarer direkte.
-    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName, productId, itemType: "product" };
-    const without = (data.reportArticleMappings || []).filter((m) => m.articleName !== articleName);
+    // Mappingen lagres fortsatt keyed på articleName (uendret) - koblingen skal gjelde
+    // varenavnet generelt, slik at ALLE rader med samme navn matches automatisk
+    // etterpå (se wasteReportMatched/wasteReportUnmatched-oppdelingen under), ikke
+    // bare akkurat denne ene raden.
+    const mapping: ReportArticleMapping = { id: `ram-${Date.now()}`, articleName: row.articleName, productId, itemType: "product" };
+    const without = (data.reportArticleMappings || []).filter((m) => m.articleName !== row.articleName);
     updateData({ reportArticleMappings: [...without, mapping] });
   }
 
   // Matching: gjenbruker EKSAKT samme type/liste/logikk som Rapporter-fanen
   // (reportArticleMappings), slik at samme artikkelnavn ikke må kobles to steder.
-  const wasteReportMatched: { articleName: string; quantity: number; kostpris: number; product: Product }[] = [];
-  const wasteReportUnmatched: { articleName: string; quantity: number; kostpris: number }[] = [];
+  const wasteReportMatched: { id: string; articleName: string; quantity: number; kostpris: number; product: Product }[] = [];
+  const wasteReportUnmatched: { id: string; articleName: string; quantity: number; kostpris: number }[] = [];
   wasteReportRows.forEach((row) => {
     // Kastet vare-rapporten gjelder kun ferdigprodukter - ignorer evt. råvare-koblinger
     // (itemType "material") som er lagret fra Rapporter-fanens bredere matching.
@@ -12053,24 +12075,23 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
     function fLbl(ws: any, rowNum: number, col: number, val: string, bold = false) { const cell = ws.getCell(rowNum, col); cell.value = val; cell.font = { bold, size: 11 }; cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; cell.border = border; }
     function fVal(ws: any, rowNum: number, col: number, value: number | string | { formula: string }, bg?: string) { const cell = ws.getCell(rowNum, col); cell.value = value; if (typeof value === "number") cell.numFmt = "#,##0.00"; if (bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + bg } }; cell.alignment = { horizontal: "right", vertical: "middle" }; cell.border = border; }
     function fInputBlue(ws: any, rowNum: number, col: number, val: string) { const cell = ws.getCell(rowNum, col); cell.value = val; cell.font = { bold: true, size: 11 }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + blue } }; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; cell.border = border; }
-    function fInputGreen(ws: any, rowNum: number, col: number) { const cell = ws.getCell(rowNum, col); cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + green } }; cell.alignment = { horizontal: "right", vertical: "middle" }; cell.border = border; cell.font = { size: 18 }; }
     function mergeF(ws: any, r1: number, c1: number, r2: number, c2: number) { ws.mergeCells(r1, c1, r2, c2); }
     wsFront.getRow(1).height = 15.75; wsFront.getRow(2).height = 16.5; wsFront.getRow(3).height = 16.5;
-    mergeF(wsFront, 2, 2, 3, 4); fInputBlue(wsFront, 2, 2, "Guttan på Torget AS");
+    mergeF(wsFront, 2, 2, 3, 4); fInputBlue(wsFront, 2, 2, siteName || "Brødrene Berbusmel");
     const g2 = wsFront.getCell(2, 7); g2.value = "Kontantbeholdning / Cash "; g2.font = { size: 11 }; g2.alignment = { horizontal: "left", vertical: "middle" };
     fInputBlue(wsFront, 2, 8, "(selskap/company)"); fInputBlue(wsFront, 3, 8, "(dato/date)");
     wsFront.getRow(4).height = 19.35; fHdr(wsFront, 4, 2, "VAREBEHOLDNING PR: ", blue, true); mergeF(wsFront, 4, 3, 4, 4); fInputBlue(wsFront, 4, 3, månedLabel);
     wsFront.getRow(5).height = 34.5; fHdr(wsFront, 5, 2, "Varekategori:", blue, true); mergeF(wsFront, 5, 3, 5, 4); fHdr(wsFront, 5, 3, "Sum:", blue, true);
     const g5 = wsFront.getCell(5, 7); g5.value = "Kontantbeholdning in-house (inkl. vekselkasser)/cash in house (incl. cash till)"; g5.font = { size: 11 }; g5.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g5.border = border;
-    fInputGreen(wsFront, 5, 8);
+    fVal(wsFront, 5, 8, cashCounts.inHouse || 0, green);
     const drinkCategories = ["Mineralvann", "Kaffe/te", "Vin", "Øl", "Cider", "Brennevin"];
    const matBuckets = data.materialCategories.filter((c: string) => !drinkCategories.includes(c) && c !== "Mat");
     const egenprodTotal = egenprodusertCategories.reduce((sum: number, b: string) => sum + bucketValue(b), 0);
     const matTotal = matBuckets.reduce((sum: number, b: string) => sum + bucketValue(b), 0) + egenprodTotal;
     wsFront.getRow(6).height = 24.75; fLbl(wsFront, 6, 2, "Mat (Telt på kjøkken-telleliste):"); mergeF(wsFront, 6, 3, 6, 4); fVal(wsFront, 6, 3, Math.round(matTotal * 100) / 100);
-    const g6 = wsFront.getCell(6, 7); g6.value = "Levert Loomis siste mnd/ Delivered to Loomis last month"; g6.font = { size: 11 }; g6.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g6.border = border; fInputGreen(wsFront, 6, 8);
+    const g6 = wsFront.getCell(6, 7); g6.value = "Levert Loomis siste mnd/ Delivered to Loomis last month"; g6.font = { size: 11 }; g6.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g6.border = border; fVal(wsFront, 6, 8, cashCounts.deliveredLoomis || 0, green);
     wsFront.getRow(7).height = 41.25; fLbl(wsFront, 7, 2, "Mat (Evt. eksternt lager):"); mergeF(wsFront, 7, 3, 7, 4); fVal(wsFront, 7, 3, 0);
-    const g7 = wsFront.getCell(7, 7); g7.value = "Poser til Loomis, ikke levert / Bags for Loomis in the safe but not delivered"; g7.font = { size: 11 }; g7.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g7.border = border; fInputGreen(wsFront, 7, 8);
+    const g7 = wsFront.getCell(7, 7); g7.value = "Poser til Loomis, ikke levert / Bags for Loomis in the safe but not delivered"; g7.font = { size: 11 }; g7.alignment = { horizontal: "left", vertical: "middle", wrapText: true }; g7.border = border; fVal(wsFront, 7, 8, cashCounts.bagsNotDelivered || 0, green);
     wsFront.getRow(8).height = 24.75; fLbl(wsFront, 8, 2, "Mat (Telt på bar-telleliste):"); mergeF(wsFront, 8, 3, 8, 4); fVal(wsFront, 8, 3, 0);
     wsFront.getRow(9).height = 24.75; fLbl(wsFront, 9, 2, "Total Mat:", true); mergeF(wsFront, 9, 3, 9, 4);
     const c9 = wsFront.getCell(9, 3); c9.value = { formula: "SUM(C6:C8)" }; c9.numFmt = "#,##0.00"; c9.alignment = { horizontal: "right", vertical: "middle" }; c9.border = border; c9.font = { bold: true };
@@ -12358,6 +12379,39 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
       </div>
 
       <div className="soft-box" style={{ marginBottom: 12 }}>
+        <p style={{ fontWeight: 800, fontSize: 14, marginTop: 0 }}>Kontantbeholdning</p>
+        <div className="form-grid three">
+          <label>Kontantbeholdning in-house (inkl. vekselkasser)
+            <input
+              type="number" disabled={isLocked || readOnly}
+              value={cashCounts.inHouse || ""}
+              onChange={(e) => updateCashCount("inHouse", Number(e.target.value) || 0)}
+              placeholder="0"
+              style={{ background: isLocked ? "#f8fafc" : "white" }}
+            />
+          </label>
+          <label>Levert Loomis siste mnd
+            <input
+              type="number" disabled={isLocked || readOnly}
+              value={cashCounts.deliveredLoomis || ""}
+              onChange={(e) => updateCashCount("deliveredLoomis", Number(e.target.value) || 0)}
+              placeholder="0"
+              style={{ background: isLocked ? "#f8fafc" : "white" }}
+            />
+          </label>
+          <label>Poser til Loomis, ikke levert
+            <input
+              type="number" disabled={isLocked || readOnly}
+              value={cashCounts.bagsNotDelivered || ""}
+              onChange={(e) => updateCashCount("bagsNotDelivered", Number(e.target.value) || 0)}
+              placeholder="0"
+              style={{ background: isLocked ? "#f8fafc" : "white" }}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="soft-box" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
           <label style={{ fontWeight: 800, fontSize: 14 }}>Importer kastet vare-rapport (Favn)</label>
           <input type="file" accept=".xlsx" disabled={readOnly || isLocked} onChange={(e) => handleWasteReportUpload(e.target.files?.[0] || null)} />
@@ -12374,32 +12428,63 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
             {wasteReportUnmatched.length > 0 && (
               <div className="soft-box" style={{ marginTop: 8 }}>
                 <h4 style={{ marginTop: 0 }}>Ikke matchet ({wasteReportUnmatched.length})</h4>
-                {wasteReportUnmatched.map((row) => (
-                  <div key={row.articleName} className="editable-row">
+                {wasteReportUnmatched.map((row) => {
+                  const selectedProductId = wasteReportUnmatchedSelections[row.id];
+                  const selectedProductName = selectedProductId ? (data.products.find((p) => p.id === selectedProductId)?.name || "") : "";
+                  const searchValue = wasteReportSearch[row.id];
+                  const filteredProducts = searchValue
+                    ? data.products.filter((p) => p.name.toLowerCase().includes(searchValue.toLowerCase())).slice(0, 50)
+                    : [];
+                  return (
+                  <div key={row.id} className="editable-row">
                     <div>
                       <b>{row.articleName}</b>
                       <br /><small style={{ color: "#64748b" }}>{row.quantity} stk</small>
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <select
-                        value={wasteReportUnmatchedSelections[row.articleName] || ""}
-                        disabled={readOnly}
-                        onChange={(e) => setWasteReportUnmatchedSelections({ ...wasteReportUnmatchedSelections, [row.articleName]: e.target.value })}
-                      >
-                        <option value="">Velg produkt...</option>
-                        {data.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
+                      <div className="search-picker" style={{ maxWidth: 260 }}>
+                        <input
+                          value={searchValue ?? selectedProductName}
+                          disabled={readOnly}
+                          onChange={(e) => setWasteReportSearch({ ...wasteReportSearch, [row.id]: e.target.value })}
+                          onFocus={() => setWasteReportSearch({ ...wasteReportSearch, [row.id]: "" })}
+                          placeholder="Søk produkt..."
+                        />
+                        {searchValue !== undefined && searchValue !== "" && (
+                          <div className="search-dropdown inline">
+                            {filteredProducts.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="search-result"
+                                onClick={() => {
+                                  setWasteReportUnmatchedSelections({ ...wasteReportUnmatchedSelections, [row.id]: p.id });
+                                  const next = { ...wasteReportSearch };
+                                  delete next[row.id];
+                                  setWasteReportSearch(next);
+                                }}
+                              >
+                                <b>{p.name}</b>
+                              </button>
+                            ))}
+                            {filteredProducts.length === 0 && (
+                              <div className="search-result" style={{ color: "#94a3b8", cursor: "default" }}>Ingen treff</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <button
                         className="btn active"
-                        disabled={readOnly || !wasteReportUnmatchedSelections[row.articleName]}
+                        disabled={readOnly || !wasteReportUnmatchedSelections[row.id]}
                         title={readOnly ? "Du har ikke redigeringstilgang" : undefined}
-                        onClick={() => saveWasteReportMapping(row.articleName)}
+                        onClick={() => saveWasteReportMapping(row.id)}
                       >
                         Lagre kobling
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -17674,6 +17759,8 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
   const [deleteSiteConfirm, setDeleteSiteConfirm] = useState("");
   const [deleteSiteBusy, setDeleteSiteBusy] = useState(false);
 
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+
   const [migrateName, setMigrateName] = useState("Brødrene Berbusmel");
   const [migrateConfirm, setMigrateConfirm] = useState("");
   const [migrateBusy, setMigrateBusy] = useState(false);
@@ -18162,14 +18249,22 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
 
             function group(key: string, title: string, color: string, users: UserAccessEntry[]) {
               if (users.length === 0) return null;
+              const collapsed = !!collapsedGroups[key];
               return (
                 <React.Fragment key={key}>
                   <tr>
                     <td colSpan={6} style={{ paddingTop: 16, paddingBottom: 4 }}>
-                      <h3 style={{ fontSize: 15, fontWeight: 800, margin: 0, borderLeft: `4px solid ${color}`, paddingLeft: 10 }}>{title}</h3>
+                      <h3
+                        onClick={() => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }))}
+                        style={{ fontSize: 15, fontWeight: 800, margin: 0, borderLeft: `4px solid ${color}`, paddingLeft: 10, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, userSelect: "none" }}
+                      >
+                        <span>{collapsed ? "▲" : "▼"}</span>
+                        <span>{title}</span>
+                        <span style={{ color: "#94a3b8", fontWeight: 400 }}>({users.length})</span>
+                      </h3>
                     </td>
                   </tr>
-                  {byNameOrEmail(users).map(userRow)}
+                  {!collapsed && byNameOrEmail(users).map(userRow)}
                 </React.Fragment>
               );
             }
