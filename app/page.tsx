@@ -71,6 +71,7 @@ type Recipe = {
   category: string;
   yieldAmount: number;
   yieldUnit: YieldUnit;
+  productionWastePercent?: number; // Steke-/produksjonssvinn % - vekttap ETTER tilberedning, atskilt fra per-linje wastePercent (FØR tilberedning)
   lines: RecipeLine[];
   steps?: RecipeStep[];
   showOnBaseProductionSheet?: boolean; // "Vis på egen produksjonsliste" - egen side ved print av grunnproduksjon (surdeig o.l.)
@@ -112,6 +113,7 @@ type Product = {
   lines: ProductLine[];
   packaging: ProductPackagingLine[];
   recipeYieldAmount?: number;
+  productionWastePercent?: number; // Steke-/produksjonssvinn % - vekttap ETTER tilberedning, atskilt fra per-linje wastePercent (FØR tilberedning)
   unitWeightKg?: number;
   unitsPerCase?: number;
   isDeliveryProduct?: boolean;
@@ -3894,7 +3896,7 @@ function PriceAgreementsTab({ data, updateData, updateListRpc, readOnly, setTab,
 function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCost, recipeTotalAmount, recipeAllergens, readOnly, isDirty, onDirtyChange, registerSave }: { data: AppData; updateData: (p: Partial<AppData>) => void; updateListRpc: (listKey: "products" | "recipes" | "orders", itemsPatch: Record<string, any>) => void; recipeCost: (r: Recipe) => number; recipeUnitCost: (r: Recipe) => number; recipeTotalAmount: (r: Recipe) => number; recipeAllergens: (r: Recipe) => string[]; readOnly: boolean; isDirty: boolean; onDirtyChange: (dirty: boolean) => void; registerSave: (fn: (() => boolean) | null) => void }) {
   const [selectedId, setSelectedId] = useState(data.recipes[0]?.id || "");
   const [mode, setMode] = useState<"view" | "new" | "edit">("view");
-  const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit, showOnBaseProductionSheet: false });
+  const [form, setForm] = useState({ productNumber: "", name: "", category: "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg" as YieldUnit, productionWastePercent: "", showOnBaseProductionSheet: false });
   const [draftLines, setDraftLines] = useState<RecipeLine[]>([]);
   const [draftSteps, setDraftSteps] = useState<RecipeStep[]>([]);
   const [line, setLine] = useState({ itemType: "material" as "material" | "recipe", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
@@ -3930,7 +3932,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
 
   function startNewRecipe() {
     setMode("new");
-    setForm({ productNumber: "", name: "", category: data.recipeCategories[0] || "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg", showOnBaseProductionSheet: false });
+    setForm({ productNumber: "", name: "", category: data.recipeCategories[0] || "Grunnoppskrift", yieldAmount: "1", yieldUnit: "kg", productionWastePercent: "", showOnBaseProductionSheet: false });
     setDraftLines([]);
     setDraftSteps([]);
     setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
@@ -3942,7 +3944,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
   function editRecipe(r: Recipe) {
     setSelectedId(r.id);
     setMode("edit");
-    setForm({ productNumber: r.productNumber || "", name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit, showOnBaseProductionSheet: !!r.showOnBaseProductionSheet });
+    setForm({ productNumber: r.productNumber || "", name: r.name, category: r.category, yieldAmount: String(r.yieldAmount), yieldUnit: r.yieldUnit, productionWastePercent: String(r.productionWastePercent || ""), showOnBaseProductionSheet: !!r.showOnBaseProductionSheet });
     setDraftLines(r.lines.map((l) => ({ ...l })));
     setDraftSteps((r.steps || []).map((s) => ({ ...s, inputs: s.inputs.map((i) => ({ ...i })) })));
     setLine({ itemType: "material", itemId: "", amount: "0", wastePercent: "", groupLabel: "" });
@@ -3973,6 +3975,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
       category: form.category || data.recipeCategories[0] || "Grunnoppskrift",
       yieldAmount: Number(form.yieldAmount) || 1,
       yieldUnit: form.yieldUnit,
+      productionWastePercent: Number(form.productionWastePercent) || undefined,
       lines: draftLines,
       steps: draftSteps,
       showOnBaseProductionSheet: form.showOnBaseProductionSheet,
@@ -3997,7 +4000,7 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
       steps: (r.steps || []).map((s) => ({ ...s, inputs: s.inputs.map((i) => ({ ...i })) })),
     };
     updateListRpc("recipes", { [copy.id]: copy });
-    setForm({ productNumber: copy.productNumber, name: copy.name, category: copy.category, yieldAmount: String(copy.yieldAmount), yieldUnit: copy.yieldUnit, showOnBaseProductionSheet: !!copy.showOnBaseProductionSheet });
+    setForm({ productNumber: copy.productNumber, name: copy.name, category: copy.category, yieldAmount: String(copy.yieldAmount), yieldUnit: copy.yieldUnit, productionWastePercent: String(copy.productionWastePercent || ""), showOnBaseProductionSheet: !!copy.showOnBaseProductionSheet });
     setDraftLines(copy.lines.map((l) => ({ ...l })));
     setDraftSteps((copy.steps || []).map((s) => ({ ...s, inputs: s.inputs.map((i) => ({ ...i })) })));
     setSelectedId(copy.id);
@@ -4187,6 +4190,15 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             <select value={form.category} disabled={readOnly} onChange={(e) => setForm({ ...form, category: e.target.value })}>
               {Array.from(new Set([...data.recipeCategories, form.category].filter(Boolean))).map((c) => <option key={c}>{c}</option>)}
             </select>
+          </label>
+          <label>Steke-/produksjonssvinn % (valgfritt)
+            <input
+              type="number"
+              value={form.productionWastePercent}
+              disabled={readOnly}
+              onChange={(e) => setForm({ ...form, productionWastePercent: e.target.value })}
+              placeholder="F.eks. 25"
+            />
           </label>
         </div>
 
@@ -4449,11 +4461,11 @@ function RecipesTab({ data, updateData, updateListRpc, recipeCost, recipeUnitCos
             <button className="plain" onClick={() => setSelectedId(r.id)}>
               <b>{r.name}</b><br />
               <small>{r.category} · {r.yieldAmount} {r.yieldUnit} · kost {currency(recipeCost(r))} · {currency(recipeUnitCost(r))}/{r.yieldUnit}</small>
-              {Math.abs(recipeTotalAmount(r) - Number(r.yieldAmount || 0)) > 0.01 && (
+              {Math.abs(recipeTotalAmount(r) * (1 - (Number(r.productionWastePercent) || 0) / 100) - Number(r.yieldAmount || 0)) > 0.01 && (
                 <div style={{ color: "#b45309", fontSize: 12 }}>
                   ⚠ Utbytte stemmer ikke: linjene summerer til {num(recipeTotalAmount(r), 3)} {r.yieldUnit}, men utbytte er satt til {r.yieldAmount} {r.yieldUnit}
                   {" "}
-                  <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => updateListRpc("recipes", { [r.id]: { ...r, yieldAmount: recipeTotalAmount(r) } })}>Fiks automatisk</button>
+                  <button className="link" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => updateListRpc("recipes", { [r.id]: { ...r, yieldAmount: recipeTotalAmount(r) * (1 - (Number(r.productionWastePercent) || 0) / 100) } })}>Fiks automatisk</button>
                 </div>
               )}
             </button>
@@ -4533,6 +4545,7 @@ const [form, setForm] = useState({
   recipeYieldAmount: "1",
 unitWeightKg: "1",
   portionsPerWhole: "",
+  productionWastePercent: "",
   customerPrice: "0",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
@@ -4614,12 +4627,13 @@ productNumber: form.productNumber || getNextProductNumber(form.category),    nam
     yieldAmount: Number(form.unitWeightKg) || 1,
     yieldUnit: form.yieldUnit,
     portionsPerWhole: form.portionsPerWhole ? Number(form.portionsPerWhole) : undefined,
+    productionWastePercent: form.productionWastePercent ? Number(form.productionWastePercent) : undefined,
     customerPrice: Number(form.customerPrice) || 0,
     storkjokkenPriceExVat: form.storkjokkenPriceExVat ? Number(form.storkjokkenPriceExVat) : undefined,
     targetMargin: Number(form.targetMargin) || 70,
     lines: draftLines,
     packaging: draftPackaging,
-    recipeYieldAmount: calculatedRecipeYieldAmount(draftLines) || 1,
+    recipeYieldAmount: (calculatedRecipeYieldAmount(draftLines) * (1 - (Number(form.productionWastePercent) || 0) / 100)) || 1,
 unitWeightKg: Number(form.unitWeightKg) || 0,
   unitsPerCase: Number(form.unitsPerCase) || undefined,
   menuCourses: form.type === "selskapsmeny" ? draftMenuCourses : undefined,
@@ -4649,6 +4663,7 @@ setForm({
   recipeYieldAmount: "1",
 unitWeightKg: "1",
   portionsPerWhole: "",
+  productionWastePercent: "",
   customerPrice: "0",
   storkjokkenPriceExVat: "",
   targetMargin: "70",
@@ -4794,6 +4809,7 @@ productNumber: p.productNumber || "",      name: p.name,
       recipeYieldAmount: String(p.recipeYieldAmount || 1),
 unitWeightKg: String(p.unitWeightKg || p.yieldAmount || 1),
       portionsPerWhole: String(p.portionsPerWhole || ""),
+      productionWastePercent: String(p.productionWastePercent || ""),
       customerPrice: String(p.customerPrice || 0),
       storkjokkenPriceExVat: String(p.storkjokkenPriceExVat || ""),
       targetMargin: String(p.targetMargin || 70),
@@ -4862,6 +4878,7 @@ productNumber: copy.productNumber,    name: copy.name,
     recipeYieldAmount: "1",
 unitWeightKg: "1",
     portionsPerWhole: String(copy.portionsPerWhole || ""),
+    productionWastePercent: String(copy.productionWastePercent || ""),
     customerPrice: String(copy.customerPrice || 0),
     storkjokkenPriceExVat: String(copy.storkjokkenPriceExVat || ""),
     targetMargin: String(copy.targetMargin || 70),
@@ -5631,9 +5648,20 @@ th{background:#f3f4f6}
   <label>Total oppskriftsvekt (kg)
     <input
       type="number"
-      value={calculatedRecipeYieldAmount(draftLines)}
+      value={calculatedRecipeYieldAmount(draftLines) * (1 - (Number(form.productionWastePercent) || 0) / 100)}
       readOnly
       placeholder="Beregnes automatisk"
+    />
+    <small className="muted">Råvarevekt før tilberedning: {calculatedRecipeYieldAmount(draftLines)} kg</small>
+  </label>
+
+  <label>Steke-/produksjonssvinn % (valgfritt)
+    <input
+      type="number"
+      value={form.productionWastePercent}
+      disabled={readOnly}
+      onChange={(e) => setForm({ ...form, productionWastePercent: e.target.value })}
+      placeholder="F.eks. 25"
     />
   </label>
 
