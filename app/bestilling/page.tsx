@@ -6,6 +6,7 @@ type Product = { id: string; name: string; category: string; priceExVat: number;
 type Delivery = { productId: string; name: string; priceExVat: number } | null;
 type HistoryGroup = { date: string; lines: { id: string; productId: string; productName: string; quantity: number; priceExVat: number }[] };
 type PendingItem = { id: string; date: string; submittedAt: string; lines: { productId: string; productName: string; quantity: number }[] };
+type RejectedItem = { id: string; date: string; submittedAt: string; rejectedAt?: string; lines: { productId: string; productName: string; quantity: number }[] };
 type DeadlineDay = { closed?: boolean; cutoffTime?: string };
 type Deadlines = { weekday: Record<number, DeadlineDay>; exceptions: Record<string, DeadlineDay> };
 
@@ -43,6 +44,7 @@ export default function BestillingPortal() {
   const [products, setProducts] = useState<Product[]>([]);
   const [history, setHistory] = useState<HistoryGroup[]>([]);
   const [pending, setPending] = useState<PendingItem[]>([]);
+  const [rejectedOrders, setRejectedOrders] = useState<RejectedItem[]>([]);
   const [deadlines, setDeadlines] = useState<Deadlines>({ weekday: {}, exceptions: {} });
   const [vatRate, setVatRate] = useState(15);
   const [tab, setTab] = useState<"bestill" | "historikk" | "fastordre">("bestill");
@@ -81,6 +83,7 @@ export default function BestillingPortal() {
     }).then((r) => r.json());
     setHistory(json.history || []);
     setPending(json.pending || []);
+    setRejectedOrders(json.rejectedOrders || []);
     setPendingRecurring(json.pendingRecurring || []);
   }
 
@@ -105,6 +108,7 @@ export default function BestillingPortal() {
       setProducts(json.products);
       setHistory(json.history);
       setPending(json.pending);
+      setRejectedOrders(json.rejectedOrders || []);
       setDeadlines(json.deadlines);
       setVatRate(json.vatRate || 15);
       setFavorites(json.favoriteProductIds || []);
@@ -124,6 +128,7 @@ export default function BestillingPortal() {
     setProducts([]);
     setHistory([]);
     setPending([]);
+    setRejectedOrders([]);
     setQuantities({});
   }
 
@@ -397,6 +402,22 @@ async function toggleFavorite(productId: string) {
         </div>
       )}
 
+      {(() => {
+        // Begrenset til siste 14 dagene, slik at en gammel avvisning ikke
+        // fortsetter å dukke opp som et "nytt" varsel hver gang kunden logger
+        // inn - enkel, tidsbegrenset tilnærming i stedet for en egen
+        // sett/ikke sett-sporingsmekanisme.
+        const recentRejected = rejectedOrders.filter(
+          (r) => Date.now() - new Date(r.rejectedAt || r.submittedAt).getTime() < 14 * 24 * 60 * 60 * 1000
+        );
+        if (!recentRejected.length) return null;
+        return (
+          <div style={{ background: "#fee2e2", border: "1px solid #dc2626", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 14, color: "#991b1b" }}>
+            ⚠️ Du har {recentRejected.length} avvist bestilling{recentRejected.length > 1 ? "er" : ""} - se Tidligere bestillinger for detaljer.
+          </div>
+        );
+      })()}
+
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <button
           onClick={() => setTab("bestill")}
@@ -653,6 +674,21 @@ async function toggleFavorite(productId: string) {
               </div>
             );
           })}
+
+          {rejectedOrders.length > 0 && (
+            <div style={{ marginTop: 24 }}>
+              <h3 style={{ color: "#991b1b" }}>Avviste bestillinger</h3>
+              {rejectedOrders.map((r) => (
+                <div key={r.id} style={{ border: "1px solid #fca5a5", background: "#fef2f2", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <b>{r.date}</b>
+                    <span style={{ background: "#dc2626", color: "white", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>Avvist</span>
+                  </div>
+                  <p style={{ margin: "6px 0 0", fontSize: 14 }}>{r.lines.map((l) => `${l.quantity}× ${l.productName}`).join(", ")}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
       {tab === "fastordre" && (

@@ -90,6 +90,20 @@ export async function POST(req: Request) {
         lines: p.lines.map((l: any) => ({ productId: l.productId, productName: productName(l.productId), quantity: l.quantity })),
       }));
 
+    // Avviste bestillinger - EGET felt, IKKE blandet inn i "history" (som
+    // representerer faktiske, leverte henteordre - noe helt annet).
+    const rejectedOrders = (appData.pendingPortalOrders || [])
+      .filter((p: any) => p.customerId === customer.id && p.status === "rejected")
+      .sort((a: any, b: any) => (b.rejectedAt || b.submittedAt).localeCompare(a.rejectedAt || a.submittedAt))
+      .slice(0, 30)
+      .map((p: any) => ({
+        id: p.id,
+        date: p.date,
+        submittedAt: p.submittedAt,
+        rejectedAt: p.rejectedAt,
+        lines: p.lines.map((l: any) => ({ productId: l.productId, productName: productName(l.productId), quantity: l.quantity })),
+      }));
+
     const deadlines = appData.portalDeadlines || { weekday: { 7: { closed: true } }, exceptions: {} };
 
     const activeRecurring = (appData.recurringStorkjokkenOrders || [])
@@ -125,6 +139,7 @@ export async function POST(req: Request) {
       delivery,
       history,
       pending,
+      rejectedOrders,
       deadlines,
       favoriteProductIds: customer.favoriteProductIds || [],
       activeRecurring,

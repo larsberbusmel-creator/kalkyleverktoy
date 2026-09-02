@@ -501,6 +501,7 @@ type PendingPortalOrder = {
   note?: string;
   deliveryTime?: string;
   reminderSentAt?: string; // DEL E2: hindrer at cronjobben sender flere påminnelser for samme bestilling
+  rejectedAt?: string; // satt av rejectPendingPortalOrder() - brukes til å vise/sortere avviste bestillinger i portalen
 };
 
 type PendingRecurringOrderRequest = {
@@ -8722,7 +8723,17 @@ function ProductionTab({
   }
 
   function rejectPendingPortalOrder(id: string) {
-    updateData({ pendingPortalOrders: (data.pendingPortalOrders || []).map((p) => p.id === id ? { ...p, status: "rejected" } : p) });
+    const pending = (data.pendingPortalOrders || []).find((p) => p.id === id);
+    if (!pending) return;
+    updateData({ pendingPortalOrders: (data.pendingPortalOrders || []).map((p) => p.id === id ? { ...p, status: "rejected", rejectedAt: new Date().toISOString() } : p) });
+    // Fire-and-forget e-postvarsel til kunden - ikke blokkerende for UI-et.
+    // Avvisningen er uansett allerede lagret via updateData over, så en
+    // feilet/treg e-post skal ikke kunne påvirke selve avvisnings-flyten.
+    fetch("/api/kunde/notify-rejection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customerId: pending.customerId, orderId: id }),
+    }).catch((e) => console.error("Kunne ikke varsle kunde om avvisning:", e));
   }
 
   // DEL F: godkjent endring av en storkjøkken-bestilling ETTER frist.
