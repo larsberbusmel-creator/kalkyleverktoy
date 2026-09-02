@@ -1304,7 +1304,11 @@ export default function Page() {
   const [materialToOpen, setMaterialToOpen] = useState<string | null>(null);
   const [priceAgreementToOpen, setPriceAgreementToOpen] = useState<string | null>(null);
   const [data, setData] = useState<AppData>(initialData);
-  const isSavingRef = React.useRef(false);
+    const isSavingRef = React.useRef(0); // teller (ikke boolsk) - flere samtidige lagringer
+  // kan være underveis på én gang (f.eks. rask utfylling nedover en liste); en enkelt
+  // boolsk bryter ville latt DEN FØRSTE lagringen som fullfører slå av beskyttelsen for
+  // ALLE andre som fortsatt er underveis, og eksponere dem for et forsinket sanntids-ekko
+  // som overskriver nyere, ubeskyttede endringer.
 
   // "Vil du lagre før du avslutter"-mekanisme (foreløpig kun Ordre/Produkter/
   // Grunnoppskrifter) - dirtyTabs er kildesannheten for om en fane har
@@ -1641,7 +1645,7 @@ export default function Page() {
   const updateData = React.useCallback((partial: Partial<AppData>) => {
   setData((prev) => {
     const next = { ...prev, ...partial };
-    isSavingRef.current = true;
+    isSavingRef.current += 1;
     supabase
       .from("app_data")
       .upsert({
@@ -1651,7 +1655,7 @@ export default function Page() {
       })
       .then(({ error }) => {
         if (error) console.error("Supabase save error:", error);
-        setTimeout(() => { isSavingRef.current = false; }, 2000);
+        setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 2000);
       });
     return next;
   });
@@ -1679,7 +1683,7 @@ export default function Page() {
 
       const next = { ...prev, inventoryCounts: { ...(prev.inventoryCounts || {}), [month]: nextMonth } };
 
-      isSavingRef.current = true;
+      isSavingRef.current += 1;
       supabase.rpc("update_inventory_items", {
         p_month: month,
         p_items_patch: patch.itemsPatch || null,
@@ -1700,7 +1704,7 @@ export default function Page() {
             .update({ updated_at: new Date().toISOString() })
             .eq("id", "main");
         }
-        setTimeout(() => { isSavingRef.current = false; }, 500);
+        setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 500);
       });
 
       return next;
@@ -1721,12 +1725,12 @@ export default function Page() {
         .map(([, mat]) => mat as Material);
       if (newMaterials.length) next.materials = [...next.materials, ...newMaterials];
 
-      isSavingRef.current = true;
+      isSavingRef.current += 1;
       supabase.rpc("update_materials", {
         p_materials: materialsPatch,
       }).then(({ error }: any) => {
         if (error) console.error("Supabase RPC error (materials):", error);
-        setTimeout(() => { isSavingRef.current = false; }, 500);
+        setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 500);
       });
 
       return next;
@@ -1743,13 +1747,13 @@ export default function Page() {
         .map(([, item]) => item);
       if (newItems.length) next[listKey] = [...next[listKey], ...newItems];
 
-      isSavingRef.current = true;
+      isSavingRef.current += 1;
       supabase.rpc("update_list_items", {
         p_list_key: listKey,
         p_items: itemsPatch,
       }).then(({ error }: any) => {
         if (error) console.error(`Supabase RPC error (${listKey}):`, error);
-        setTimeout(() => { isSavingRef.current = false; }, 2000);
+        setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 2000);
       });
 
       return next;
