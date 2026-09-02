@@ -2348,7 +2348,7 @@ return (
         {tab === "priceAgreements" && <PriceAgreementsTab data={data} updateData={updateData} updateListRpc={updateListRpc} readOnly={!canEdit("priceAgreements")} setTab={setTab} setMaterialToOpen={setMaterialToOpen} pendingAgreementId={priceAgreementToOpen} clearPendingAgreementId={() => setPriceAgreementToOpen(null)} linkMaterialToAgreement={linkMaterialToAgreement} unlinkMaterialFromAgreement={unlinkMaterialFromAgreement} resyncMaterialForAgreement={resyncMaterialForAgreement} />}
         {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} userEmail={userEmail} />}
-        {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} syncSharedData={syncSharedData} />}
+        {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} syncSharedData={syncSharedData} activeSiteId={activeSiteId} switchActiveSite={switchActiveSite} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
@@ -17643,12 +17643,14 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
   );
 }
 
-function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData }: {
+function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData, activeSiteId, switchActiveSite }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   allTabConfig: { key: Tab; label: string; icon: string; color: string }[];
   isSuperadmin: boolean;
   syncSharedData: (shared: { sites: Site[]; priceAgreements: PriceAgreementEntry[]; priceAgreementTypes: PriceAgreementType[]; userAccess: UserAccessEntry[] }) => void;
+  activeSiteId: string | null;
+  switchActiveSite: (newId: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -17664,8 +17666,13 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
   const [form, setForm] = useState<UserAccessEntry>(emptyEntry());
 
   const [siteForm, setSiteForm] = useState<{ name: string; enabledTabs: Tab[]; logoFile: File | null }>({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+  const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [siteBusy, setSiteBusy] = useState(false);
   const [siteFeedback, setSiteFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const [deletingSiteId, setDeletingSiteId] = useState<string | null>(null);
+  const [deleteSiteConfirm, setDeleteSiteConfirm] = useState("");
+  const [deleteSiteBusy, setDeleteSiteBusy] = useState(false);
 
   const [migrateName, setMigrateName] = useState("Brødrene Berbusmel");
   const [migrateConfirm, setMigrateConfirm] = useState("");
@@ -17795,7 +17802,39 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
     }));
   }
 
-  async function createSite() {
+  // Felles mønster for opprett/rediger/slett sted: hent FERSK "main"-data rett
+  // før en full erstatning av sites-listen bygges (lokal data.sites kan være
+  // utdatert - en annen økt kan ha endret listen i mellomtiden), skriv den
+  // oppdaterte listen tilbake via updateData (ruter automatisk til "main" siden
+  // sites er en ren delt nøkkel), og synk lokal state umiddelbart med HELE det
+  // ferske settet av delte nøkler (ikke bare sites) - samme mønster som
+  // syncSharedData bruker etter migrering, slik at brukeren ikke må vente på
+  // sanntid/polling for å se resultatet.
+  async function updateSitesList(buildSites: (freshSites: Site[]) => Site[]): Promise<Site[]> {
+    const freshMain = await fetchFreshMainData();
+    const newSites = buildSites(freshMain.sites);
+    updateData({ sites: newSites });
+    syncSharedData({
+      sites: newSites,
+      priceAgreements: freshMain.priceAgreements,
+      priceAgreementTypes: freshMain.priceAgreementTypes,
+      userAccess: freshMain.userAccess,
+    });
+    return newSites;
+  }
+
+  function startEditSite(s: Site) {
+    setSiteForm({ name: s.name, enabledTabs: [...s.enabledTabs], logoFile: null });
+    setEditingSiteId(s.id);
+    setSiteFeedback(null);
+  }
+  function cancelEditSite() {
+    setEditingSiteId(null);
+    setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+    setSiteFeedback(null);
+  }
+
+  async function saveSite() {
     if (!siteForm.name.trim()) return alert("Legg inn navn på stedet.");
     setSiteBusy(true);
     setSiteFeedback(null);
@@ -17810,34 +17849,89 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
       }
       logoPath = path;
     }
-    const newSite: Site = {
-      id: `site-${Date.now()}`,
-      name: siteForm.name.trim(),
-      enabledTabs: siteForm.enabledTabs,
-      createdAt: new Date().toISOString(),
-      ...(logoPath ? { logoUrl: logoPath } : {}),
-    };
-    const { error: insertError } = await supabase.from("app_data").insert({ id: newSite.id, data: omitSharedKeys(initialData), updated_at: new Date().toISOString() });
-    if (insertError) {
+
+    if (editingSiteId === null) {
+      const newSite: Site = {
+        id: `site-${Date.now()}`,
+        name: siteForm.name.trim(),
+        enabledTabs: siteForm.enabledTabs,
+        createdAt: new Date().toISOString(),
+        ...(logoPath ? { logoUrl: logoPath } : {}),
+      };
+      const { error: insertError } = await supabase.from("app_data").insert({ id: newSite.id, data: omitSharedKeys(initialData), updated_at: new Date().toISOString() });
+      if (insertError) {
+        setSiteBusy(false);
+        setSiteFeedback({ type: "error", text: `Kunne ikke opprette sted-raden: ${insertError.message}` });
+        return;
+      }
+      try {
+        await updateSitesList((freshSites) => [...freshSites, newSite]);
+      } catch (e: any) {
+        setSiteBusy(false);
+        setSiteFeedback({ type: "error", text: `Sted-raden ble opprettet, men kunne ikke registrere den i "main": ${e?.message || e}. Prøv å laste siden på nytt og opprett stedet på nytt om det ikke dukker opp.` });
+        return;
+      }
       setSiteBusy(false);
-      setSiteFeedback({ type: "error", text: `Kunne ikke opprette sted-raden: ${insertError.message}` });
-      return;
+      setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+      setSiteFeedback({ type: "success", text: `Stedet "${newSite.name}" er opprettet.` });
+    } else {
+      const name = siteForm.name.trim();
+      const enabledTabs = siteForm.enabledTabs;
+      try {
+        await updateSitesList((freshSites) => freshSites.map((s) => s.id === editingSiteId
+          ? { ...s, name, enabledTabs, ...(logoPath ? { logoUrl: logoPath } : {}) }
+          : s));
+      } catch (e: any) {
+        setSiteBusy(false);
+        setSiteFeedback({ type: "error", text: `Kunne ikke lagre endringer for stedet: ${e?.message || e}. Prøv igjen.` });
+        return;
+      }
+      setSiteBusy(false);
+      setEditingSiteId(null);
+      setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+      setSiteFeedback({ type: "success", text: `Stedet "${name}" er oppdatert.` });
     }
-    // Hent FERSK sites-liste rett før vi bygger den nye - lokal data.sites kan være
-    // utdatert (en annen økt kan ha opprettet et sted i mellomtiden), og en full
-    // erstatning bygget på en utdatert liste ville usynlig slettet det stedet igjen.
-    let freshSites: Site[];
+  }
+
+  function startDeleteSite(id: string) {
+    setDeletingSiteId(id);
+    setDeleteSiteConfirm("");
+    setSiteFeedback(null);
+  }
+  function cancelDeleteSite() {
+    setDeletingSiteId(null);
+    setDeleteSiteConfirm("");
+  }
+
+  async function confirmDeleteSite(site: Site) {
+    if (deleteSiteConfirm.trim() !== site.name) return alert(`Skriv stedets navn ("${site.name}") nøyaktig for å bekrefte.`);
+    setDeleteSiteBusy(true);
+    setSiteFeedback(null);
+    // Alt-eller-ingenting: fjern stedet fra sites-listen FØRST, og fortsett KUN til
+    // selve raden slettes hvis dette lykkes - ellers ville en feilet listeoppdatering
+    // kunnet la data-raden bli slettet uten at stedet faktisk ble fjernet fra listen
+    // (eller omvendt), samme prinsipp som insert-før-main-oppdatering i migreringen.
+    let remainingSites: Site[];
     try {
-      freshSites = (await fetchFreshMainData()).sites;
+      remainingSites = await updateSitesList((freshSites) => freshSites.filter((s) => s.id !== site.id));
     } catch (e: any) {
-      setSiteBusy(false);
-      setSiteFeedback({ type: "error", text: `Sted-raden ble opprettet, men kunne ikke hente fersk sted-liste for å registrere den i "main": ${e?.message || e}. Prøv å laste siden på nytt og opprett stedet på nytt om det ikke dukker opp.` });
+      setDeleteSiteBusy(false);
+      setSiteFeedback({ type: "error", text: `Kunne ikke fjerne stedet fra listen - ingenting ble slettet: ${e?.message || e}. Prøv igjen.` });
       return;
     }
-    updateData({ sites: [...freshSites, newSite] });
-    setSiteBusy(false);
-    setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
-    setSiteFeedback({ type: "success", text: `Stedet "${newSite.name}" er opprettet.` });
+    const { error: deleteError } = await supabase.from("app_data").delete().eq("id", site.id);
+    if (deleteError) {
+      setDeleteSiteBusy(false);
+      setSiteFeedback({ type: "error", text: `Stedet ble fjernet fra sted-listen, men selve data-raden ("${site.id}") kunne ikke slettes: ${deleteError.message}. All data for stedet ligger fortsatt i databasen - kontakt utvikler for manuell opprydding.` });
+      return;
+    }
+    if (activeSiteId === site.id && remainingSites.length > 0) {
+      switchActiveSite(remainingSites[0].id);
+    }
+    setDeletingSiteId(null);
+    setDeleteSiteConfirm("");
+    setDeleteSiteBusy(false);
+    setSiteFeedback({ type: "success", text: `Stedet "${site.name}" er slettet.` });
   }
 
   async function runMigration() {
@@ -18035,39 +18129,131 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
       <table style={{ marginTop: 16 }}>
         <thead><tr><th>Navn</th><th>E-post</th><th>Rolle</th><th>Sted</th><th>Faner (se/rediger)</th><th></th></tr></thead>
         <tbody>
-          {[...data.userAccess].sort((a, b) => {
-            if (a.role === "superadmin" && b.role !== "superadmin") return -1;
-            if (b.role === "superadmin" && a.role !== "superadmin") return 1;
-            const siteA = a.siteId || "";
-            const siteB = b.siteId || "";
-            if (siteA !== siteB) return siteA.localeCompare(siteB);
-            return (a.name || a.email).localeCompare(b.name || b.email);
-          }).map((u) => (
-            <tr key={u.id}>
-              <td>{u.name || "-"}</td>
-              <td>{u.email}</td>
-              <td>{u.role === "superadmin" ? "Superadmin" : "Bruker"}</td>
-              <td>{u.role === "superadmin" ? "Alle" : (data.sites.find((s) => s.id === u.siteId)?.name || "-")}</td>
-              <td>
-                {u.role === "superadmin"
-                  ? "Alt"
-                  : allTabConfig.filter((t) => u.permissions[t.key]?.view).map((t) => t.label + (u.permissions[t.key]?.edit ? " (rediger)" : " (se)")).join(", ") || "Ingen"}
-              </td>
-              <td style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button className="btn" onClick={() => startEdit(u)}>Rediger</button>
-                <button className="btn" disabled={busy} onClick={() => resetPassword(u)}>Send passord-tilbakestilling</button>
-                {u.authUserId && (
-                  <button className="btn danger" disabled={busy} onClick={() => deleteLogin(u)}>Slett innlogging</button>
-                )}
-                <button className="btn danger" disabled={busy} onClick={() => deleteEntry(u.id)}>Slett</button>
-              </td>
-            </tr>
-          ))}
+          {(() => {
+            // Sorteringsrekkefølge/visning av den enkelte brukerraden er uendret fra
+            // før - kun grupperingen med overskrift per sted (og Superadmin/Ikke
+            // tildelt sted som egne grupper) er nytt.
+            const byNameOrEmail = (list: UserAccessEntry[]) =>
+              [...list].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+
+            function userRow(u: UserAccessEntry) {
+              return (
+                <tr key={u.id}>
+                  <td>{u.name || "-"}</td>
+                  <td>{u.email}</td>
+                  <td>{u.role === "superadmin" ? "Superadmin" : "Bruker"}</td>
+                  <td>{u.role === "superadmin" ? "Alle" : (data.sites.find((s) => s.id === u.siteId)?.name || "-")}</td>
+                  <td>
+                    {u.role === "superadmin"
+                      ? "Alt"
+                      : allTabConfig.filter((t) => u.permissions[t.key]?.view).map((t) => t.label + (u.permissions[t.key]?.edit ? " (rediger)" : " (se)")).join(", ") || "Ingen"}
+                  </td>
+                  <td style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="btn" onClick={() => startEdit(u)}>Rediger</button>
+                    <button className="btn" disabled={busy} onClick={() => resetPassword(u)}>Send passord-tilbakestilling</button>
+                    {u.authUserId && (
+                      <button className="btn danger" disabled={busy} onClick={() => deleteLogin(u)}>Slett innlogging</button>
+                    )}
+                    <button className="btn danger" disabled={busy} onClick={() => deleteEntry(u.id)}>Slett</button>
+                  </td>
+                </tr>
+              );
+            }
+
+            function group(key: string, title: string, color: string, users: UserAccessEntry[]) {
+              if (users.length === 0) return null;
+              return (
+                <React.Fragment key={key}>
+                  <tr>
+                    <td colSpan={6} style={{ paddingTop: 16, paddingBottom: 4 }}>
+                      <h3 style={{ fontSize: 15, fontWeight: 800, margin: 0, borderLeft: `4px solid ${color}`, paddingLeft: 10 }}>{title}</h3>
+                    </td>
+                  </tr>
+                  {byNameOrEmail(users).map(userRow)}
+                </React.Fragment>
+              );
+            }
+
+            const superadmins = data.userAccess.filter((u) => u.role === "superadmin");
+            const sortedSites = [...data.sites].sort((a, b) => a.name.localeCompare(b.name));
+            const unassigned = data.userAccess.filter((u) => u.role !== "superadmin" && !data.sites.some((s) => s.id === u.siteId));
+
+            return (
+              <>
+                {group("superadmin", "Superadmin", "#9333ea", superadmins)}
+                {sortedSites.map((s) => group(s.id, s.name, "#0891b2", data.userAccess.filter((u) => u.siteId === s.id)))}
+                {group("unassigned", "Ikke tildelt sted", "#dc2626", unassigned)}
+              </>
+            );
+          })()}
         </tbody>
       </table>
 
+      {data.sites.length > 0 && (
+        <div className="soft-box" style={{ marginTop: 24 }}>
+          <h3 style={{ marginTop: 0 }}>Steder</h3>
+          <table>
+            <thead><tr><th>Navn</th><th>Faner</th><th></th></tr></thead>
+            <tbody>
+              {[...data.sites].sort((a, b) => a.name.localeCompare(b.name)).map((s) => {
+                const usersAtSite = data.userAccess.filter((u) => u.siteId === s.id).length;
+                // Siste gjenværende sted kan ikke slettes - da ville aktivt sted (for
+                // superadmin i denne økten) blitt stående uten noe sted å bytte til.
+                const isLastSite = data.sites.length === 1;
+                return (
+                  <tr key={s.id}>
+                    <td>{s.name}</td>
+                    <td>{s.enabledTabs.length} av {ALL_TABS.length}</td>
+                    <td style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <button className="btn" onClick={() => startEditSite(s)}>Rediger</button>
+                      {usersAtSite > 0 ? (
+                        <button className="btn danger" disabled title={`Kan ikke slettes - ${usersAtSite} bruker${usersAtSite === 1 ? "" : "e"} er tildelt dette stedet`}>
+                          Kan ikke slettes ({usersAtSite} bruker{usersAtSite === 1 ? "" : "e"})
+                        </button>
+                      ) : isLastSite ? (
+                        <button className="btn danger" disabled title="Kan ikke slettes - dette er det eneste gjenværende stedet">
+                          Kan ikke slette siste sted
+                        </button>
+                      ) : (
+                        <button className="btn danger" onClick={() => startDeleteSite(s.id)}>Slett</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {deletingSiteId && (() => {
+            const site = data.sites.find((s) => s.id === deletingSiteId);
+            if (!site) return null;
+            return (
+              <div className="soft-box" style={{ marginTop: 12, border: "2px solid #dc2626" }}>
+                <p style={{ color: "#dc2626", fontWeight: 700 }}>
+                  ⚠️ Slette "{site.name}"? Dette fjerner ALL data for stedet permanent (råvarer, ordre, varetelling, alt) og kan IKKE angres.
+                </p>
+                <div className="form-grid three">
+                  <label>Skriv stedets navn ("{site.name}") for å bekrefte
+                    <input value={deleteSiteConfirm} onChange={(e) => setDeleteSiteConfirm(e.target.value)} />
+                  </label>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                    <button className="btn danger" disabled={deleteSiteBusy || deleteSiteConfirm.trim() !== site.name} onClick={() => confirmDeleteSite(site)}>
+                      {deleteSiteBusy ? "Sletter..." : "Bekreft sletting"}
+                    </button>
+                    <button className="btn" onClick={cancelDeleteSite}>Avbryt</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       <div className="soft-box" style={{ marginTop: 24 }}>
-        <h3 style={{ marginTop: 0 }}>Opprett nytt sted</h3>
+        <div className="between">
+          <h3 style={{ marginTop: 0 }}>{editingSiteId ? "Rediger sted" : "Opprett nytt sted"}</h3>
+          {editingSiteId && <button className="btn" onClick={cancelEditSite}>Avbryt</button>}
+        </div>
         {siteFeedback && (
           <div style={siteFeedback.type === "success"
             ? { background: "#dcfce7", border: "1px solid #16a34a", borderRadius: 12, padding: 12, margin: "12px 0", color: "#166534" }
@@ -18080,10 +18266,16 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
           <label>Navn på stedet
             <input value={siteForm.name} onChange={(e) => setSiteForm({ ...siteForm, name: e.target.value })} placeholder="F.eks. Bodø" />
           </label>
-          <label>Logo (valgfritt)
+          <label>{editingSiteId ? "Ny logo (valgfritt - behold nåværende ved å la stå tom)" : "Logo (valgfritt)"}
             <input type="file" accept="image/*" onChange={(e) => setSiteForm({ ...siteForm, logoFile: e.target.files?.[0] || null })} />
           </label>
         </div>
+        {editingSiteId && (
+          <div style={{ marginBottom: 8 }}>
+            <p style={{ fontSize: 13, color: "#64748b", marginBottom: 4 }}>Nåværende logo:</p>
+            <SiteLogo path={data.sites.find((s) => s.id === editingSiteId)?.logoUrl} fallbackSrc="/logo.png" alt="Nåværende logo" style={{ height: 40, width: "auto", objectFit: "contain" }} />
+          </div>
+        )}
         <p style={{ fontWeight: 700, marginBottom: 6 }}>Faner dette stedet skal ha tilgang til</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           {allTabConfig.map((t) => (
@@ -18093,8 +18285,8 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
             </label>
           ))}
         </div>
-        <button className="btn active" style={{ marginTop: 12 }} disabled={siteBusy} onClick={createSite}>
-          {siteBusy ? "Oppretter..." : "Opprett sted"}
+        <button className="btn active" style={{ marginTop: 12 }} disabled={siteBusy} onClick={saveSite}>
+          {siteBusy ? "Lagrer..." : editingSiteId ? "Lagre endringer" : "Opprett sted"}
         </button>
       </div>
     </section>
