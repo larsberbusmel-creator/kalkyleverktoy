@@ -1201,6 +1201,19 @@ rentalOffers: (raw as any).rentalOffers || [],
   };
 }
 
+// Henter FERSK "main"-data direkte fra Supabase, rett før en full erstatning
+// av en delt liste (sites/priceAgreementTypes/userAccess) skrives. Lokal
+// React-state kan være utdatert (sanntid rekker ikke alltid frem før neste
+// klikk, eller en annen fane/enhet skrev samtidig) - å bygge en "erstatt hele
+// listen"-oppdatering ut fra en utdatert lokal kopi kan usynlig slette noe
+// som nettopp ble lagret av noen andre. Kastes videre ved feil - kalleren
+// avgjør hvordan det håndteres (typisk: vis feilmelding, ikke fortsett).
+async function fetchFreshMainData(): Promise<AppData> {
+  const { data: row, error } = await supabase.from("app_data").select("data").eq("id", "main").single();
+  if (error) throw error;
+  return migrateData(row?.data || {});
+}
+
 function PageHeader({ icon, title, color }: { icon: string; title: string; color: string }) {
   return (
     <div
@@ -2191,6 +2204,15 @@ function productCost(product: Product, visited: string[] = []) {
     setActiveSiteId(newId);
   }
 
+  // Kalles av UsersTab rett etter en vellykket engangs-migrering (som skriver til
+  // Supabase direkte, utenom updateData) - synkroniserer lokal state umiddelbart som
+  // et ekstra sikkerhetsnett i tillegg til "last siden på nytt"-meldingen, i tilfelle
+  // brukeren ikke laster på nytt med det samme.
+  function syncSharedData(shared: { sites: Site[]; priceAgreements: PriceAgreementEntry[]; priceAgreementTypes: PriceAgreementType[]; userAccess: UserAccessEntry[] }) {
+    sharedDataRef.current = shared;
+    setData((prev) => ({ ...prev, ...shared }));
+  }
+
   const tabConfig = allTabConfig.filter((t) => {
     if (t.key === "dashboard") return true;
     if (t.key === "users") return isSuperadmin;
@@ -2294,7 +2316,7 @@ return (
         {tab === "priceAgreements" && <PriceAgreementsTab data={data} updateData={updateData} updateListRpc={updateListRpc} readOnly={!canEdit("priceAgreements")} setTab={setTab} setMaterialToOpen={setMaterialToOpen} pendingAgreementId={priceAgreementToOpen} clearPendingAgreementId={() => setPriceAgreementToOpen(null)} linkMaterialToAgreement={linkMaterialToAgreement} unlinkMaterialFromAgreement={unlinkMaterialFromAgreement} resyncMaterialForAgreement={resyncMaterialForAgreement} />}
         {tab === "reports"    && <ReportsTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("reports")} />}
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} userEmail={userEmail} />}
-        {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} />}
+        {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} syncSharedData={syncSharedData} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
@@ -3442,11 +3464,20 @@ function PriceAgreementsTab({ data, updateData, updateListRpc, readOnly, setTab,
     setShowForm(false);
   }
 
-  function deleteEntry(id: string) {
+  async function deleteEntry(id: string) {
     if (!confirm("Slette avtaleprisen?")) return;
     const entry = data.priceAgreements.find((a) => a.id === id);
     if (entry?.materialId) unlinkMaterialFromAgreement(id);
-    updateData({ priceAgreements: (data.priceAgreements || []).filter((a) => a.id !== id) });
+    // Fersk liste rett før full erstatning - lokal data.priceAgreements kan være
+    // utdatert (en annen økt kan ha lagt til/endret en avtalepris i mellomtiden).
+    let freshAgreements: PriceAgreementEntry[];
+    try {
+      freshAgreements = (await fetchFreshMainData()).priceAgreements;
+    } catch (e: any) {
+      alert(`Kunne ikke hente fersk liste over avtalepriser før sletting: ${e?.message || e}. Prøv igjen.`);
+      return;
+    }
+    updateData({ priceAgreements: freshAgreements.filter((a) => a.id !== id) });
     if (editingId === id) reset();
   }
 
@@ -3487,12 +3518,21 @@ function PriceAgreementsTab({ data, updateData, updateListRpc, readOnly, setTab,
       <select
         value={value}
         disabled={readOnly}
-        onChange={(e) => {
+        onChange={async (e) => {
           if (e.target.value === "__new__") {
             const name = window.prompt("Navn på ny avtaletype");
             if (name && name.trim()) {
               const newType: PriceAgreementType = { id: `pat-${Date.now()}`, name: name.trim() };
-              updateData({ priceAgreementTypes: [...(data.priceAgreementTypes || []), newType] });
+              // Fersk liste rett før full erstatning - lokal data.priceAgreementTypes
+              // kan være utdatert (en annen økt kan ha lagt til en type i mellomtiden).
+              let freshTypes: PriceAgreementType[];
+              try {
+                freshTypes = (await fetchFreshMainData()).priceAgreementTypes;
+              } catch (err: any) {
+                alert(`Kunne ikke hente fersk liste over avtaletyper: ${err?.message || err}. Prøv igjen.`);
+                return;
+              }
+              updateData({ priceAgreementTypes: [...freshTypes, newType] });
               onChange(newType.id);
             }
           } else {
@@ -17571,11 +17611,12 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
   );
 }
 
-function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
+function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   allTabConfig: { key: Tab; label: string; icon: string; color: string }[];
   isSuperadmin: boolean;
+  syncSharedData: (shared: { sites: Site[]; priceAgreements: PriceAgreementEntry[]; priceAgreementTypes: PriceAgreementType[]; userAccess: UserAccessEntry[] }) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -17638,17 +17679,37 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
   function cancelEdit() {
     setEditingId(null);
   }
-  function saveEntry() {
+  async function saveEntry() {
     if (!form.email.trim()) return alert("Legg inn e-postadresse.");
-    const next = editingId === "new"
-      ? [...data.userAccess, form]
-      : data.userAccess.map((u) => (u.id === form.id ? form : u));
-    updateData({ userAccess: next });
-    setEditingId(null);
+    setBusy(true);
+    setFeedback(null);
+    try {
+      // Fersk liste rett før full erstatning - lokal data.userAccess kan være
+      // utdatert (en annen admin-økt kan ha lagt til/endret en bruker i mellomtiden).
+      const freshUserAccess = (await fetchFreshMainData()).userAccess;
+      const next = editingId === "new"
+        ? [...freshUserAccess, form]
+        : freshUserAccess.map((u) => (u.id === form.id ? form : u));
+      updateData({ userAccess: next });
+      setEditingId(null);
+    } catch (e: any) {
+      setFeedback({ type: "error", text: `Kunne ikke hente fersk brukerliste før lagring: ${e?.message || e}. Prøv igjen.` });
+    } finally {
+      setBusy(false);
+    }
   }
-  function deleteEntry(id: string) {
+  async function deleteEntry(id: string) {
     if (!confirm("Fjerne denne brukerens tilgangsoppsett?")) return;
-    updateData({ userAccess: data.userAccess.filter((u) => u.id !== id) });
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const freshUserAccess = (await fetchFreshMainData()).userAccess;
+      updateData({ userAccess: freshUserAccess.filter((u) => u.id !== id) });
+    } catch (e: any) {
+      setFeedback({ type: "error", text: `Kunne ikke hente fersk brukerliste før sletting: ${e?.message || e}. Prøv igjen.` });
+    } finally {
+      setBusy(false);
+    }
   }
   function togglePermission(tabKey: Tab, field: "view" | "edit") {
     const current = form.permissions[tabKey] || { view: false, edit: false };
@@ -17730,7 +17791,18 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
       setSiteFeedback({ type: "error", text: `Kunne ikke opprette sted-raden: ${insertError.message}` });
       return;
     }
-    updateData({ sites: [...data.sites, newSite] });
+    // Hent FERSK sites-liste rett før vi bygger den nye - lokal data.sites kan være
+    // utdatert (en annen økt kan ha opprettet et sted i mellomtiden), og en full
+    // erstatning bygget på en utdatert liste ville usynlig slettet det stedet igjen.
+    let freshSites: Site[];
+    try {
+      freshSites = (await fetchFreshMainData()).sites;
+    } catch (e: any) {
+      setSiteBusy(false);
+      setSiteFeedback({ type: "error", text: `Sted-raden ble opprettet, men kunne ikke hente fersk sted-liste for å registrere den i "main": ${e?.message || e}. Prøv å laste siden på nytt og opprett stedet på nytt om det ikke dukker opp.` });
+      return;
+    }
+    updateData({ sites: [...freshSites, newSite] });
     setSiteBusy(false);
     setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
     setSiteFeedback({ type: "success", text: `Stedet "${newSite.name}" er opprettet.` });
@@ -17747,18 +17819,29 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
       enabledTabs: ALL_TABS,
       createdAt: new Date().toISOString(),
     };
-    const siteData = omitSharedKeys(data);
     try {
+      // Hent FERSK "main"-data rett før migreringen bygger sine lister - lokal
+      // data kan være utdatert. Dobbelsjekker samtidig at ingen andre allerede har
+      // kjørt migreringen i mellomtiden (sites ville da ikke lenger vært tom).
+      const freshMain = await fetchFreshMainData();
+      if (freshMain.sites && freshMain.sites.length > 0) {
+        throw new Error('Migrering er allerede kjørt av noen andre (fant eksisterende steder i "main"). Last siden på nytt.');
+      }
+      const siteData = omitSharedKeys(freshMain);
       const { error: insertError } = await supabase.from("app_data").insert({ id: newSite.id, data: siteData, updated_at: new Date().toISOString() });
       if (insertError) throw insertError;
       const newMainData = {
         sites: [newSite],
-        priceAgreements: data.priceAgreements,
-        priceAgreementTypes: data.priceAgreementTypes,
-        userAccess: data.userAccess.map((u) => (u.role === "superadmin" ? u : { ...u, siteId: newSite.id })),
+        priceAgreements: freshMain.priceAgreements,
+        priceAgreementTypes: freshMain.priceAgreementTypes,
+        userAccess: freshMain.userAccess.map((u) => (u.role === "superadmin" ? u : { ...u, siteId: newSite.id })),
       };
       const { error: mainError } = await supabase.from("app_data").upsert({ id: "main", data: newMainData, updated_at: new Date().toISOString() });
       if (mainError) throw mainError;
+      // Sikkerhetsnett i tillegg til "last siden på nytt"-meldingen under: synker
+      // lokal state umiddelbart slik at data.sites er korrekt selv om brukeren ikke
+      // laster på nytt med det samme.
+      syncSharedData(newMainData);
       setMigrateFeedback({ type: "success", text: `Migrering fullført. Nytt sted opprettet med rad-id "${newSite.id}". "main"-raden inneholder nå kun delt data (sites/priceAgreements/priceAgreementTypes/userAccess). Last siden på nytt manuelt for å ta i bruk den nye strukturen.` });
     } catch (e: any) {
       setMigrateFeedback({ type: "error", text: `Migrering feilet: ${e?.message || e}. "main"-raden er IKKE endret siden opprettelsen av den nye sted-raden feilet eller stoppet underveis.` });
@@ -17913,7 +17996,7 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
             Kan se lønnsdata i Eventkalkyle
           </label>
 
-          <button className="btn active" style={{ marginTop: 12 }} onClick={saveEntry}>Lagre</button>
+          <button className="btn active" style={{ marginTop: 12 }} disabled={busy} onClick={saveEntry}>Lagre</button>
         </div>
       )}
 
@@ -17944,7 +18027,7 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
                 {u.authUserId && (
                   <button className="btn danger" disabled={busy} onClick={() => deleteLogin(u)}>Slett innlogging</button>
                 )}
-                <button className="btn danger" onClick={() => deleteEntry(u.id)}>Slett</button>
+                <button className="btn danger" disabled={busy} onClick={() => deleteEntry(u.id)}>Slett</button>
               </td>
             </tr>
           ))}
