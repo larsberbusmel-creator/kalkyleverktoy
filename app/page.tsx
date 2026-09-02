@@ -1864,12 +1864,55 @@ export default function Page() {
     const legacyMode = !activeSiteIdRef.current || activeSiteIdRef.current === "main";
     const keys = Object.keys(partial);
     const allShared = keys.length > 0 && keys.every((k) => (SHARED_TOP_LEVEL_KEYS as readonly string[]).includes(k));
-    const rowId = legacyMode ? "main" : (allShared ? "main" : activeSiteIdRef.current!);
-    const payload: any = legacyMode
-      ? next
-      : allShared
-        ? { sites: next.sites, priceAgreements: next.priceAgreements, priceAgreementTypes: next.priceAgreementTypes, userAccess: next.userAccess }
-        : omitSharedKeys(next);
+
+    if (!legacyMode && allShared) {
+      // Delt nøkkel i ekte multi-site-modus: ALDRI stol på lokal state for de
+      // delte nøklene som IKKE er en del av dette konkrete kallet. To
+      // bekreftede datatap i produksjon (sites og senere priceAgreements,
+      // begge tømt i "main") skjedde fordi payload tidligere ble bygget fra
+      // lokal `next`-state for ALLE fire delte nøkler samtidig - hvis lokal
+      // state var utdatert for EN av de tre andre (f.eks. en annen økt/fane
+      // hadde nettopp lagt til noe), ble den ferske, faktisk lagrede verdien
+      // usynlig overskrevet. Henter derfor FERSK "main"-data rett før
+      // skriving, og merger KUN inn feltene som faktisk var del av dette
+      // kallet (`partial`) - resten forblir akkurat som de faktisk står i
+      // databasen akkurat nå, uansett hva lokal state måtte tro.
+      isSavingRef.current += 1;
+      (async () => {
+        try {
+          const { data: freshMainRow, error: fetchError } = await supabase.from("app_data").select("data").eq("id", "main").single();
+          if (fetchError) throw fetchError;
+          const freshMain = (freshMainRow?.data || {}) as Partial<AppData>;
+          const payload = {
+            sites: freshMain.sites || [],
+            priceAgreements: freshMain.priceAgreements || [],
+            priceAgreementTypes: freshMain.priceAgreementTypes || [],
+            userAccess: freshMain.userAccess || [],
+            ...partial,
+          };
+          const { error: upsertError } = await supabase.from("app_data").upsert({ id: "main", data: payload, updated_at: new Date().toISOString() });
+          if (upsertError) throw upsertError;
+          // Synk lokal state umiddelbart med den autoritative, ferske+
+          // merge-de payloaden (samme mønster som syncSharedData) - ikke
+          // bare vent på neste sanntids-/poll-tikk for å reflektere sannheten.
+          sharedDataRef.current = {
+            sites: payload.sites || [],
+            priceAgreements: payload.priceAgreements || [],
+            priceAgreementTypes: payload.priceAgreementTypes || [],
+            userAccess: payload.userAccess || [],
+          };
+          setData((p) => ({ ...p, ...payload }));
+        } catch (e) {
+          console.error("Supabase save error (delt nøkkel):", e);
+        } finally {
+          setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 2000);
+        }
+      })();
+      return next; // optimistisk lokal oppdatering med det samme, for responsivitet
+    }
+
+    const rowId = legacyMode ? "main" : activeSiteIdRef.current!;
+    const payload: any = legacyMode ? next : omitSharedKeys(next);
     isSavingRef.current += 1;
     supabase
       .from("app_data")
