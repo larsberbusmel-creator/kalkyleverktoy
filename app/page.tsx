@@ -642,6 +642,15 @@ type UserAccessEntry = {
   canSeeWages?: boolean; // atskilt fra fane-rettigheter - se lønnsdata i Eventkalkyle
   createdAt?: string;
   authUserId?: string;
+  siteId?: string; // hvilket sted brukeren tilhører - superadmin trenger ingen, de ser alle steder
+};
+
+type Site = {
+  id: string;
+  name: string;
+  logoUrl?: string; // storage path i "documents"-bucketen, løses til signert URL ved visning
+  enabledTabs: Tab[];
+  createdAt: string;
 };
 
 type AppData = {
@@ -694,7 +703,18 @@ type AppData = {
   storkjokkenInvoiceOverrides: StorkjokkenInvoiceOverride[];
   priceAgreements: PriceAgreementEntry[];
   priceAgreementTypes: PriceAgreementType[];
+  sites: Site[];
 };
+
+// Nøkler som lever i den delte "main"-raden i Supabase (app_data), på tvers av alle steder.
+// Alle andre toppnivå-nøkler i AppData lever i en per-sted-rad ("site-{id}").
+const SHARED_TOP_LEVEL_KEYS = ["sites", "priceAgreements", "priceAgreementTypes", "userAccess"] as const;
+function omitSharedKeys<T extends Record<string, any>>(obj: T): T {
+  const copy: any = { ...obj };
+  for (const k of SHARED_TOP_LEVEL_KEYS) delete copy[k];
+  return copy;
+}
+const ALL_TABS: Tab[] = ["dashboard", "materials", "recipes", "products", "orders", "production", "inventory", "rental", "reports", "settings", "rombibliotek", "users", "eventkalkyle", "priceAgreements"];
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
 const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_TIME || "dev";
@@ -1022,6 +1042,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   storkjokkenInvoiceOverrides: [],
   priceAgreements: [],
   priceAgreementTypes: [],
+  sites: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1176,6 +1197,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     storkjokkenInvoiceOverrides: (raw as any).storkjokkenInvoiceOverrides || [],
     priceAgreements: (raw as any).priceAgreements || [],
     priceAgreementTypes: (raw as any).priceAgreementTypes || [],
+    sites: (raw as any).sites || [],
   };
 }
 
@@ -1197,6 +1219,28 @@ function PageHeader({ icon, title, color }: { icon: string; title: string; color
       <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "white" }}>{title}</h1>
     </div>
   );
+}
+
+// Sted-logo i sidebar/mobiltopp - path er en storage-path i "documents"-
+// bucketen (samme private bucket/mønster som dokumentbanken), ikke en ferdig
+// URL. Løses til en midlertidig signert URL klient-side; faller tilbake til
+// standardlogoen mens den lastes, ved feil, eller når stedet ikke har logo.
+function SiteLogo({ path, fallbackSrc, alt, style }: { path?: string; fallbackSrc: string; alt: string; style?: React.CSSProperties }) {
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setResolvedUrl(null);
+    if (!path) return;
+    let cancelled = false;
+    supabase.storage.from("documents").createSignedUrl(path, 60 * 60).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { console.error("Kunne ikke hente sted-logo:", error); return; }
+      if (data?.signedUrl) setResolvedUrl(data.signedUrl);
+    });
+    return () => { cancelled = true; };
+  }, [path]);
+
+  return <img src={resolvedUrl || fallbackSrc} alt={alt} style={style} />;
 }
 
 // Gjenbrukbar søkbar multi-select (dokumentbank: koble produkter til et
@@ -1309,6 +1353,18 @@ export default function Page() {
   // boolsk bryter ville latt DEN FØRSTE lagringen som fullfører slå av beskyttelsen for
   // ALLE andre som fortsatt er underveis, og eksponere dem for et forsinket sanntids-ekko
   // som overskriver nyere, ubeskyttede endringer.
+
+  // Multi-tenant: hvilken Supabase-rad (app_data.id) som er "aktivt sted" akkurat nå.
+  // "main" betyr enten legacy/pre-migrering (ingen steder opprettet ennå - hele appen
+  // bor fortsatt i main-raden) eller - i praksis aldri samtidig med et faktisk sted.
+  // activeSiteIdRef holder samme verdi tilgjengelig uten stale closures for de fire
+  // lagre-funksjonene (som har tom dependency-array, akkurat som isSavingRef-mønsteret).
+  const [activeSiteId, setActiveSiteId] = useState<string | null>(null);
+  const activeSiteIdRef = React.useRef<string | null>(null);
+  useEffect(() => { activeSiteIdRef.current = activeSiteId; }, [activeSiteId]);
+  const sharedDataRef = React.useRef<{ sites: Site[]; priceAgreements: PriceAgreementEntry[]; priceAgreementTypes: PriceAgreementType[]; userAccess: UserAccessEntry[] } | null>(null);
+  const [siteAccessError, setSiteAccessError] = useState<string | null>(null);
+  const ACTIVE_SITE_STORAGE_KEY = "misemetrics_active_site";
 
   // "Vil du lagre før du avslutter"-mekanisme (foreløpig kun Ordre/Produkter/
   // Grunnoppskrifter) - dirtyTabs er kildesannheten for om en fane har
@@ -1445,14 +1501,20 @@ export default function Page() {
     });
   }
 
+  // ── Effekt 1: boot - autentisering, last "main"-raden, avgjør aktivt sted ──
+  // Kaller ALDRI setData/setIsLoaded selv (bortsett fra ved blokkerende feil) -
+  // det er effekt 2 sin jobb, også når aktivSiteId ender opp som "main" (legacy/
+  // pre-migrering). Dette gjør at "hent raden med denne id-en" er identisk kode
+  // uansett om id-en er "main" eller et faktisk sted.
   useEffect(() => {
-    async function loadData() {
+    async function boot() {
       const { data: authData } = await supabase.auth.getSession();
       if (!authData.session) {
         window.location.href = "/login";
         return;
       }
-      setUserEmail(authData.session.user.email || "");
+      const email = authData.session.user.email || "";
+      setUserEmail(email);
 
       const { data: row, error } = await supabase
         .from("app_data")
@@ -1465,25 +1527,96 @@ export default function Page() {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
           try { setData(migrateData(JSON.parse(saved))); } catch { setData(initialData); }
+        } else {
+          setData(initialData);
         }
+        setActiveSiteId("main");
         setIsLoaded(true);
         return;
       }
 
-      if (row?.data) setData(migrateData(row.data));
+      const mainMigrated = migrateData(row?.data || {});
+      sharedDataRef.current = {
+        sites: mainMigrated.sites,
+        priceAgreements: mainMigrated.priceAgreements,
+        priceAgreementTypes: mainMigrated.priceAgreementTypes,
+        userAccess: mainMigrated.userAccess,
+      };
+
+      if (!mainMigrated.sites || mainMigrated.sites.length === 0) {
+        // Legacy/pre-migrering: ingen steder opprettet ennå - main ER hele datasettet.
+        setActiveSiteId("main");
+        return;
+      }
+
+      const currentUserAccess = mainMigrated.userAccess.find((u) => u.email.toLowerCase() === email.toLowerCase());
+      const isSuperadmin = mainMigrated.userAccess.length === 0 || currentUserAccess?.role === "superadmin";
+
+      if (isSuperadmin) {
+        const stored = localStorage.getItem(ACTIVE_SITE_STORAGE_KEY);
+        const resolved = (stored && mainMigrated.sites.find((s) => s.id === stored)) ? stored : mainMigrated.sites[0].id;
+        localStorage.setItem(ACTIVE_SITE_STORAGE_KEY, resolved);
+        setActiveSiteId(resolved);
+        return;
+      }
+
+      const assignedSite = currentUserAccess?.siteId ? mainMigrated.sites.find((s) => s.id === currentUserAccess.siteId) : undefined;
+      if (!assignedSite) {
+        setSiteAccessError("Ingen sted er tildelt din bruker. Kontakt en administrator.");
+        setIsLoaded(true);
+        return;
+      }
+      setActiveSiteId(assignedSite.id);
+    }
+
+    boot();
+    supabase.rpc("ensure_daily_backup").then(({ error }: any) => {
+      if (error) console.error("Backup error:", error);
+    });
+  }, []);
+
+  // ── Effekt 2: hent aktiv rad (main eller site-*) + sanntid + polling ──
+  // Kjører på nytt hver gang activeSiteId endres (både ved første lasting og
+  // ved sted-bytte som superadmin) - avslutter forrige abonnement/polling først.
+  useEffect(() => {
+    if (!activeSiteId) return;
+
+    let cancelled = false;
+    setIsLoaded(false);
+
+    async function loadActiveRow() {
+      const { data: row, error } = await supabase
+        .from("app_data")
+        .select("data")
+        .eq("id", activeSiteId)
+        .single();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Supabase load error (aktiv rad):", error);
+        setIsLoaded(true);
+        return;
+      }
+
+      const siteMigrated = migrateData(row?.data || {});
+      const shared = sharedDataRef.current || {
+        sites: siteMigrated.sites,
+        priceAgreements: siteMigrated.priceAgreements,
+        priceAgreementTypes: siteMigrated.priceAgreementTypes,
+        userAccess: siteMigrated.userAccess,
+      };
+      setData({ ...siteMigrated, ...shared });
       setIsLoaded(true);
     }
 
-    loadData();
-  supabase.rpc("ensure_daily_backup").then(({ error }: any) => {
-    if (error) console.error("Backup error:", error);
-  });
+    loadActiveRow();
 
-  const channel = supabase
-      .channel("app_data_changes")
+    const channel = supabase
+      .channel(`app_data_changes_${activeSiteId}`)
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "app_data", filter: "id=eq.main" },
+        { event: "UPDATE", schema: "public", table: "app_data", filter: `id=eq.${activeSiteId}` },
         (payload) => {
           console.log("Realtime mottatt:", new Date().toISOString(), payload?.new?.updated_at);
                     if (payload.new?.data) {
@@ -1532,14 +1665,14 @@ export default function Page() {
       const { data: tsRow } = await supabase
         .from("app_data")
         .select("updated_at")
-        .eq("id", "main")
+        .eq("id", activeSiteId)
         .single();
       if (tsRow?.updated_at && tsRow.updated_at !== lastUpdatedRef.current) {
         lastUpdatedRef.current = tsRow.updated_at;
         const { data: fullRow } = await supabase
           .from("app_data")
           .select("data")
-          .eq("id", "main")
+          .eq("id", activeSiteId)
           .single();
         if (fullRow?.data) {
           setData((prev) => {
@@ -1554,10 +1687,40 @@ export default function Page() {
     }, 3000);
 
     return () => {
+      cancelled = true;
       supabase.removeChannel(channel);
       clearInterval(pollInterval);
     };
-  }, []);
+  }, [activeSiteId]);
+
+  // ── Effekt 3: delt "main"-kanal (sites/priceAgreements/priceAgreementTypes/
+  // userAccess) - kun aktiv i ekte multi-site-modus, siden effekt 2 sin kanal på
+  // "main" allerede dekker alt i legacy/pre-migrerings-modus. Enkelt, ubeskyttet
+  // abonnement (ingen isSavingRef) - se begrunnelse i oppsummeringen: disse
+  // nøklene skrives sjelden og alltid som full array-erstatning.
+  const isMultiSite = activeSiteId != null && activeSiteId !== "main";
+  useEffect(() => {
+    if (!isMultiSite) return;
+    const channel = supabase
+      .channel("app_data_main_shared_changes")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "app_data", filter: "id=eq.main" },
+        (payload) => {
+          const incoming = payload.new?.data as Partial<AppData> | undefined;
+          if (!incoming) return;
+          setData((prev) => ({
+            ...prev,
+            sites: incoming.sites ?? prev.sites,
+            priceAgreements: incoming.priceAgreements ?? prev.priceAgreements,
+            priceAgreementTypes: incoming.priceAgreementTypes ?? prev.priceAgreementTypes,
+            userAccess: incoming.userAccess ?? prev.userAccess,
+          }));
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [isMultiSite]);
 
   useEffect(() => { if (isLoaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, isLoaded]);
 
@@ -1645,12 +1808,26 @@ export default function Page() {
   const updateData = React.useCallback((partial: Partial<AppData>) => {
   setData((prev) => {
     const next = { ...prev, ...partial };
+    // Legacy/pre-migrering (ingen sted opprettet ennå): "main" ER hele appens eneste
+    // rad, så vi må skrive HELE next dit akkurat som i dag - IKKE bare en slice, ellers
+    // ville de fire delte nøklene (sites/priceAgreements/priceAgreementTypes/userAccess)
+    // blitt fjernet fra "main" ved hver eneste per-sted-lagring (materialer, ordre osv.),
+    // siden Supabase sin upsert ERSTATTER hele data-kolonnen, ikke slår sammen.
+    const legacyMode = !activeSiteIdRef.current || activeSiteIdRef.current === "main";
+    const keys = Object.keys(partial);
+    const allShared = keys.length > 0 && keys.every((k) => (SHARED_TOP_LEVEL_KEYS as readonly string[]).includes(k));
+    const rowId = legacyMode ? "main" : (allShared ? "main" : activeSiteIdRef.current!);
+    const payload: any = legacyMode
+      ? next
+      : allShared
+        ? { sites: next.sites, priceAgreements: next.priceAgreements, priceAgreementTypes: next.priceAgreementTypes, userAccess: next.userAccess }
+        : omitSharedKeys(next);
     isSavingRef.current += 1;
     supabase
       .from("app_data")
       .upsert({
-        id: "main",
-        data: next,
+        id: rowId,
+        data: payload,
         updated_at: new Date().toISOString(),
       })
       .then(({ error }) => {
@@ -1683,6 +1860,7 @@ export default function Page() {
 
       const next = { ...prev, inventoryCounts: { ...(prev.inventoryCounts || {}), [month]: nextMonth } };
 
+      const rowId = activeSiteIdRef.current || "main";
       isSavingRef.current += 1;
       supabase.rpc("update_inventory_items", {
         p_month: month,
@@ -1692,6 +1870,7 @@ export default function Page() {
         p_locked: patch.locked ?? null,
         p_prices_frozen: patch.pricesFrozen ?? null,
         p_profitability: patch.profitability ?? null,
+        p_row_id: rowId,
       }).then(async ({ data, error }: any) => {
         if (error) {
           console.error("Supabase RPC error (inventory):", error);
@@ -1702,7 +1881,7 @@ export default function Page() {
           await supabase
             .from("app_data")
             .update({ updated_at: new Date().toISOString() })
-            .eq("id", "main");
+            .eq("id", rowId);
         }
         setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 500);
       });
@@ -1728,6 +1907,7 @@ export default function Page() {
       isSavingRef.current += 1;
       supabase.rpc("update_materials", {
         p_materials: materialsPatch,
+        p_row_id: activeSiteIdRef.current || "main",
       }).then(({ error }: any) => {
         if (error) console.error("Supabase RPC error (materials):", error);
         setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 500);
@@ -1751,6 +1931,7 @@ export default function Page() {
       supabase.rpc("update_list_items", {
         p_list_key: listKey,
         p_items: itemsPatch,
+        p_row_id: listKey === "priceAgreements" ? "main" : (activeSiteIdRef.current || "main"),
       }).then(({ error }: any) => {
         if (error) console.error(`Supabase RPC error (${listKey}):`, error);
         setTimeout(() => { isSavingRef.current = Math.max(0, isSavingRef.current - 1); }, 2000);
@@ -1969,6 +2150,7 @@ function productCost(product: Product, visited: string[] = []) {
     return Math.ceil((costExVat / (1 - margin)) * (1 + data.settings.foodVat / 100));
   }
 
+  if (siteAccessError) return <main style={{ padding: 24, color: "#dc2626", fontWeight: 700 }}>{siteAccessError}</main>;
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
   const currentUserAccess = data.userAccess.find((u) => u.email.toLowerCase() === userEmail.toLowerCase());
@@ -1999,10 +2181,23 @@ function productCost(product: Product, visited: string[] = []) {
   { key: "priceAgreements", label: "Avtalepriser",  icon: "🏷️", color: "#65a30d" },
   { key: "reports",    label: "Rapporter",          icon: "📊", color: "#0d9488" },
   { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
-  { key: "users",      label: "Brukere",            icon: "🔑", color: "#9333ea" },
+  { key: "users",      label: "Admin",              icon: "🔑", color: "#9333ea" },
 ];
 
-  const tabConfig = allTabConfig.filter((t) => t.key === "dashboard" || (t.key === "users" ? isSuperadmin : canView(t.key)));
+  const activeSite = data.sites.find((s) => s.id === activeSiteId);
+
+  function switchActiveSite(newId: string) {
+    localStorage.setItem(ACTIVE_SITE_STORAGE_KEY, newId);
+    setActiveSiteId(newId);
+  }
+
+  const tabConfig = allTabConfig.filter((t) => {
+    if (t.key === "dashboard") return true;
+    if (t.key === "users") return isSuperadmin;
+    if (!canView(t.key)) return false;
+    if (isSuperadmin || !activeSite) return true;
+    return activeSite.enabledTabs.includes(t.key);
+  });
 
   const activeTabConfig = tabConfig.find((t) => t.key === tab);
 
@@ -2019,7 +2214,16 @@ return (
       {/* ── VENSTRE SIDEBAR (desktop) ── */}
       <aside className="sidebar">
         <div style={{ padding: "20px 14px 12px" }}>
-          <img src="/logo.png" alt="Logo" style={{ width: "100%", maxWidth: 140, height: "auto", objectFit: "contain", display: "block", margin: "0 auto 20px" }} />
+          <SiteLogo path={activeSite?.logoUrl} fallbackSrc="/logo.png" alt="Logo" style={{ width: "100%", maxWidth: 140, height: "auto", objectFit: "contain", display: "block", margin: "0 auto 20px" }} />
+          {isSuperadmin && data.sites.length > 0 && (
+            <select
+              value={activeSiteId ?? ""}
+              onChange={(e) => switchActiveSite(e.target.value)}
+              style={{ width: "100%", fontSize: 13, padding: "6px 8px", borderRadius: 8, border: "1px solid #cbd5e1", marginBottom: 10 }}
+            >
+              {data.sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
         </div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 8px" }}>
           {tabConfig.map(({ key, label, icon }) => (
@@ -2050,7 +2254,7 @@ return (
 
       {/* ── MOBILTOPP ── */}
       <div className="mobile-topbar">
-        <img src="/logo.png" alt="Logo" style={{ height: 44, width: "auto", objectFit: "contain" }} />
+        <SiteLogo path={activeSite?.logoUrl} fallbackSrc="/logo.png" alt="Logo" style={{ height: 44, width: "auto", objectFit: "contain" }} />
         <select
           value={tab}
           onChange={(e) => requestTabChange(e.target.value as Tab)}
@@ -17386,6 +17590,15 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
   });
   const [form, setForm] = useState<UserAccessEntry>(emptyEntry());
 
+  const [siteForm, setSiteForm] = useState<{ name: string; enabledTabs: Tab[]; logoFile: File | null }>({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+  const [siteBusy, setSiteBusy] = useState(false);
+  const [siteFeedback, setSiteFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const [migrateName, setMigrateName] = useState("Brødrene Berbusmel");
+  const [migrateConfirm, setMigrateConfirm] = useState("");
+  const [migrateBusy, setMigrateBusy] = useState(false);
+  const [migrateFeedback, setMigrateFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
   if (!isSuperadmin) {
     return (
       <section className="card">
@@ -17482,12 +17695,118 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
       : { type: "error", text: `Kunne ikke slette innlogging for ${u.email}: ${result.error}` });
   }
 
+  function toggleSiteFormTab(t: Tab) {
+    setSiteForm((f) => ({
+      ...f,
+      enabledTabs: f.enabledTabs.includes(t) ? f.enabledTabs.filter((x) => x !== t) : [...f.enabledTabs, t],
+    }));
+  }
+
+  async function createSite() {
+    if (!siteForm.name.trim()) return alert("Legg inn navn på stedet.");
+    setSiteBusy(true);
+    setSiteFeedback(null);
+    let logoPath: string | undefined;
+    if (siteForm.logoFile) {
+      const path = `site-logos/${Date.now()}-${siteForm.logoFile.name}`;
+      const { error: uploadError } = await supabase.storage.from("documents").upload(path, siteForm.logoFile);
+      if (uploadError) {
+        setSiteBusy(false);
+        setSiteFeedback({ type: "error", text: `Opplasting av logo feilet: ${uploadError.message}` });
+        return;
+      }
+      logoPath = path;
+    }
+    const newSite: Site = {
+      id: `site-${Date.now()}`,
+      name: siteForm.name.trim(),
+      enabledTabs: siteForm.enabledTabs,
+      createdAt: new Date().toISOString(),
+      ...(logoPath ? { logoUrl: logoPath } : {}),
+    };
+    const { error: insertError } = await supabase.from("app_data").insert({ id: newSite.id, data: omitSharedKeys(initialData), updated_at: new Date().toISOString() });
+    if (insertError) {
+      setSiteBusy(false);
+      setSiteFeedback({ type: "error", text: `Kunne ikke opprette sted-raden: ${insertError.message}` });
+      return;
+    }
+    updateData({ sites: [...data.sites, newSite] });
+    setSiteBusy(false);
+    setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+    setSiteFeedback({ type: "success", text: `Stedet "${newSite.name}" er opprettet.` });
+  }
+
+  async function runMigration() {
+    if (migrateConfirm !== "MIGRER") return alert('Skriv nøyaktig "MIGRER" i feltet for å bekrefte.');
+    if (!migrateName.trim()) return alert("Legg inn navn på stedet.");
+    setMigrateBusy(true);
+    setMigrateFeedback(null);
+    const newSite: Site = {
+      id: `site-${Date.now()}`,
+      name: migrateName.trim(),
+      enabledTabs: ALL_TABS,
+      createdAt: new Date().toISOString(),
+    };
+    const siteData = omitSharedKeys(data);
+    try {
+      const { error: insertError } = await supabase.from("app_data").insert({ id: newSite.id, data: siteData, updated_at: new Date().toISOString() });
+      if (insertError) throw insertError;
+      const newMainData = {
+        sites: [newSite],
+        priceAgreements: data.priceAgreements,
+        priceAgreementTypes: data.priceAgreementTypes,
+        userAccess: data.userAccess.map((u) => (u.role === "superadmin" ? u : { ...u, siteId: newSite.id })),
+      };
+      const { error: mainError } = await supabase.from("app_data").upsert({ id: "main", data: newMainData, updated_at: new Date().toISOString() });
+      if (mainError) throw mainError;
+      setMigrateFeedback({ type: "success", text: `Migrering fullført. Nytt sted opprettet med rad-id "${newSite.id}". "main"-raden inneholder nå kun delt data (sites/priceAgreements/priceAgreementTypes/userAccess). Last siden på nytt manuelt for å ta i bruk den nye strukturen.` });
+    } catch (e: any) {
+      setMigrateFeedback({ type: "error", text: `Migrering feilet: ${e?.message || e}. "main"-raden er IKKE endret siden opprettelsen av den nye sted-raden feilet eller stoppet underveis.` });
+    } finally {
+      setMigrateBusy(false);
+    }
+  }
+
   return (
     <section className="card">
       <p style={{ color: "#64748b", marginTop: 0 }}>
         Styr hvilke faner ansatte kan se og redigere. Brukere som ikke ligger i denne listen får foreløpig full tilgang
         (bakoverkompatibelt) — legg til alle som skal ha begrenset tilgang her.
       </p>
+
+      {(!data.sites || data.sites.length === 0) && (
+        <div className="soft-box" style={{ marginBottom: 16, border: "2px solid #dc2626" }}>
+          <h3 style={{ color: "#dc2626", marginTop: 0 }}>⚠️ Kjør engangs-migrering til flere steder</h3>
+          <p style={{ color: "#64748b" }}>
+            Flytter all nåværende data over til et eget, nytt "sted", og reduserer "main"-raden til kun delt data
+            (avtalepriser, steder, brukertilganger). Dette kan kun gjøres ÉN gang, og bør ikke kjøres uten at du er
+            sikker på hva du gjør.
+          </p>
+          {migrateFeedback && (
+            <div style={migrateFeedback.type === "success"
+              ? { background: "#dcfce7", border: "1px solid #16a34a", borderRadius: 12, padding: 12, margin: "12px 0", color: "#166534" }
+              : { background: "#fef2f2", border: "1px solid #dc2626", borderRadius: 12, padding: 12, margin: "12px 0", color: "#991b1b" }}
+            >
+              {migrateFeedback.text}
+            </div>
+          )}
+          {migrateFeedback?.type !== "success" && (
+            <div className="form-grid three">
+              <label>Navn på stedet
+                <input value={migrateName} onChange={(e) => setMigrateName(e.target.value)} />
+              </label>
+              <label>Skriv "MIGRER" for å bekrefte
+                <input value={migrateConfirm} onChange={(e) => setMigrateConfirm(e.target.value)} placeholder="MIGRER" />
+              </label>
+              <div style={{ display: "flex", alignItems: "flex-end" }}>
+                <button className="btn danger" disabled={migrateBusy || migrateConfirm !== "MIGRER"} onClick={runMigration}>
+                  {migrateBusy ? "Migrerer..." : "Kjør migrering"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {feedback && (
         <div style={feedback.type === "success"
@@ -17521,6 +17840,14 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
                 <option value="superadmin">Superadmin (full tilgang til alt)</option>
               </select>
             </label>
+            {form.role === "user" && data.sites.length > 0 && (
+              <label>Sted
+                <select value={form.siteId || ""} onChange={(e) => setForm({ ...form, siteId: e.target.value || undefined })}>
+                  <option value="">Velg sted...</option>
+                  {data.sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </label>
+            )}
           </div>
 
           <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
@@ -17591,13 +17918,21 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
       )}
 
       <table style={{ marginTop: 16 }}>
-        <thead><tr><th>Navn</th><th>E-post</th><th>Rolle</th><th>Faner (se/rediger)</th><th></th></tr></thead>
+        <thead><tr><th>Navn</th><th>E-post</th><th>Rolle</th><th>Sted</th><th>Faner (se/rediger)</th><th></th></tr></thead>
         <tbody>
-          {data.userAccess.map((u) => (
+          {[...data.userAccess].sort((a, b) => {
+            if (a.role === "superadmin" && b.role !== "superadmin") return -1;
+            if (b.role === "superadmin" && a.role !== "superadmin") return 1;
+            const siteA = a.siteId || "";
+            const siteB = b.siteId || "";
+            if (siteA !== siteB) return siteA.localeCompare(siteB);
+            return (a.name || a.email).localeCompare(b.name || b.email);
+          }).map((u) => (
             <tr key={u.id}>
               <td>{u.name || "-"}</td>
               <td>{u.email}</td>
               <td>{u.role === "superadmin" ? "Superadmin" : "Bruker"}</td>
+              <td>{u.role === "superadmin" ? "Alle" : (data.sites.find((s) => s.id === u.siteId)?.name || "-")}</td>
               <td>
                 {u.role === "superadmin"
                   ? "Alt"
@@ -17615,6 +17950,38 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin }: {
           ))}
         </tbody>
       </table>
+
+      <div className="soft-box" style={{ marginTop: 24 }}>
+        <h3 style={{ marginTop: 0 }}>Opprett nytt sted</h3>
+        {siteFeedback && (
+          <div style={siteFeedback.type === "success"
+            ? { background: "#dcfce7", border: "1px solid #16a34a", borderRadius: 12, padding: 12, margin: "12px 0", color: "#166534" }
+            : { background: "#fef2f2", border: "1px solid #dc2626", borderRadius: 12, padding: 12, margin: "12px 0", color: "#991b1b" }}
+          >
+            {siteFeedback.text}
+          </div>
+        )}
+        <div className="form-grid three">
+          <label>Navn på stedet
+            <input value={siteForm.name} onChange={(e) => setSiteForm({ ...siteForm, name: e.target.value })} placeholder="F.eks. Bodø" />
+          </label>
+          <label>Logo (valgfritt)
+            <input type="file" accept="image/*" onChange={(e) => setSiteForm({ ...siteForm, logoFile: e.target.files?.[0] || null })} />
+          </label>
+        </div>
+        <p style={{ fontWeight: 700, marginBottom: 6 }}>Faner dette stedet skal ha tilgang til</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {allTabConfig.map((t) => (
+            <label key={t.key} className="check">
+              <input type="checkbox" checked={siteForm.enabledTabs.includes(t.key)} onChange={() => toggleSiteFormTab(t.key)} />
+              {t.icon} {t.label}
+            </label>
+          ))}
+        </div>
+        <button className="btn active" style={{ marginTop: 12 }} disabled={siteBusy} onClick={createSite}>
+          {siteBusy ? "Oppretter..." : "Opprett sted"}
+        </button>
+      </div>
     </section>
   );
 }
