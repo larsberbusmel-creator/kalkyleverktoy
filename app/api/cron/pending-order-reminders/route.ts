@@ -9,6 +9,13 @@ const supabaseAdmin = createClient(
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
+// Portalen er i dag knyttet til ÉTT bestemt sted (Berbusmel) via denne faste
+// rad-ID-en. Får dere et andre, reelt sted med egne storkjøkkenkunder senere,
+// holder ikke denne løsningen - da trengs en mer fleksibel mekanisme (f.eks.
+// egen portal-URL/subdomene per sted, eller søk etter PIN-kode på tvers av
+// alle site-rader). Bevisst utenfor omfanget av denne hastefiksen.
+const SITE_ROW_ID = process.env.PORTAL_SITE_ROW_ID || "main";
+
 // Hvor lenge en portal-bestilling kan stå som "pending" før kunden får en
 // påminnelse - ingen eksisterende terskel for dette i prosjektet fra før,
 // 24 timer er et rimelig, hardkodet utgangspunkt.
@@ -19,7 +26,7 @@ export async function GET() {
     const { data: row, error } = await supabaseAdmin
       .from("app_data")
       .select("data")
-      .eq("id", "main")
+      .eq("id", SITE_ROW_ID)
       .single();
 
     if (error || !row) {
@@ -73,6 +80,7 @@ export async function GET() {
     const { error: rpcError } = await supabaseAdmin.rpc("update_list_items", {
       p_list_key: "pendingPortalOrders",
       p_items: updates,
+      p_row_id: SITE_ROW_ID,
     });
 
     if (rpcError) {

@@ -6,6 +6,13 @@ import { parseWebshopEmail } from "@/lib/parseWebshopEmail";
 
 const WEBHOOK_SECRET = process.env.INBOUND_EMAIL_SECRET || "";
 
+// Portalen er i dag knyttet til ÉTT bestemt sted (Berbusmel) via denne faste
+// rad-ID-en. Får dere et andre, reelt sted med egen webshop senere, holder
+// ikke denne løsningen - da trengs en mer fleksibel mekanisme (f.eks. egen
+// e-postadresse/subdomene per sted, mappet til riktig rad-ID). Bevisst
+// utenfor omfanget av denne hastefiksen.
+const SITE_ROW_ID = process.env.PORTAL_SITE_ROW_ID || "main";
+
 export async function POST(req: NextRequest) {
   try {
     if (!supabaseAdmin) {
@@ -32,7 +39,7 @@ export async function POST(req: NextRequest) {
     const { data: row, error: fetchError } = await supabaseAdmin
       .from("app_data")
       .select("data")
-      .eq("id", "main")
+      .eq("id", SITE_ROW_ID)
       .single();
 
     if (fetchError || !row?.data) {
@@ -85,7 +92,7 @@ export async function POST(req: NextRequest) {
           data: { ...appData, orders: updatedOrders },
           updated_at: new Date().toISOString(),
         })
-        .eq("id", "main");
+        .eq("id", SITE_ROW_ID);
 
       if (cancelSaveError) {
         console.error("Kunne ikke lagre kansellering:", cancelSaveError);
@@ -127,7 +134,7 @@ export async function POST(req: NextRequest) {
         data: { ...appData, orders: updatedOrders },
         updated_at: new Date().toISOString(),
       })
-      .eq("id", "main");
+      .eq("id", SITE_ROW_ID);
 
     if (saveError) {
       console.error("Kunne ikke lagre ordre:", saveError);

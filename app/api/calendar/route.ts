@@ -114,6 +114,12 @@ function packingChecklistRowsForOffer(offer: any, packingListTemplates: any[], c
   return rows;
 }
 
+// Portalen er i dag knyttet til ÉTT bestemt sted (Berbusmel) via denne faste
+// rad-ID-en. Får dere et andre, reelt sted med egen kalender senere, holder
+// ikke denne løsningen - da trengs en mer fleksibel mekanisme (f.eks. egen
+// kalender-URL per sted). Bevisst utenfor omfanget av denne hastefiksen.
+const SITE_ROW_ID = process.env.PORTAL_SITE_ROW_ID || "main";
+
 export async function GET() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -123,7 +129,7 @@ export async function GET() {
   const { data: row } = await supabase
     .from("app_data")
     .select("data")
-    .eq("id", "main")
+    .eq("id", SITE_ROW_ID)
     .single();
 
   const orders = (row?.data?.orders || []).filter((o: any) => !o.deletedAt);
