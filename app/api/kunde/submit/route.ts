@@ -28,14 +28,18 @@ async function sendOrderNotification(customerName: string, date: string, lines: 
   }
   const productName = (id: string) => products.find((p: any) => p.id === id)?.name || "Ukjent";
   const linesHtml = lines.map((l) => `<li>${l.quantity} × ${productName(l.productId)}</li>`).join("");
-  try {
+   try {
     const result = await resend.emails.send({
-      from: "Misemetrics <onboarding@resend.dev>",
+      from: "Misemetrics <noreply@misemetrics.app>",
       to: recipients,
       subject: `Ny bestilling fra ${customerName} – levering ${date}`,
       html: `<p><b>${customerName}</b> har sendt inn en bestilling for levering <b>${date}</b>:</p><ul>${linesHtml}</ul><p>Logg inn i appen for å godkjenne.</p>`,
     });
-    console.log("Resend-svar:", JSON.stringify(result));
+    if (result.error) {
+      console.error("Resend avviste ny-bestilling-varselet:", JSON.stringify(result.error));
+    } else {
+      console.log("Resend-svar:", JSON.stringify(result));
+    }
   } catch (e) {
     console.error("Kunne ikke sende varsel-e-post:", e);
   }
