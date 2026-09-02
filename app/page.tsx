@@ -11006,6 +11006,209 @@ function ProfitabilityReport({ data, month, productUnitCost, updateInventoryRpc,
   );
 }
 
+// ── Svingningsrapport: kontroll av varetelling mot forrige måned ──────────
+// Formål: fange opp sannsynlige tastefeil i månedens telling ved å vise
+// hvilke varer/egenproduserte produkter som har størst endring i
+// beholdningsverdi fra forrige til denne tellingen. Gjenbruker nøyaktig
+// samme verdi-logikk som computeProfitability()/valueForBucketInMonth
+// (packagePrice/pricePerUnit, Brennevin-unntaket, frozenUnitCost for
+// egenprodusert), men på enkeltvare-nivå i stedet for buckets, og uten
+// noen skriving til data - rent lesende sammenligning.
+type InventoryVarianceRow = {
+  id: string;
+  name: string;
+  category: string;
+  isProduct: boolean;
+  prevPackages: number;
+  prevLoose: number;
+  prevValue: number;
+  prevCounted: boolean;
+  currPackages: number;
+  currLoose: number;
+  currValue: number;
+  currCounted: boolean;
+  deltaValue: number;
+  deltaPct: number | null;
+};
+
+function computeInventoryVariance(data: AppData, month: string, productUnitCost: (p: Product) => number) {
+  const egenprodusertCategories = ["Kjøkken, egenprodusert", "Bakeri, egenprodusert"];
+  const countsByMonth = data.inventoryCounts || {};
+
+  const prevMonthKey = (() => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  })();
+
+  function materialSnapshot(monthKey: string, m: Material) {
+    const items = countsByMonth[monthKey]?.items || {};
+    const raw = items[m.id] as any;
+    const c = raw || { packages: 0, loose: 0, packagePrice: m.packagePrice, pricePerUnit: m.pricePerUnit };
+    const packages = Number(c.packages || 0);
+    const loose = Number(c.loose || 0);
+    const packagePrice = c.packagePrice ?? m.packagePrice;
+    const pricePerUnit = c.pricePerUnit ?? m.pricePerUnit;
+    const looseVal = m.category === "Brennevin" ? loose * packagePrice : loose * pricePerUnit;
+    const value = packages * packagePrice + looseVal;
+    return { packages, loose, value, counted: !!raw };
+  }
+
+  function productSnapshot(monthKey: string, p: Product) {
+    const monthIsFrozen = countsByMonth[monthKey]?.pricesFrozen;
+    const items = countsByMonth[monthKey]?.items || {};
+    const key = `product_${p.id}`;
+    const raw = items[key] as any;
+    const c = raw || { packages: 0, loose: 0 };
+    const packages = Number(c.packages || 0);
+    const loose = Number(c.loose || 0);
+    const unitCost = monthIsFrozen && c.frozenUnitCost != null ? c.frozenUnitCost : productUnitCost(p);
+    const value = (packages * Number(p.unitsPerCase || 1) + loose) * unitCost;
+    return { packages, loose, value, counted: !!raw };
+  }
+
+  const rows: InventoryVarianceRow[] = [];
+
+  for (const m of data.materials) {
+    const prev = materialSnapshot(prevMonthKey, m);
+    const curr = materialSnapshot(month, m);
+    if (!prev.counted && !curr.counted) continue;
+    const deltaValue = curr.value - prev.value;
+    const deltaPct = prev.value > 0 ? deltaValue / prev.value : null;
+    rows.push({
+      id: m.id, name: m.name, category: m.category, isProduct: false,
+      prevPackages: prev.packages, prevLoose: prev.loose, prevValue: prev.value, prevCounted: prev.counted,
+      currPackages: curr.packages, currLoose: curr.loose, currValue: curr.value, currCounted: curr.counted,
+      deltaValue, deltaPct,
+    });
+  }
+
+  for (const cat of egenprodusertCategories) {
+    for (const p of data.products.filter((prod) => prod.category === cat)) {
+      const prev = productSnapshot(prevMonthKey, p);
+      const curr = productSnapshot(month, p);
+      if (!prev.counted && !curr.counted) continue;
+      const deltaValue = curr.value - prev.value;
+      const deltaPct = prev.value > 0 ? deltaValue / prev.value : null;
+      rows.push({
+        id: `product_${p.id}`, name: p.name, category: p.category, isProduct: true,
+        prevPackages: prev.packages, prevLoose: prev.loose, prevValue: prev.value, prevCounted: prev.counted,
+        currPackages: curr.packages, currLoose: curr.loose, currValue: curr.value, currCounted: curr.counted,
+        deltaValue, deltaPct,
+      });
+    }
+  }
+
+  rows.sort((a, b) => Math.abs(b.deltaValue) - Math.abs(a.deltaValue));
+  return { rows, prevMonthKey };
+}
+
+function InventoryVarianceReport({ data, month, productUnitCost }: {
+  data: AppData;
+  month: string;
+  productUnitCost: (p: Product) => number;
+}) {
+  const [categoryFilter, setCategoryFilter] = useState("Alle");
+  const [limit, setLimit] = useState(20);
+
+  const { rows, prevMonthKey } = useMemo(
+    () => computeInventoryVariance(data, month, productUnitCost),
+    [data, month, productUnitCost]
+  );
+
+  const categories = useMemo(() => {
+    const set = new Set(rows.map((r) => r.category));
+    return ["Alle", ...Array.from(set).sort()];
+  }, [rows]);
+
+  const filteredRows = categoryFilter === "Alle" ? rows : rows.filter((r) => r.category === categoryFilter);
+  const visibleRows = limit >= filteredRows.length ? filteredRows : filteredRows.slice(0, limit);
+
+  return (
+    <details className="soft-box" style={{ padding: 0 }}>
+      <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Svingningsrapport ({prevMonthKey} → {month})</span>
+        <span style={{ color: "#64748b", fontSize: 13 }}>▼</span>
+      </summary>
+      <div style={{ padding: "0 16px 16px" }}>
+        <p style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
+          Viser varer og egenproduserte produkter med størst endring i beholdningsverdi fra forrige til denne tellingen,
+          sortert etter størst avvik i kroner (uansett retning). Store, uventede hopp er ofte tastefeil i antall eller pris –
+          sjekk spesielt rader markert i rødt.
+        </p>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
+          <label style={{ fontSize: 13 }}>
+            Kategori
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label style={{ fontSize: 13 }}>
+            Vis antall rader
+            <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+              {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+              <option value={filteredRows.length || 1}>Alle ({filteredRows.length})</option>
+            </select>
+          </label>
+        </div>
+
+        {filteredRows.length === 0 ? (
+          <div className="warning">Ingen tellinger å sammenligne for {prevMonthKey} og {month} ennå.</div>
+        ) : (
+          <table style={{ marginTop: 8 }}>
+            <thead>
+              <tr>
+                <th>Vare</th>
+                <th>Kategori</th>
+                <th>{prevMonthKey} (pk / løs)</th>
+                <th>{month} (pk / løs)</th>
+                <th>{prevMonthKey} verdi</th>
+                <th>{month} verdi</th>
+                <th>Endring</th>
+                <th>Endring %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((r) => {
+                const big = Math.abs(r.deltaValue) >= 5000 || (r.deltaPct != null && Math.abs(r.deltaPct) >= 0.5);
+                return (
+                  <tr key={r.id} style={big ? { background: "#fef2f2" } : undefined}>
+                    <td>
+                      {r.name}
+                      {r.isProduct && <span style={{ color: "#94a3b8", fontSize: 11 }}> (egenprod.)</span>}
+                    </td>
+                    <td>{r.category}</td>
+                    <td>{r.prevCounted ? `${num(r.prevPackages, 0)} / ${num(r.prevLoose, 1)}` : <span style={{ color: "#94a3b8" }}>ikke telt</span>}</td>
+                    <td>{r.currCounted ? `${num(r.currPackages, 0)} / ${num(r.currLoose, 1)}` : <span style={{ color: "#94a3b8" }}>ikke telt</span>}</td>
+                    <td>{currency(r.prevValue)}</td>
+                    <td>{currency(r.currValue)}</td>
+                    <td style={{ color: r.deltaValue < 0 ? "#dc2626" : r.deltaValue > 0 ? "#16a34a" : undefined, fontWeight: 700 }}>
+                      {r.deltaValue > 0 ? "+" : ""}{currency(r.deltaValue)}
+                    </td>
+                    <td>
+                      {!r.prevCounted && r.currCounted ? "Ny"
+                        : r.prevCounted && !r.currCounted ? "Tømt/fjernet"
+                        : r.deltaPct == null ? "-"
+                        : `${r.deltaPct > 0 ? "+" : ""}${num(r.deltaPct * 100, 0)} %`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ background: "#0f172a", color: "white" }}>
+                <td colSpan={6}><b>Sum absolutt avvik (viste rader)</b></td>
+                <td colSpan={2}><b>{currency(visibleRows.reduce((sum, r) => sum + Math.abs(r.deltaValue), 0))}</b></td>
+              </tr>
+            </tfoot>
+          </table>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, readOnly }: { data: AppData; updateData: (p: Partial<AppData>) => void; productUnitCost: (p: Product) => number; updateInventoryRpc: (month: string, patch: { itemsPatch?: Record<string, any>; wastePatch?: Record<string, number>; kassasvinn?: number; locked?: boolean; pricesFrozen?: boolean; profitability?: any }) => void; readOnly: boolean }) {
   const currentYm = new Date().toISOString().slice(0, 7);
   const [inventoryMonth, setInventoryMonth] = useState(currentYm);
@@ -11981,6 +12184,7 @@ function InventoryTab({ data, updateData, productUnitCost, updateInventoryRpc, r
       </details>
 
       <ProfitabilityReport data={data} month={inventoryMonth} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={readOnly} />
+      <InventoryVarianceReport data={data} month={inventoryMonth} productUnitCost={productUnitCost} />
 
       <details className="soft-box" style={{ padding: 0 }}>
         <summary style={{ padding: "12px 16px", fontWeight: 800, cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -17965,6 +18169,7 @@ function ReportsTab({ data, updateData, productUnitCost, updateInventoryRpc, rea
           <input type="month" value={reportMonth} disabled={readOnly} onChange={(e) => setReportMonth(e.target.value)} />
         </label>
         <ProfitabilityReport data={data} month={reportMonth} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={readOnly} />
+        <InventoryVarianceReport data={data} month={reportMonth} productUnitCost={productUnitCost} />
       </div>
     </section>
   );
