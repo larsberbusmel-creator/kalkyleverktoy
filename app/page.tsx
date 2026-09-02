@@ -2873,30 +2873,39 @@ const bg = isToday ? "#dcfce7"
                   <button className="btn active" onClick={() => { setWantsNewOrder(true); setTab("orders"); }}>+ Ny ordre</button>
                 </div>
                 {selectedOrders.length ? (
-                  <table>
-                    <tbody>
-                      {selectedOrders.map((o) => (
-                        <tr key={o.id} className="click-row" onClick={() => { setOrderToOpen(o.id); setTab("orders"); }}>
-                          <td>{o.time || "-"}</td>
-                          <td>{o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer}</td>
-                          <td>{o.orderLines.map((l) => { const p = data.products.find((x) => x.id === l.productId); return `${l.quantity} × ${p?.name || "Produkt"}`; }).join(", ")}</td>
-                          {o.recurringNote?.startsWith("Importert fra webshop") && !(data.seenOrderIds || []).includes(o.id) && (
-                            <td><span style={{ color: "#f59e0b", fontWeight: 900 }}>🔔 Ny</span></td>
-                          )}
-                                                    <td>
-                            <button
-                              className="btn"
-                              style={{ background: "#2563eb", borderColor: "#2563eb", color: "white", padding: "2px 10px", fontSize: 12 }}
-                              title="Åpne klar til utskrift i Ordre-fanen"
-                              onClick={(e) => { e.stopPropagation(); setOrderToOpen(o.id); setTab("orders"); }}
-                            >
-                              Print
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {selectedOrders.map((o) => (
+                      <div
+                        key={o.id}
+                        className="click-row"
+                        onClick={() => { setOrderToOpen(o.id); setTab("orders"); }}
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0" }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <b>{o.customerType === "bedrift" || o.customerType === "storkjokken" ? o.companyName || o.customer : o.customer}</b>
+                            {o.recurringNote?.startsWith("Importert fra webshop") && !(data.seenOrderIds || []).includes(o.id) && (
+                              <span style={{ color: "#f59e0b", fontWeight: 900, fontSize: 13 }}>🔔 Ny</span>
+                            )}
+                          </div>
+                          <div style={{ color: "#64748b", fontSize: 13, marginTop: 2 }}>
+                            {o.orderLines.map((l) => { const p = data.products.find((x) => x.id === l.productId); return `${l.quantity} × ${p?.name || "Produkt"}`; }).join(", ")}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          <span style={{ color: "#94a3b8", fontSize: 13 }}>{o.time || "-"}</span>
+                          <button
+                            className="btn"
+                            style={{ background: "#2563eb", borderColor: "#2563eb", color: "white", padding: "2px 10px", fontSize: 12 }}
+                            title="Åpne klar til utskrift i Ordre-fanen"
+                            onClick={(e) => { e.stopPropagation(); setOrderToOpen(o.id); setTab("orders"); }}
+                          >
+                            Print
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <p style={{ color: "#64748b" }}>Ingen ordre denne dagen.</p>
                 )}
@@ -8149,7 +8158,7 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
         const isPast = o.date < todayStr;
         const paidOnline = isPaidOnline(o);
         return (
-          <div key={o.id} className="order-row" style={{ borderLeft: isToday ? "4px solid #166534" : undefined, background: isToday ? "#f0fdf4" : isPast ? "#f5efe3" : undefined }}>
+          <div key={o.id} className="order-row" style={{ borderLeft: isToday ? "4px solid #166534" : undefined, background: isToday ? "#f0fdf4" : isPast ? "#f1f5f9" : undefined }}>
             <button className="order-row-header" onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}>
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 {isToday && <span style={{ background: "#166534", color: "white", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>I dag</span>}

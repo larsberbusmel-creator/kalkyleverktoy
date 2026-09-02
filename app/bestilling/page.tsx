@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 type Product = { id: string; name: string; category: string; priceExVat: number; unitsPerCase?: number };
 type Delivery = { productId: string; name: string; priceExVat: number } | null;
@@ -25,6 +25,9 @@ function getDeadlineForDate(deadlines: Deadlines, date: string): { closed: boole
   return { closed: !!wd?.closed, cutoffTime: wd?.cutoffTime || "12:00" };
 }
 
+const SESSION_KEY = "misemetrics_portal_session";
+const SESSION_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutter inaktivitet
+
 function isPastDeadline(deadlines: Deadlines, date: string) {
   const d = getDeadlineForDate(deadlines, date);
   if (d.closed) return true;
@@ -40,6 +43,10 @@ export default function BestillingPortal() {
   const [pinInput, setPinInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Gater rendring til vi har rukket å sjekke om en lagret, fortsatt gyldig
+  // økt finnes i localStorage - unngår at innloggingsskjermaet blinker frem
+  // et øyeblikk før en stille gjeninnlogging med lagret PIN rekker å fullføre.
+  const [restoringSession, setRestoringSession] = useState(true);
   const [customer, setCustomer] = useState<{ id: string; name: string } | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [history, setHistory] = useState<HistoryGroup[]>([]);
@@ -87,23 +94,28 @@ export default function BestillingPortal() {
     setPendingRecurring(json.pendingRecurring || []);
   }
 
-  async function login() {
-    if (!pinInput.trim()) return;
-    setLoading(true);
-    setError("");
+  // silent=true brukes av session-gjenoppretting ved sideoppstart - viser
+  // ingen lasting/feil-tilstand til brukeren, siden en mislykket stille
+  // gjeninnlogging bare skal falle tilbake til det vanlige innloggings-
+  // skjermaet (ikke vise en feilmelding for noe brukeren ikke selv gjorde).
+  async function loginWithPin(pinValue: string, silent = false) {
+    if (!silent) { setLoading(true); setError(""); }
     try {
       const res = await fetch("/api/kunde/data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: pinInput.trim() }),
+        body: JSON.stringify({ pin: pinValue }),
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error || "Kunne ikke logge inn");
-        setLoading(false);
+        if (silent) {
+          localStorage.removeItem(SESSION_KEY);
+        } else {
+          setError(json.error || "Kunne ikke logge inn");
+        }
         return;
       }
-      setPin(pinInput.trim());
+      setPin(pinValue);
       setCustomer(json.customer);
       setProducts(json.products);
       setHistory(json.history);
@@ -115,13 +127,62 @@ export default function BestillingPortal() {
       setDelivery(json.delivery || null);
       setActiveRecurring(json.activeRecurring || []);
       setPendingRecurring(json.pendingRecurring || []);
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ pin: pinValue, lastActivityAt: Date.now() }));
     } catch {
-      setError("Noe gikk galt. Prøv igjen.");
+      if (!silent) setError("Noe gikk galt. Prøv igjen.");
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }
 
+  async function login() {
+    if (!pinInput.trim()) return;
+    await loginWithPin(pinInput.trim());
+  }
+
+  // Session-persistens: ved oppstart, prøv å gjenopprette en lagret økt som
+  // fortsatt er innenfor 10 minutters inaktivitetsgrense - stille, uten å
+  // vise innloggingsskjermaet i mellomtiden. Kjøres kun én gang.
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as { pin?: string; lastActivityAt?: number };
+          if (saved?.pin && saved.lastActivityAt && Date.now() - saved.lastActivityAt < SESSION_MAX_AGE_MS) {
+            await loginWithPin(saved.pin, true);
+            setRestoringSession(false);
+            return;
+          }
+        }
+      } catch {}
+      localStorage.removeItem(SESSION_KEY);
+      setRestoringSession(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Hold økten "varm" mens kunden faktisk bruker siden - enhver klikk-/
+  // tastetrykk-interaksjon oppdaterer lastActivityAt i den lagrede økten.
+  useEffect(() => {
+    if (!customer) return;
+    function touch() {
+      try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ ...saved, lastActivityAt: Date.now() }));
+      } catch {}
+    }
+    window.addEventListener("click", touch);
+    window.addEventListener("keydown", touch);
+    return () => {
+      window.removeEventListener("click", touch);
+      window.removeEventListener("keydown", touch);
+    };
+  }, [customer]);
+
   function logout() {
+    localStorage.removeItem(SESSION_KEY);
     setPin("");
     setPinInput("");
     setCustomer(null);
@@ -353,6 +414,10 @@ async function toggleFavorite(productId: string) {
     }
   }
   
+  if (restoringSession) {
+    return <div style={{ minHeight: "100vh", background: "#f3f4f6" }} />;
+  }
+
   if (!customer) {
     return (
       <div style={{ minHeight: "100vh", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Arial, Helvetica, sans-serif", padding: 16 }}>
