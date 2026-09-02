@@ -1376,6 +1376,18 @@ export default function Page() {
   const activeSiteIdRef = React.useRef<string | null>(null);
   useEffect(() => { activeSiteIdRef.current = activeSiteId; }, [activeSiteId]);
   const sharedDataRef = React.useRef<{ sites: Site[]; priceAgreements: PriceAgreementEntry[]; priceAgreementTypes: PriceAgreementType[]; userAccess: UserAccessEntry[] } | null>(null);
+  // Holder sharedDataRef speilet mot lokal data til enhver tid - uten dette ville
+  // en lokal endring (f.eks. et nytt sted opprettet via UsersTab) blitt usynlig
+  // overskrevet igjen av neste poll-/sanntids-tikk, som flettes inn FRA denne
+  // reffen (se effekt 2 under).
+  useEffect(() => {
+    sharedDataRef.current = {
+      sites: data.sites,
+      priceAgreements: data.priceAgreements,
+      priceAgreementTypes: data.priceAgreementTypes,
+      userAccess: data.userAccess,
+    };
+  }, [data.sites, data.priceAgreements, data.priceAgreementTypes, data.userAccess]);
   const [siteAccessError, setSiteAccessError] = useState<string | null>(null);
   const ACTIVE_SITE_STORAGE_KEY = "misemetrics_active_site";
 
@@ -1649,6 +1661,16 @@ export default function Page() {
               });
               const barTallyEntries = Array.from(mergedBarTallyMap.values());
 
+              // Sted-raden selv har ingen ekte verdier for de fire delte nøklene
+              // (sites/priceAgreements/priceAgreementTypes/userAccess) - de bor i
+              // "main". Uten denne flettingen ville incoming (og dermed data) fått
+              // migrateData sine tomme standardverdier for disse, og f.eks. sites-
+              // listen ville forsvunnet fra visningen ved neste sanntids-oppdatering.
+              const shared = sharedDataRef.current || {
+                sites: prev.sites, priceAgreements: prev.priceAgreements,
+                priceAgreementTypes: prev.priceAgreementTypes, userAccess: prev.userAccess,
+              };
+
               if (isSavingRef.current) {
                 // Vi holder på å lagre selv – behold lokal state for alt,
                 // men hent inventoryCounts fra databasen siden RPC alltid er autoritativ der
@@ -1656,6 +1678,7 @@ export default function Page() {
                   ...prev,
                   inventoryCounts: incoming.inventoryCounts,
                   barTallyEntries,
+                  ...shared,
                 };
               }
               // Ikke i ferd med å lagre – ta inn alt fra databasen, men behold lokal inventoryCounts
@@ -1664,6 +1687,7 @@ export default function Page() {
                 ...incoming,
                 inventoryCounts: prev.inventoryCounts,
                 barTallyEntries,
+                ...shared,
               };
             });
           }
@@ -1690,9 +1714,17 @@ export default function Page() {
         if (fullRow?.data) {
           setData((prev) => {
             const incoming = migrateData(fullRow.data);
+            // Samme fletting som i sanntids-handleren over - sted-raden selv har
+            // ingen ekte verdier for de fire delte nøklene, så uten dette ville de
+            // blitt overskrevet med migrateData sine tomme standardverdier.
+            const shared = sharedDataRef.current || {
+              sites: prev.sites, priceAgreements: prev.priceAgreements,
+              priceAgreementTypes: prev.priceAgreementTypes, userAccess: prev.userAccess,
+            };
             return {
               ...incoming,
               inventoryCounts: incoming.inventoryCounts,
+              ...shared,
             };
           });
         }
