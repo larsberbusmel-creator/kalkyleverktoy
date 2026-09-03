@@ -18350,15 +18350,22 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   }
 
   // Importer produkt: har produktet egne "product"-linjer (retter det består
-  // av), opprettes én MenuItem per slik linje. Er produktet selv en
-  // enkeltrett (ingen slike linjer), opprettes kun ÉN MenuItem for produktet
-  // selv. Pris/beskrivelse fylles ALDRI ut automatisk - kun navnet.
+  // av), opprettes én MenuItem PER slik linje, i ÉTT klikk (alle linjene
+  // legges til samtidig via samme .map()/setForm-kall, ikke ett og ett). Er
+  // produktet selv en enkeltrett (ingen slike linjer), opprettes kun ÉN
+  // MenuItem for produktet selv. Pris forhåndsutfylles fra produktets egen
+  // customerPrice (ren tallstreng, fritt redigerbar etterpå) - description
+  // fylles ALDRI ut automatisk, siden Product ikke har noe kundevendt
+  // beskrivelsesfelt (kun "instructions", som er interne kjøkkennotater).
   function importProduct(product: Product, targetSectionId: string) {
     if (!form) return;
     const subProductLines = product.lines.filter((l) => l.itemType === "product");
     const newItems: MenuItem[] = subProductLines.length
-      ? subProductLines.map((l) => ({ id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: data.products.find((p) => p.id === l.itemId)?.name || "Ukjent produkt" }))
-      : [{ id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name }];
+      ? subProductLines.map((l) => {
+          const sub = data.products.find((p) => p.id === l.itemId);
+          return { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: sub?.name || "Ukjent produkt", price: sub ? String(sub.customerPrice) : undefined };
+        })
+      : [{ id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name, price: String(product.customerPrice) }];
 
     if (targetSectionId === "__new__") {
       const section: MenuSection = { id: `sec-${Date.now()}`, title: product.name, items: newItems };
