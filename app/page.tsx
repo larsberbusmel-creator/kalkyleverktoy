@@ -2464,6 +2464,14 @@ function productCost(product: Product, visited: string[] = []) {
   // parallell, duplisert versjon av produksjonsgrunnlag/oppskrifter/
   // varebestilling-logikken. printOrder() sin egen, enkeltordre-oppførsel er
   // UENDRET (samme stil, samme knapp, samme innhold som før).
+  // Delt <style>-blokk for ALL ordre-print (Ordre-fanens printOrder() OG
+  // Catering-panelets "print for dag"/"print for periode") - definert ÉTT
+  // sted slik at fremtidige endringer i utskriftsstilen automatisk gjelder
+  // overalt, i stedet for å risikere at de tre stedene drifter fra hverandre.
+  function orderPrintStyleTag() {
+    return `<style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style>`;
+  }
+
   function buildOrderPrintHtml(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
     const rows = order.orderLines.map((line) => {
       const product = data.products.find((p) => p.id === line.productId);
@@ -2535,7 +2543,7 @@ function productCost(product: Product, visited: string[] = []) {
 
   function printOrder(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
     const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button>${buildOrderPrintHtml(order, flags)}</body></html>`);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title>${orderPrintStyleTag()}</head><body><button onclick="window.print()">Print</button>${buildOrderPrintHtml(order, flags)}</body></html>`);
     w.document.close(); w.focus();
   }
 
@@ -2685,7 +2693,7 @@ return (
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} isDirty={dirtyTabs.has("recipes")} onDirtyChange={onDirtyChangeFor("recipes")} registerSave={registerSave} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} printFlags={printFlags} setPrintFlags={setPrintFlags} selectedAllergens={selectedAllergens} orderSubtotalIncVat={orderSubtotalIncVat} orderDiscountAmount={orderDiscountAmount} orderTotalIncVat={orderTotalIncVat} orderAllergenWarnings={orderAllergenWarnings} printOrder={printOrder} />}
-        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} printFlags={printFlags} setPrintFlags={setPrintFlags} printOrder={printOrder} buildOrderPrintHtml={buildOrderPrintHtml} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} printFlags={printFlags} setPrintFlags={setPrintFlags} printOrder={printOrder} buildOrderPrintHtml={buildOrderPrintHtml} orderPrintStyleTag={orderPrintStyleTag} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} siteName={activeSite?.name} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
@@ -8554,6 +8562,7 @@ function ProductionTab({
   setPrintFlags,
   printOrder,
   buildOrderPrintHtml,
+  orderPrintStyleTag,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -8569,6 +8578,7 @@ function ProductionTab({
   setPrintFlags: (f: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
   printOrder: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
   buildOrderPrintHtml: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => string;
+  orderPrintStyleTag: () => string;
 }) {
   const productionCategories: { id: ProductionCategory; name: string }[] = [
     { id: "smabakst", name: "Småbakst" },
@@ -9755,97 +9765,18 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
     printWindow(`Produksjon ${activeDate}`, body);
   }
 // ── Print alle cateringordre for dagen ───────────────────────────────────
-  function printCateringDay() {
-    if (!cateringOrders.length) return alert("Ingen cateringordre denne dagen.");
-
-    const forsideRows = cateringOrders.map((o) => {
-      const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
-      return `<tr><td>${o.time || "-"}</td><td><b>${escapeHtml(customerName || "")}</b><br><small>${escapeHtml(o.phone || "")}</small></td><td>${o.orderLines.map((ol) => { const p = data.products.find((x) => x.id === ol.productId); return `${ol.quantity} × ${escapeHtml(p?.name || "Ukjent")}`; }).join("<br>")}</td><td>${escapeHtml(o.deliveryAddress || "-")}</td><td>${escapeHtml(o.paymentInfo || "-")}</td></tr>`;
-    }).join("");
-
-    const orderPages = cateringOrders.map((o) => {
-      const customerName = o.customerType === "bedrift" ? `${o.companyName || ""}${o.orgNumber ? ` (${o.orgNumber})` : ""}` : o.customer;
-
-      // Beregn totaler for pakkseddel
-      const subtotal = o.orderLines.reduce((sum, ol) => {
-        const p = data.products.find((x) => x.id === ol.productId);
-        return sum + (p?.customerPrice || 0) * ol.quantity;
-      }, 0);
-      const discount = subtotal * ((Number(o.discountPercent) || 0) / 100);
-      const total = subtotal - discount;
-      const totalEx = exVatFromIncVat(total, data.settings.foodVat);
-
-      const packingRows = o.orderLines.map((ol) => {
-        const p = data.products.find((x) => x.id === ol.productId);
-        const lineTotal = (p?.customerPrice || 0) * ol.quantity;
-        return `<tr><td>${escapeHtml(p?.name || "Ukjent")}</td><td class="right">${ol.quantity} stk</td><td class="right">${currency(p?.customerPrice || 0)}</td><td class="right"><b>${currency(lineTotal)}</b></td></tr>`;
-      }).join("");
-
-      const pakkseddel = `
-<div class="page">
-  <div class="top">
-    <div>
-      <img src="/logo.png" class="logo" />
-      <h1>Pakkseddel</h1>
-      <p class="muted">${formatDateNo(o.date)} ${o.time || ""}${o.orderNumber ? ` · Ordrenr: ${escapeHtml(o.orderNumber)}` : ""}</p>
-    </div>
-    <div class="right">
-      <p><b>${escapeHtml(customerName || "")}</b></p>
-      <p>${escapeHtml(o.deliveryAddress || "-")}</p>
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
-    <div class="box">
-      <h2>Kunde</h2>
-      <p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p>
-      <p>Kontakt: ${escapeHtml(o.customer || "-")}</p>
-      <p>Telefon: ${escapeHtml(o.phone || "-")}</p>
-      <p>Leveringsadresse: ${escapeHtml(o.deliveryAddress || "-")}</p>
-    </div>
-    <div class="box">
-      <h2>Betaling</h2>
-      <p>${escapeHtml(o.paymentInfo || "Ikke registrert")}</p>
-      ${o.note ? `<p><b>Notat:</b><br>${escapeHtml(o.note).replace(/\n/g, "<br>")}</p>` : ""}
-    </div>
-  </div>
-  <table>
-    <thead><tr><th>Produkt</th><th class="right">Antall</th><th class="right">Pris inkl. mva</th><th class="right">Sum inkl. mva</th></tr></thead>
-    <tbody>${packingRows}</tbody>
-    <tfoot>
-      ${o.discountPercent ? `<tr><td colspan="3">Rabatt ${o.discountPercent}%</td><td class="right">-${currency(discount)}</td></tr>` : ""}
-      <tr style="font-weight:900;background:#f8fafc"><td colspan="3">Total inkl. mva</td><td class="right">${currency(total)}</td></tr>
-      <tr><td colspan="3" style="color:#64748b">Herav mva</td><td class="right" style="color:#64748b">${currency(total - totalEx)}</td></tr>
-    </tfoot>
-  </table>
-  <div style="margin-top:30px;text-align:center;font-size:12px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:14px">
-    Brødrene Berbusmel · brodrene@berbusmel.no · Tlf 413 73 000
-  </div>
-</div>`;
-
-      // Oppskriftsider per produkt
-      const recipesPages = o.orderLines.map((ol) => {
-        const product = data.products.find((p) => p.id === ol.productId);
-        if (!product) return "";
-return `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}</h1><p class="muted">${escapeHtml(customerName || "")} · ${ol.quantity} porsjoner / stk</p></div><div class="right"><b>${formatDateNo(o.date)} ${o.time || ""}</b></div></div>${scaledRecipeHtml(product, ol.quantity, ol.menuSelections)}</div>`;      }).join("");
-
-      return pakkseddel + recipesPages;
-    }).join("");
-
-    const body = `
-<div class="print-header"><img src="/logo.png" class="print-logo" /></div>
-<div class="page">
-  <div class="top">
-    <div><img src="/logo.png" class="logo" /><h1>Catering – oversikt for dagen</h1><p class="muted">${weekdayNo(activeDate)} ${formatDateNo(activeDate)}</p></div>
-    <div class="right"><b>${cateringOrders.length} ordre</b></div>
-  </div>
-  <table>
-    <thead><tr><th>Tid</th><th>Kunde</th><th>Produkter</th><th>Levering</th><th>Betaling</th></tr></thead>
-    <tbody>${forsideRows}</tbody>
-  </table>
-</div>
-${orderPages}`;
-
-    printWindow(`Catering ${formatDateNo(activeDate)}`, body);
+  // Bygger utskriften av HELE dagens cateringordre av NØYAKTIG samme
+  // byggeklosser som Ordre-fanens printOrder() (buildOrderPrintHtml() +
+  // orderPrintStyleTag()) - tidligere hadde denne knappen sin egen,
+  // frittstående pakkseddel/oppskrift-visning som aldri ble koblet til den
+  // delte print-funksjonaliteten. Sideskift foran hver ordre unntatt den
+  // aller første, slik at hver ordre alltid starter på egen side.
+  function printCateringDay(flags: { recipes: boolean; shopping: boolean; packingList: boolean }) {
+    if (!cateringOrders.length) { alert("Ingen cateringordre denne dagen."); return; }
+    const ordersHtml = cateringOrders.map((o, i) => `${i === 0 ? "" : '<div class="page-break"></div>'}${buildOrderPrintHtml(o, flags)}`).join("");
+    const w = window.open("", "_blank"); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Catering ${activeDate}</title>${orderPrintStyleTag()}</head><body><button onclick="window.print()">Print</button>${ordersHtml}</body></html>`);
+    w.document.close(); w.focus();
   }
 
   // Samme filter som cateringOrders over (faktisk produktinnhold, ikke
@@ -9871,20 +9802,25 @@ ${orderPages}`;
       byDate[o.date].push(o);
     });
 
-    // printWindow() sin delte stil (.page/.frontpage/.subpage/.recipe-block)
-    // definerer ikke klassene buildOrderPrintHtml() sitt markup er bygget på
-    // (.grid/.box/.prod-product/.page-break, fra printOrder() sin egen,
-    // separate stil) - legges til lokalt her i stedet for i printWindow()
-    // selv, slik at printInvoice()/printCateringDay() (andre kallere av
-    // printWindow) ikke påvirkes.
-    const extraStyle = `<style>.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.page-break{page-break-before:always}</style>`;
-
+    // Samme byggeklosser som printOrder() (buildOrderPrintHtml() +
+    // orderPrintStyleTag()) - IKKE printWindow()'s egen rapport-stil, som har
+    // annen skriftstørrelse/sidemargin og manglet .grid/.box/.prod-product.
+    // Sideskift foran hver ordre unntatt den aller første i HELE dokumentet
+    // (ikke per dato-gruppe) - dato-overskriften er kun en visuell gruppering,
+    // ikke en egen side i seg selv.
+    let orderIndex = 0;
     const dayGroupsHtml = Object.keys(byDate).sort().map((date) => {
-      const ordersHtml = byDate[date].map((o) => `<div class="subpage">${buildOrderPrintHtml(o, flags)}</div>`).join("");
+      const ordersHtml = byDate[date].map((o) => {
+        const pageBreak = orderIndex > 0 ? '<div class="page-break"></div>' : "";
+        orderIndex++;
+        return `${pageBreak}${buildOrderPrintHtml(o, flags)}`;
+      }).join("");
       return `<h2 style="font-size:16px;font-weight:800;margin:16px 0 8px;border-left:4px solid #ea580c;padding-left:10px">${weekdayNo(date)} ${formatDateNo(date)}</h2>${ordersHtml}`;
     }).join("");
 
-    printWindow(`Catering ${formatDateNo(fromDate)} – ${formatDateNo(toDate)}`, extraStyle + dayGroupsHtml);
+    const w = window.open("", "_blank"); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Catering ${fromDate} – ${toDate}</title>${orderPrintStyleTag()}</head><body><button onclick="window.print()">Print</button>${dayGroupsHtml}</body></html>`);
+    w.document.close(); w.focus();
   }
 
   function hasProductionForDay(date: string) {
@@ -11357,7 +11293,7 @@ ${orderPages}`;
                 <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Ordre som inneholder minst ett cateringmeny-produkt vises automatisk her på leveringsdatoen.</p>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <button className="btn active" onClick={printCateringDay}>
+                <button className="btn active" onClick={() => printCateringDay(printFlags)}>
                   Print alle ordre for dagen
                 </button>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px" }}>
