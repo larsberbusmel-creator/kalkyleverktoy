@@ -1531,6 +1531,12 @@ export default function Page() {
   const [pendingTabChange, setPendingTabChange] = useState<Tab | null>(null);
   const saveActiveTabRef = React.useRef<(() => boolean) | null>(null);
 
+  // Løftet opp fra Ordre-fanen sin egen komponent, siden Catering-panelet i
+  // Produksjon nå også trenger å kunne printe enkeltordre med samme
+  // oppskrifter/varebestilling-avkrysninger og samme printOrder()-funksjon -
+  // én delt implementasjon i stedet for to parallelle.
+  const [printFlags, setPrintFlags] = useState({ recipes: false, shopping: false, packingList: false });
+
   function registerSave(fn: (() => boolean) | null) {
     saveActiveTabRef.current = fn;
   }
@@ -2372,6 +2378,167 @@ function productCost(product: Product, visited: string[] = []) {
     return Math.ceil((costExVat / (1 - margin)) * (1 + data.settings.foodVat / 100));
   }
 
+  // ── Løftet opp fra Ordre-fanen sin egen komponent (se kommentar ved
+  // printFlags over) - Catering-panelet i Produksjon trenger nå den samme
+  // ordre-print-funksjonaliteten, én delt implementasjon i stedet for to. ──
+  function selectedAllergens(order: Order) {
+    return Object.entries(order.allergens || {})
+      .filter(([, count]) => Number(count) > 0)
+      .map(([name, count]) => `${name}: ${count}`);
+  }
+
+  function orderSubtotalIncVat(order: Order) {
+    return order.orderLines.reduce((sum, line) => {
+      const product = data.products.find((p) => p.id === line.productId);
+      const price = line.priceOverride ?? product?.customerPrice ?? 0;
+      const lineDiscount = (Number(line.discountPercent) || 0) / 100;
+      return sum + price * Number(line.quantity || 0) * (1 - lineDiscount);
+    }, 0);
+  }
+  function orderDiscountAmount(order: Order) {
+    return orderSubtotalIncVat(order) * ((Number(order.discountPercent) || 0) / 100);
+  }
+  function orderTotalIncVat(order: Order) {
+    return orderSubtotalIncVat(order) - orderDiscountAmount(order);
+  }
+
+  function productAllergenBreakdown(product: Product, visited: string[] = []): { name: string; allergens: string[] }[] {
+    if (visited.includes(product.id)) return [];
+    const nextVisited = [...visited, product.id];
+    return product.lines.map((line) => {
+      if (line.itemType === "material") {
+        const m = data.materials.find((x) => x.id === line.itemId);
+        return m && (m.allergens || []).length ? { name: m.name, allergens: m.allergens } : null;
+      }
+      if (line.itemType === "recipe") {
+        const r = data.recipes.find((x) => x.id === line.itemId);
+        const allergens = r ? recipeAllergens(r) : [];
+        return r && allergens.length ? { name: r.name, allergens } : null;
+      }
+      const p = data.products.find((x) => x.id === line.itemId);
+      const allergens = p ? productAllergens(p, nextVisited) : [];
+      return p && allergens.length ? { name: p.name, allergens } : null;
+    }).filter((x): x is { name: string; allergens: string[] } => !!x);
+  }
+
+  function orderLineAllergenBreakdown(line: OrderLine): { dish: string; name: string; allergens: string[] }[] {
+    const product = data.products.find((p) => p.id === line.productId);
+    if (!product) return [];
+    if (product.type === "selskapsmeny" && (product.menuCourses || []).length && line.menuSelections?.length) {
+      return line.menuSelections.flatMap((sel) => {
+        const chosen = data.products.find((p) => p.id === sel.productId);
+        if (!chosen) return [];
+        const breakdown = productAllergenBreakdown(chosen);
+        return (breakdown.length ? breakdown : [{ name: chosen.name, allergens: productAllergens(chosen) }])
+          .filter((b) => b.allergens.length)
+          .map((b) => ({ dish: chosen.name, name: b.name, allergens: b.allergens }));
+      });
+    }
+    const breakdown = productAllergenBreakdown(product);
+    return (breakdown.length ? breakdown : [{ name: product.name, allergens: productAllergens(product) }])
+      .filter((b) => b.allergens.length)
+      .map((b) => ({ dish: product.name, name: b.name, allergens: b.allergens }));
+  }
+
+  function orderAllergenWarnings(order: Order) {
+    const orderAllergens = new Set(order.orderLines.flatMap((l) => orderLineAllergenBreakdown(l).flatMap((b) => b.allergens)));
+    return Object.entries(order.allergens || {})
+      .filter(([allergen, count]) => Number(count) > 0 && orderAllergens.has(allergen))
+      .map(([allergen]) => allergen);
+  }
+
+  function orderAllergenWarningDetails(order: Order) {
+    const flagged = new Set(Object.entries(order.allergens || {}).filter(([, c]) => Number(c) > 0).map(([a]) => a));
+    if (!flagged.size) return [];
+    return order.orderLines.flatMap((line) =>
+      orderLineAllergenBreakdown(line)
+        .map((b) => ({ ...b, allergens: b.allergens.filter((a) => flagged.has(a)) }))
+        .filter((b) => b.allergens.length)
+    );
+  }
+
+  // Bygger INNHOLDET (uten <html>/<style>/window.open) for én ordre sin
+  // print-visning - ekstrahert fra printOrder() slik at printCateringRange()
+  // (Catering-panelet, DEL C) kan gjenbruke NØYAKTIG samme innhold i ETT
+  // samlet print-dokument for et helt datointervall, i stedet for å bygge en
+  // parallell, duplisert versjon av produksjonsgrunnlag/oppskrifter/
+  // varebestilling-logikken. printOrder() sin egen, enkeltordre-oppførsel er
+  // UENDRET (samme stil, samme knapp, samme innhold som før).
+  function buildOrderPrintHtml(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
+    const rows = order.orderLines.map((line) => {
+      const product = data.products.find((p) => p.id === line.productId);
+      const lineTotal = (product?.customerPrice || 0) * line.quantity;
+      return `<tr><td>${line.quantity}</td><td>${product?.name || "Ukjent"}</td><td>${currency(product?.customerPrice || 0)}</td><td>${currency(lineTotal)}</td></tr>`;
+    }).join("");
+    const subtotalInc = orderSubtotalIncVat(order);
+    const discountAmount = orderDiscountAmount(order);
+    const totalInc = orderTotalIncVat(order);
+    const totalEx = exVatFromIncVat(totalInc, data.settings.foodVat);
+    const noteAllergens = order.note?.match(/Allergier \(fra bestilling\):\s*(.+)/i)?.[1]?.trim() || "";
+    const allergens = selectedAllergens(order).join(", ") || noteAllergens || "Ingen registrert";
+    const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
+    const customerName = order.customerType === "bedrift"
+      ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
+    const allergenDetails = orderAllergenWarningDetails(order);
+    const allergenWarningHtml = allergenDetails.length
+      ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel:<br>${allergenDetails.map((d) => `${escapeHtml(d.dish)}${d.name !== d.dish ? ` – ${escapeHtml(d.name)}` : ""}: ${escapeHtml(d.allergens.join(", "))}`).join("<br>")}</div>`
+      : "";
+    let prodSection = "";
+    {
+      // Bakeri/egenprodusert-ordre brukte tidligere en helt egen, enkeltkolonne
+      // print-gren her. Nå bruker ALLE ordretyper samme kode - forceExpandBakery
+      // (isBakeryOrder) sørger for at expandProductForProduction/
+      // scaledRecipeHtmlForOrder/collectOrderMaterials likevel bretter ut
+      // Søtbakst/Bakeri-egenprodusert-kategoriene til ingrediensnivå for DENNE
+      // ordretypen spesifikt (de hopper ellers over disse kategoriene by design,
+      // siden bakevarer som opptrer som linje i en CATERING-ordre ikke skal
+      // brettes ut der - den skillelinjen gjelder fortsatt for andre ordretyper).
+      const isBakeryOrder = order.type === "bakeri" || order.type === "egenprodusert";
+      const prodRows = order.orderLines.map((line) => {
+        const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
+        const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, Number(line.quantity) || 0, [], line.menuSelections, undefined, isBakeryOrder));
+        return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
+      }).join("");
+      const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
+        const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
+        // Samme batch-justering (unitWeightKg/recipeYieldAmount) som Produksjonsgrunnlag og
+        // Varebestilling allerede bruker - uten denne bruker "Oppskrifter"-seksjonen rå bestilt
+        // antall i stedet for faktisk antall batcher, og gir feil (for høye) mengder for
+        // underprodukter (produkt-i-produkt-linjer).
+        const qty = Number(line.quantity) || 0;
+        const scaledQty = product.unitWeightKg && product.recipeYieldAmount
+          ? (qty * product.unitWeightKg) / product.recipeYieldAmount
+          : qty;
+        const html = scaledRecipeHtmlForOrder(data, product, scaledQty, line.menuSelections, false, isBakeryOrder);
+        if (!html) return "";
+        return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
+      }).join("");
+      const materialsAgg = flags.shopping ? collectOrderMaterials(data, order, isBakeryOrder) : {};
+      const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
+      Object.values(materialsAgg).forEach((entry) => {
+        if (!byCategory[entry.category]) byCategory[entry.category] = [];
+        byCategory[entry.category].push(entry);
+      });
+      const shoppingHtml = Object.keys(byCategory).sort((a, b) => a.localeCompare(b, "no-NO")).map((cat) => {
+        const rows = byCategory[cat]
+          .sort((a, b) => a.name.localeCompare(b.name, "no-NO"))
+          .map((e) => `<tr><td>${escapeHtml(e.name)}</td><td class="right">${num(e.amount, 3)} ${escapeHtml(e.unit)}</td></tr>`).join("");
+        return `<div class="recipe-block"><h3>${escapeHtml(cat)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      }).join("");
+      prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div class="page-break"></div><h2>Oppskrifter (skalert til bestilt antall)</h2>${recipePages}` : ""}${shoppingHtml ? `<div class="page-break"></div><h2>Varebestilling</h2>${shoppingHtml}` : ""}`;
+    }
+    const packingListSection = flags.packingList
+      ? `<div class="page-break"></div>${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackingListTemplateIds, order.extraPackingListItems)}`
+      : "";
+    return `<div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.reference ? `<p>Referanse: ${escapeHtml(order.reference)}</p>` : ""}${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${packingListSection}`;
+  }
+
+  function printOrder(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
+    const w = window.open("", "_blank"); if (!w) return;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button>${buildOrderPrintHtml(order, flags)}</body></html>`);
+    w.document.close(); w.focus();
+  }
+
   if (siteAccessError) return <main style={{ padding: 24, color: "#dc2626", fontWeight: 700 }}>{siteAccessError}</main>;
   if (!isLoaded) return <main style={{ padding: 24 }}>Laster...</main>;
 
@@ -2517,8 +2684,8 @@ return (
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} setTab={setTab} setPriceAgreementToOpen={setPriceAgreementToOpen} pendingMaterialId={materialToOpen} clearPendingMaterialId={() => setMaterialToOpen(null)} linkMaterialToAgreement={linkMaterialToAgreement} unlinkMaterialFromAgreement={unlinkMaterialFromAgreement} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} isDirty={dirtyTabs.has("recipes")} onDirtyChange={onDirtyChangeFor("recipes")} registerSave={registerSave} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
-        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} />}
-        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} />}
+        {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} printFlags={printFlags} setPrintFlags={setPrintFlags} selectedAllergens={selectedAllergens} orderSubtotalIncVat={orderSubtotalIncVat} orderDiscountAmount={orderDiscountAmount} orderTotalIncVat={orderTotalIncVat} orderAllergenWarnings={orderAllergenWarnings} printOrder={printOrder} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} printFlags={printFlags} setPrintFlags={setPrintFlags} printOrder={printOrder} buildOrderPrintHtml={buildOrderPrintHtml} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} siteName={activeSite?.name} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
@@ -6993,7 +7160,7 @@ function scaledRecipeHtmlForOrder(data: AppData, product: Product, quantity: num
   return html;
 }
 
-function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, setEventCalculationToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin, isDirty, onDirtyChange, registerSave }: {
+function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAllergens, setTab, setRentalOfferToOpen, setEventCalculationToOpen, pendingOrderId, clearPendingOrderId, pendingNewOrder, clearPendingNewOrder, readOnly, userEmail, isSuperadmin, isDirty, onDirtyChange, registerSave, printFlags, setPrintFlags, selectedAllergens, orderSubtotalIncVat, orderDiscountAmount, orderTotalIncVat, orderAllergenWarnings, printOrder }: {
   updateListRpc: (listKey: "products" | "recipes" | "orders" | "rentalOffers" | "customerDirectory", itemsPatch: Record<string, any>) => void;
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -7012,6 +7179,16 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   isDirty: boolean;
   onDirtyChange: (dirty: boolean) => void;
   registerSave: (fn: (() => boolean) | null) => void;
+  // Løftet opp til Page()-nivå (se kommentar der) - delt med Catering-panelet i
+  // Produksjon, slik at begge printer enkeltordre via samme printOrder().
+  printFlags: { recipes: boolean; shopping: boolean; packingList: boolean };
+  setPrintFlags: (f: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
+  selectedAllergens: (order: Order) => string[];
+  orderSubtotalIncVat: (order: Order) => number;
+  orderDiscountAmount: (order: Order) => number;
+  orderTotalIncVat: (order: Order) => number;
+  orderAllergenWarnings: (order: Order) => string[];
+  printOrder: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
 }) {
   const emptyOrder = (): Order => ({
     id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
@@ -7055,7 +7232,6 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(todayStr);
   const [newExtraOrderPackingItem, setNewExtraOrderPackingItem] = useState("");
   const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
-  const [printFlags, setPrintFlags] = useState({ recipes: false, shopping: false, packingList: false });
 
   function addExtraOrderPackingListItem() {
     if (!newExtraOrderPackingItem.trim()) return;
@@ -7492,27 +7668,6 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     updateData({ orders: data.orders.filter((o) => !o.deletedAt) });
   }
 
-  function selectedAllergens(order: Order) {
-    return Object.entries(order.allergens || {})
-      .filter(([, count]) => Number(count) > 0)
-      .map(([name, count]) => `${name}: ${count}`);
-  }
-
-    function orderSubtotalIncVat(order: Order) {
-    return order.orderLines.reduce((sum, line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      const price = line.priceOverride ?? product?.customerPrice ?? 0;
-      const lineDiscount = (Number(line.discountPercent) || 0) / 100;
-      return sum + price * Number(line.quantity || 0) * (1 - lineDiscount);
-    }, 0);
-  }
-  function orderDiscountAmount(order: Order) {
-    return orderSubtotalIncVat(order) * ((Number(order.discountPercent) || 0) / 100);
-  }
-  function orderTotalIncVat(order: Order) {
-    return orderSubtotalIncVat(order) - orderDiscountAmount(order);
-  }
-
   function productionRowsHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number }[]) {
     let lastCourse: string | undefined;
     return items.map((r) => {
@@ -7526,134 +7681,8 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
     }).join("");
   }
 
-  function printOrder(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
-    const rows = order.orderLines.map((line) => {
-      const product = data.products.find((p) => p.id === line.productId);
-      const lineTotal = (product?.customerPrice || 0) * line.quantity;
-      return `<tr><td>${line.quantity}</td><td>${product?.name || "Ukjent"}</td><td>${currency(product?.customerPrice || 0)}</td><td>${currency(lineTotal)}</td></tr>`;
-    }).join("");
-    const subtotalInc = orderSubtotalIncVat(order);
-    const discountAmount = orderDiscountAmount(order);
-    const totalInc = orderTotalIncVat(order);
-    const totalEx = exVatFromIncVat(totalInc, data.settings.foodVat);
-    const noteAllergens = order.note?.match(/Allergier \(fra bestilling\):\s*(.+)/i)?.[1]?.trim() || "";
-    const allergens = selectedAllergens(order).join(", ") || noteAllergens || "Ingen registrert";
-    const diets = `Vegetar: ${order.dietVegetarian || 0}, Vegan: ${order.dietVegan || 0}, Gravid: ${order.dietPregnant || 0}${order.dietOther ? `, Annet: ${order.dietOther}` : ""}`;
-    const customerName = order.customerType === "bedrift"
-      ? `${order.companyName || ""}${order.orgNumber ? ` (${order.orgNumber})` : ""}` : order.customer;
-    const allergenDetails = orderAllergenWarningDetails(order);
-    const allergenWarningHtml = allergenDetails.length
-      ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px;margin-bottom:8px;font-weight:700;color:#92400e">⚠ Allergivarsel:<br>${allergenDetails.map((d) => `${escapeHtml(d.dish)}${d.name !== d.dish ? ` – ${escapeHtml(d.name)}` : ""}: ${escapeHtml(d.allergens.join(", "))}`).join("<br>")}</div>`
-      : "";
-    let prodSection = "";
-    {
-      // Bakeri/egenprodusert-ordre brukte tidligere en helt egen, enkeltkolonne
-      // print-gren her. Nå bruker ALLE ordretyper samme kode - forceExpandBakery
-      // (isBakeryOrder) sørger for at expandProductForProduction/
-      // scaledRecipeHtmlForOrder/collectOrderMaterials likevel bretter ut
-      // Søtbakst/Bakeri-egenprodusert-kategoriene til ingrediensnivå for DENNE
-      // ordretypen spesifikt (de hopper ellers over disse kategoriene by design,
-      // siden bakevarer som opptrer som linje i en CATERING-ordre ikke skal
-      // brettes ut der - den skillelinjen gjelder fortsatt for andre ordretyper).
-      const isBakeryOrder = order.type === "bakeri" || order.type === "egenprodusert";
-      const prodRows = order.orderLines.map((line) => {
-        const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-        const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, Number(line.quantity) || 0, [], line.menuSelections, undefined, isBakeryOrder));
-        return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
-      }).join("");
-      const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
-        const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-        // Samme batch-justering (unitWeightKg/recipeYieldAmount) som Produksjonsgrunnlag og
-        // Varebestilling allerede bruker - uten denne bruker "Oppskrifter"-seksjonen rå bestilt
-        // antall i stedet for faktisk antall batcher, og gir feil (for høye) mengder for
-        // underprodukter (produkt-i-produkt-linjer).
-        const qty = Number(line.quantity) || 0;
-        const scaledQty = product.unitWeightKg && product.recipeYieldAmount
-          ? (qty * product.unitWeightKg) / product.recipeYieldAmount
-          : qty;
-        const html = scaledRecipeHtmlForOrder(data, product, scaledQty, line.menuSelections, false, isBakeryOrder);
-        if (!html) return "";
-        return `<div style="margin:8px 0"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${html}</div>`;
-      }).join("");
-      const materialsAgg = flags.shopping ? collectOrderMaterials(data, order, isBakeryOrder) : {};
-      const byCategory: Record<string, { name: string; amount: number; unit: string }[]> = {};
-      Object.values(materialsAgg).forEach((entry) => {
-        if (!byCategory[entry.category]) byCategory[entry.category] = [];
-        byCategory[entry.category].push(entry);
-      });
-      const shoppingHtml = Object.keys(byCategory).sort((a, b) => a.localeCompare(b, "no-NO")).map((cat) => {
-        const rows = byCategory[cat]
-          .sort((a, b) => a.name.localeCompare(b.name, "no-NO"))
-          .map((e) => `<tr><td>${escapeHtml(e.name)}</td><td class="right">${num(e.amount, 3)} ${escapeHtml(e.unit)}</td></tr>`).join("");
-        return `<div class="recipe-block"><h3>${escapeHtml(cat)}</h3><table><thead><tr><th>Råvare</th><th class="right">Mengde</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-      }).join("");
-      prodSection = `<h2>Produksjonsgrunnlag</h2>${prodRows}${recipePages ? `<div class="page-break"></div><h2>Oppskrifter (skalert til bestilt antall)</h2>${recipePages}` : ""}${shoppingHtml ? `<div class="page-break"></div><h2>Varebestilling</h2>${shoppingHtml}` : ""}`;
-    }
-    const packingListSection = flags.packingList
-      ? `<div class="page-break"></div>${packingListTemplatesHtml(data.packingListTemplates || [], order.selectedPackingListTemplateIds, order.extraPackingListItems)}`
-      : "";
-    const w = window.open("", "_blank"); if (!w) return;
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style></head><body><button onclick="window.print()">Print</button><div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.reference ? `<p>Referanse: ${escapeHtml(order.reference)}</p>` : ""}${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${packingListSection}</body></html>`);
-    w.document.close(); w.focus();
-  }
-
   function productName(id: string) {
     return data.products.find((p) => p.id === id)?.name || "Ukjent produkt";
-  }
-
-  function productAllergenBreakdown(product: Product, visited: string[] = []): { name: string; allergens: string[] }[] {
-    if (visited.includes(product.id)) return [];
-    const nextVisited = [...visited, product.id];
-    return product.lines.map((line) => {
-      if (line.itemType === "material") {
-        const m = data.materials.find((x) => x.id === line.itemId);
-        return m && (m.allergens || []).length ? { name: m.name, allergens: m.allergens } : null;
-      }
-      if (line.itemType === "recipe") {
-        const r = data.recipes.find((x) => x.id === line.itemId);
-        const allergens = r ? recipeAllergens(r) : [];
-        return r && allergens.length ? { name: r.name, allergens } : null;
-      }
-      const p = data.products.find((x) => x.id === line.itemId);
-      const allergens = p ? productAllergens(p, nextVisited) : [];
-      return p && allergens.length ? { name: p.name, allergens } : null;
-    }).filter((x): x is { name: string; allergens: string[] } => !!x);
-  }
-
-  function orderLineAllergenBreakdown(line: OrderLine): { dish: string; name: string; allergens: string[] }[] {
-    const product = data.products.find((p) => p.id === line.productId);
-    if (!product) return [];
-    if (product.type === "selskapsmeny" && (product.menuCourses || []).length && line.menuSelections?.length) {
-      return line.menuSelections.flatMap((sel) => {
-        const chosen = data.products.find((p) => p.id === sel.productId);
-        if (!chosen) return [];
-        const breakdown = productAllergenBreakdown(chosen);
-        return (breakdown.length ? breakdown : [{ name: chosen.name, allergens: productAllergens(chosen) }])
-          .filter((b) => b.allergens.length)
-          .map((b) => ({ dish: chosen.name, name: b.name, allergens: b.allergens }));
-      });
-    }
-    const breakdown = productAllergenBreakdown(product);
-    return (breakdown.length ? breakdown : [{ name: product.name, allergens: productAllergens(product) }])
-      .filter((b) => b.allergens.length)
-      .map((b) => ({ dish: product.name, name: b.name, allergens: b.allergens }));
-  }
-
-  function orderAllergenWarnings(order: Order) {
-    const orderAllergens = new Set(order.orderLines.flatMap((l) => orderLineAllergenBreakdown(l).flatMap((b) => b.allergens)));
-    return Object.entries(order.allergens || {})
-      .filter(([allergen, count]) => Number(count) > 0 && orderAllergens.has(allergen))
-      .map(([allergen]) => allergen);
-  }
-
-  function orderAllergenWarningDetails(order: Order) {
-    const flagged = new Set(Object.entries(order.allergens || {}).filter(([, c]) => Number(c) > 0).map(([a]) => a));
-    if (!flagged.size) return [];
-    return order.orderLines.flatMap((line) =>
-      orderLineAllergenBreakdown(line)
-        .map((b) => ({ ...b, allergens: b.allergens.filter((a) => flagged.has(a)) }))
-        .filter((b) => b.allergens.length)
-    );
   }
 
   function printProductPopup(product: Product) {
@@ -8521,6 +8550,10 @@ function ProductionTab({
   pendingOpenStorkjokkenCustomers,
   clearPendingOpenStorkjokkenCustomers,
   readOnly,
+  printFlags,
+  setPrintFlags,
+  printOrder,
+  buildOrderPrintHtml,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -8530,6 +8563,12 @@ function ProductionTab({
   pendingOpenStorkjokkenCustomers?: boolean;
   clearPendingOpenStorkjokkenCustomers?: () => void;
   readOnly: boolean;
+  // Delt med Ordre-fanen (løftet til Page()-nivå) - Catering-panelet printer
+  // enkeltordre og datointervaller via SAMME printOrder()/buildOrderPrintHtml().
+  printFlags: { recipes: boolean; shopping: boolean; packingList: boolean };
+  setPrintFlags: (f: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
+  printOrder: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
+  buildOrderPrintHtml: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => string;
 }) {
   const productionCategories: { id: ProductionCategory; name: string }[] = [
     { id: "smabakst", name: "Småbakst" },
@@ -8556,6 +8595,8 @@ function ProductionTab({
   const [newTemplateProductId, setNewTemplateProductId] = useState("");
   const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>("smabakst");
   const [expandedCateringOrderId, setExpandedCateringOrderId] = useState<string | null>(null);
+  const [cateringRangeFrom, setCateringRangeFrom] = useState(activeDate);
+  const [cateringRangeTo, setCateringRangeTo] = useState(activeDate);
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
   const [expandedHistoryCustomerId, setExpandedHistoryCustomerId] = useState<string | null>(null);
   const [specialPriceSearch, setSpecialPriceSearch] = useState("");
@@ -8636,10 +8677,18 @@ function ProductionTab({
     return () => { document.body.style.overflow = prevOverflow; };
   }, [gridFullscreen]);
 
-  // Cateringordre for valgt dag
-  const cateringOrders = data.orders.filter(
-    (o) => o.date === activeDate && !o.deletedAt && (o.type === "catering" || o.type === "pasmuurt")
-  ).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  // Cateringordre for valgt dag - basert på FAKTISK PRODUKTINNHOLD (minst én
+  // linje peker til et cateringmeny-produkt), IKKE ordrens eget, manuelt satte
+  // type-felt (o.type) - det feltet er lett å glemme å sette riktig, og en
+  // ordre kan uansett inneholde cateringmeny-produkter uavhengig av hvilken
+  // type den formelt er registrert som.
+  const cateringOrders = data.orders.filter((o) => {
+    if (o.date !== activeDate || o.deletedAt) return false;
+    return o.orderLines.some((l) => {
+      const p = data.products.find((x) => x.id === l.productId);
+      return p?.type === "cateringmeny";
+    });
+  }).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
 
   function addDays(date: string, days: number) {
     const [year, month, day] = date.split("-").map(Number);
@@ -9797,6 +9846,45 @@ return `<div class="page"><div class="top"><div><h1>${escapeHtml(product.name)}<
 ${orderPages}`;
 
     printWindow(`Catering ${formatDateNo(activeDate)}`, body);
+  }
+
+  // Samme filter som cateringOrders over (faktisk produktinnhold, ikke
+  // ordrens eget type-felt), men på tvers av HELE datointervallet - lar
+  // brukeren printe f.eks. en hel ukes cateringordre i ett samlet dokument
+  // i stedet for én dag om gangen.
+  function printCateringRange(fromDate: string, toDate: string, flags: { recipes: boolean; shopping: boolean; packingList: boolean }) {
+    const dates = listDates(fromDate, toDate);
+    const rangeCateringOrders = data.orders
+      .filter((o) => {
+        if (o.deletedAt || !dates.includes(o.date)) return false;
+        return o.orderLines.some((l) => {
+          const p = data.products.find((x) => x.id === l.productId);
+          return p?.type === "cateringmeny";
+        });
+      })
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || ""));
+    if (!rangeCateringOrders.length) { alert("Ingen cateringordre i valgt periode."); return; }
+
+    const byDate: Record<string, Order[]> = {};
+    rangeCateringOrders.forEach((o) => {
+      if (!byDate[o.date]) byDate[o.date] = [];
+      byDate[o.date].push(o);
+    });
+
+    // printWindow() sin delte stil (.page/.frontpage/.subpage/.recipe-block)
+    // definerer ikke klassene buildOrderPrintHtml() sitt markup er bygget på
+    // (.grid/.box/.prod-product/.page-break, fra printOrder() sin egen,
+    // separate stil) - legges til lokalt her i stedet for i printWindow()
+    // selv, slik at printInvoice()/printCateringDay() (andre kallere av
+    // printWindow) ikke påvirkes.
+    const extraStyle = `<style>.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.page-break{page-break-before:always}</style>`;
+
+    const dayGroupsHtml = Object.keys(byDate).sort().map((date) => {
+      const ordersHtml = byDate[date].map((o) => `<div class="subpage">${buildOrderPrintHtml(o, flags)}</div>`).join("");
+      return `<h2 style="font-size:16px;font-weight:800;margin:16px 0 8px;border-left:4px solid #ea580c;padding-left:10px">${weekdayNo(date)} ${formatDateNo(date)}</h2>${ordersHtml}`;
+    }).join("");
+
+    printWindow(`Catering ${formatDateNo(fromDate)} – ${formatDateNo(toDate)}`, extraStyle + dayGroupsHtml);
   }
 
   function hasProductionForDay(date: string) {
@@ -11266,11 +11354,22 @@ ${orderPages}`;
             <div className="between">
               <div style={{ borderLeft: "4px solid #ea580c", paddingLeft: 12 }}>
                 <h3 style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>Cateringordre for {weekdayNo(activeDate)} {formatDateNo(activeDate)}</h3>
-                <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Ordre av type Catering og Påsmurt vises automatisk på leveringsdatoen.</p>
+                <p style={{ color: "#64748b", fontStyle: "italic", fontSize: 13, margin: "2px 0 0" }}>Ordre som inneholder minst ett cateringmeny-produkt vises automatisk her på leveringsdatoen.</p>
               </div>
-              <button className="btn active" onClick={printCateringDay}>
-                Print alle ordre for dagen
-              </button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button className="btn active" onClick={printCateringDay}>
+                  Print alle ordre for dagen
+                </button>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px" }}>
+                  <label style={{ fontSize: 12, color: "#64748b" }}>Fra dato</label>
+                  <input type="date" value={cateringRangeFrom} onChange={(e) => setCateringRangeFrom(e.target.value)} style={{ minHeight: 36 }} />
+                  <label style={{ fontSize: 12, color: "#64748b" }}>Til dato</label>
+                  <input type="date" value={cateringRangeTo} onChange={(e) => setCateringRangeTo(e.target.value)} style={{ minHeight: 36 }} />
+                  <button className="btn" onClick={() => printCateringRange(cateringRangeFrom, cateringRangeTo, printFlags)}>
+                    Print periode
+                  </button>
+                </div>
+              </div>
             </div>
 
             {cateringOrders.length === 0 ? (
@@ -11333,6 +11432,26 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
                               </button>
                             );
                           })}
+                        </div>
+
+                        <div className="soft-box" style={{ marginTop: 12 }}>
+                          <label className="check">
+                            <input type="checkbox" checked={printFlags.recipes} onChange={(e) => setPrintFlags({ ...printFlags, recipes: e.target.checked })} />
+                            Inkluder oppskrifter
+                          </label>
+                          <label className="check">
+                            <input type="checkbox" checked={printFlags.shopping} onChange={(e) => setPrintFlags({ ...printFlags, shopping: e.target.checked })} />
+                            Inkluder varebestilling/handleliste
+                          </label>
+                          {o.packingListEnabled && (
+                            <label className="check">
+                              <input type="checkbox" checked={printFlags.packingList} onChange={(e) => setPrintFlags({ ...printFlags, packingList: e.target.checked })} />
+                              Inkluder pakkeliste
+                            </label>
+                          )}
+                          <button className="btn" style={{ marginTop: 8 }} onClick={() => printOrder(o, printFlags)}>
+                            Print
+                          </button>
                         </div>
                       </div>
                     )}
