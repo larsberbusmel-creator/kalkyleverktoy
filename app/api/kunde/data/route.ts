@@ -133,6 +133,16 @@ export async function POST(req: Request) {
       ? { productId: deliveryProduct.id, name: deliveryProduct.name, priceExVat: priceForCustomer(deliveryProduct, customer.id, customer, appData.storkjokkenSpecialPrices) }
       : null;
 
+    // "Min side": kundens egen kontaktinfo, IKKE orgNumber eller pin - disse
+    // er admin-only og skal aldri sendes til klienten i dette feltet.
+    const profile = {
+      name: customer.name,
+      address: customer.address || "",
+      deliveryAddress: customer.deliveryAddress || "",
+      phone: customer.phone || "",
+      email: customer.email || "",
+    };
+
     return NextResponse.json({
       customer: { id: customer.id, name: customer.name },
       products,
@@ -140,6 +150,7 @@ export async function POST(req: Request) {
       history,
       pending,
       rejectedOrders,
+      profile,
       deadlines,
       favoriteProductIds: customer.favoriteProductIds || [],
       activeRecurring,

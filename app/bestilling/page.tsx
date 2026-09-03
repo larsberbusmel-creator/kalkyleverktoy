@@ -7,6 +7,7 @@ type Delivery = { productId: string; name: string; priceExVat: number } | null;
 type HistoryGroup = { date: string; lines: { id: string; productId: string; productName: string; quantity: number; priceExVat: number }[] };
 type PendingItem = { id: string; date: string; submittedAt: string; lines: { productId: string; productName: string; quantity: number }[] };
 type RejectedItem = { id: string; date: string; submittedAt: string; rejectedAt?: string; lines: { productId: string; productName: string; quantity: number }[] };
+type Profile = { name: string; address: string; deliveryAddress: string; phone: string; email: string };
 type DeadlineDay = { closed?: boolean; cutoffTime?: string };
 type Deadlines = { weekday: Record<number, DeadlineDay>; exceptions: Record<string, DeadlineDay> };
 
@@ -52,9 +53,13 @@ export default function BestillingPortal() {
   const [history, setHistory] = useState<HistoryGroup[]>([]);
   const [pending, setPending] = useState<PendingItem[]>([]);
   const [rejectedOrders, setRejectedOrders] = useState<RejectedItem[]>([]);
+  const emptyProfile: Profile = { name: "", address: "", deliveryAddress: "", phone: "", email: "" };
+  const [profileForm, setProfileForm] = useState<Profile>(emptyProfile);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [deadlines, setDeadlines] = useState<Deadlines>({ weekday: {}, exceptions: {} });
   const [vatRate, setVatRate] = useState(15);
-  const [tab, setTab] = useState<"bestill" | "historikk" | "fastordre">("bestill");
+  const [tab, setTab] = useState<"bestill" | "historikk" | "fastordre" | "minside">("bestill");
   const [categoryFilter, setCategoryFilter] = useState("Alle");
 
   const [orderDate, setOrderDate] = useState(tomorrowDate());
@@ -92,6 +97,7 @@ export default function BestillingPortal() {
     setPending(json.pending || []);
     setRejectedOrders(json.rejectedOrders || []);
     setPendingRecurring(json.pendingRecurring || []);
+    if (json.profile) setProfileForm(json.profile);
   }
 
   // silent=true brukes av session-gjenoppretting ved sideoppstart - viser
@@ -127,6 +133,7 @@ export default function BestillingPortal() {
       setDelivery(json.delivery || null);
       setActiveRecurring(json.activeRecurring || []);
       setPendingRecurring(json.pendingRecurring || []);
+      setProfileForm(json.profile || emptyProfile);
       localStorage.setItem(SESSION_KEY, JSON.stringify({ pin: pinValue, lastActivityAt: Date.now() }));
     } catch {
       if (!silent) setError("Noe gikk galt. Prøv igjen.");
@@ -190,6 +197,7 @@ export default function BestillingPortal() {
     setHistory([]);
     setPending([]);
     setRejectedOrders([]);
+    setProfileForm(emptyProfile);
     setQuantities({});
   }
 
@@ -413,7 +421,36 @@ async function toggleFavorite(productId: string) {
       await refresh();
     }
   }
-  
+
+  async function saveProfile() {
+    setProfileSaving(true);
+    setProfileMsg(null);
+    try {
+      const res = await fetch("/api/kunde/update-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pin,
+          name: profileForm.name,
+          address: profileForm.address,
+          deliveryAddress: profileForm.deliveryAddress,
+          phone: profileForm.phone,
+          email: profileForm.email,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setProfileMsg({ type: "error", text: json.error || "Kunne ikke lagre." });
+      } else {
+        if (json.profile) setProfileForm(json.profile);
+        setProfileMsg({ type: "success", text: "Informasjonen din er oppdatert." });
+      }
+    } catch {
+      setProfileMsg({ type: "error", text: "Noe gikk galt. Prøv igjen." });
+    }
+    setProfileSaving(false);
+  }
+
   if (restoringSession) {
     return <div style={{ minHeight: "100vh", background: "#f3f4f6" }} />;
   }
@@ -501,6 +538,12 @@ async function toggleFavorite(productId: string) {
           style={{ padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: tab === "fastordre" ? "#111827" : "#e2e8f0", color: tab === "fastordre" ? "white" : "#111827", fontWeight: 700 }}
         >
           Fast bestilling
+        </button>
+        <button
+          onClick={() => setTab("minside")}
+          style={{ padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: tab === "minside" ? "#111827" : "#e2e8f0", color: tab === "minside" ? "white" : "#111827", fontWeight: 700 }}
+        >
+          Min side
         </button>
       </div>
 
@@ -830,6 +873,65 @@ async function toggleFavorite(productId: string) {
             style={{ width: "100%", padding: 14, fontSize: 16, fontWeight: 700, background: "#111827", color: "white", border: "none", borderRadius: 8, cursor: "pointer", marginTop: 8 }}
           >
             Send forespørsel om fastordre
+          </button>
+        </>
+      )}
+      {tab === "minside" && (
+        <>
+          <h3 style={{ marginTop: 0 }}>Min side</h3>
+          <p style={{ color: "#64748b", fontSize: 13 }}>
+            Her kan du oppdatere kontaktinformasjonen din. Org.nr og PIN-kode kan kun endres av oss - ta kontakt hvis du trenger det.
+          </p>
+
+          <label style={{ display: "block", marginTop: 12 }}>Firmanavn
+            <input
+              value={profileForm.name}
+              onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+              style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", marginTop: 4 }}
+            />
+          </label>
+          <label style={{ display: "block", marginTop: 12 }}>Adresse
+            <input
+              value={profileForm.address}
+              onChange={(e) => setProfileForm({ ...profileForm, address: e.target.value })}
+              style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", marginTop: 4 }}
+            />
+          </label>
+          <label style={{ display: "block", marginTop: 12 }}>Leveringsadresse
+            <input
+              value={profileForm.deliveryAddress}
+              onChange={(e) => setProfileForm({ ...profileForm, deliveryAddress: e.target.value })}
+              style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", marginTop: 4 }}
+            />
+          </label>
+          <label style={{ display: "block", marginTop: 12 }}>Telefon
+            <input
+              value={profileForm.phone}
+              onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+              style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", marginTop: 4 }}
+            />
+          </label>
+          <label style={{ display: "block", marginTop: 12 }}>E-post
+            <input
+              type="email"
+              value={profileForm.email}
+              onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+              style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #cbd5e1", boxSizing: "border-box", marginTop: 4 }}
+            />
+            <span style={{ display: "block", color: "#94a3b8", fontSize: 12, marginTop: 4 }}>
+              Brukes til å varsle deg på e-post dersom en bestilling ikke blir godkjent.
+            </span>
+          </label>
+
+          {profileMsg && (
+            <p style={{ fontWeight: 700, marginTop: 12, color: profileMsg.type === "success" ? "#166534" : "#dc2626" }}>{profileMsg.text}</p>
+          )}
+          <button
+            onClick={saveProfile}
+            disabled={profileSaving}
+            style={{ width: "100%", padding: 14, fontSize: 16, fontWeight: 700, background: "#111827", color: "white", border: "none", borderRadius: 8, cursor: "pointer", marginTop: 12 }}
+          >
+            {profileSaving ? "Lagrer..." : "Lagre"}
           </button>
         </>
       )}
