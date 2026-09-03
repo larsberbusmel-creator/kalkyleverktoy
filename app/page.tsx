@@ -1295,6 +1295,36 @@ function useWeatherForDate(lat: number | undefined, lon: number | undefined, dat
   return { weather, loadError, unavailable };
 }
 
+// Deler en dags time-for-time-værdata inn i FIRE faste bolker (natt/morgen/
+// ettermiddag/kveld) i stedet for én kolonne per time - løser at widgeten
+// ble for bred når MET leverte mange timesoppføringer for én dag. Bruker
+// KLOKKETID i nettleserens lokale tidssone (samme tidssone som allerede
+// vises via toLocaleTimeString nedenfor), ikke rå UTC-time fra MET.
+const WEATHER_HOUR_BUCKETS = [
+  { label: "00-06", start: 0, end: 6, midpoint: 3 },
+  { label: "06-12", start: 6, end: 12, midpoint: 9 },
+  { label: "12-18", start: 12, end: 18, midpoint: 15 },
+  { label: "18-24", start: 18, end: 24, midpoint: 21 },
+] as const;
+
+function bucketWeatherHourly(hourly: WeatherHourly[]) {
+  return WEATHER_HOUR_BUCKETS.map((bucket) => {
+    const entries = hourly.filter((h) => {
+      const hour = new Date(h.time).getHours();
+      return hour >= bucket.start && hour < bucket.end;
+    });
+    if (!entries.length) return { label: bucket.label, emoji: null as string | null, temperature: null as number | null };
+    // Representativ oppføring: nærmest bolkens midtpunkt (f.eks. kl. 03 for natt).
+    let closest = entries[0];
+    let closestDiff = Infinity;
+    for (const entry of entries) {
+      const diff = Math.abs(new Date(entry.time).getHours() - bucket.midpoint);
+      if (diff < closestDiff) { closestDiff = diff; closest = entry; }
+    }
+    return { label: bucket.label, emoji: closest.emoji, temperature: closest.temperature };
+  });
+}
+
 // Værvarsel for aktivt sted sin by (MET/Yr Locationforecast, via /api/weather),
 // for DEN VALGTE DAGEN i kalenderen (selectedDate) - ikke alltid "nå". PER
 // STED: leser koordinatene fra activeSite, viser ingenting (kun en liten
@@ -1324,15 +1354,12 @@ function WeatherWidget({ site, setTab, selectedDate }: { site?: Site; setTab: (t
             <span style={{ fontSize: 32 }}>{weather.current.emoji}</span>
             <span style={{ fontSize: 28, fontWeight: 800 }}>{weather.current.temperature != null ? `${Math.round(weather.current.temperature)}°` : "-"}</span>
           </div>
-          <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-            {weather.hourly.map((h) => (
-              <div key={h.time} style={{ textAlign: "center", minWidth: 44, flexShrink: 0 }}>
-                <div style={{ fontSize: 11, color: "#64748b" }}>{new Date(h.time).toLocaleTimeString("no-NO", { hour: "2-digit" })}</div>
-                <div style={{ fontSize: 18 }}>{h.emoji}</div>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>{h.temperature != null ? `${Math.round(h.temperature)}°` : "-"}</div>
-                {h.precipitationMm != null && h.precipitationMm > 0 && (
-                  <div style={{ fontSize: 10, color: "#2563eb" }}>{h.precipitationMm}mm</div>
-                )}
+          <div style={{ display: "flex", gap: 10 }}>
+            {bucketWeatherHourly(weather.hourly).map((b) => (
+              <div key={b.label} style={{ textAlign: "center", flex: 1 }}>
+                <div style={{ fontSize: 11, color: "#64748b" }}>{b.label}</div>
+                <div style={{ fontSize: 18 }}>{b.emoji || "–"}</div>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{b.temperature != null ? `${Math.round(b.temperature)}°` : "–"}</div>
               </div>
             ))}
           </div>
