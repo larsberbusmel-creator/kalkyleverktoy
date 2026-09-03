@@ -389,8 +389,20 @@ type MenuDesign = {
   footerText?: string;
   logoUrl?: string; // storage path i "documents"-bucketen (samme mønster som Site.logoUrl), løses til signert URL ved visning
   fontScale?: number; // enkel skaleringsfaktor for ALL tekst (0.85/1/1.2 - se MENU_PAGE), default 1
+  logoSize?: "liten" | "normal" | "stor"; // størrelse på menylogoen, default "normal" - se LOGO_SIZE
   createdAt: string;
   updatedAt: string;
+};
+
+// Fast standardmal per sted for "+ Ny meny" (fottekst/logo/tema/spalter/
+// tekststørrelse) - se MenuDesignTab sin "Standardinnstillinger"-seksjon.
+type MenuDefaults = {
+  footerText?: string;
+  logoUrl?: string;
+  logoSize?: "liten" | "normal" | "stor";
+  theme?: "harbour" | "standard";
+  fontScale?: number;
+  columns?: 1 | 2 | 3;
 };
 
 type PriceAgreementType = { id: string; name: string };
@@ -730,6 +742,7 @@ type AppData = {
   priceAgreementTypes: PriceAgreementType[];
   sites: Site[];
   menuDesigns: MenuDesign[];
+  menuDefaults?: MenuDefaults;
 };
 
 // Nøkler som lever i den delte "main"-raden i Supabase (app_data), på tvers av alle steder.
@@ -1070,6 +1083,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   priceAgreementTypes: [],
   sites: [],
   menuDesigns: [],
+  menuDefaults: undefined,
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1226,6 +1240,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     priceAgreementTypes: (raw as any).priceAgreementTypes || [],
     sites: (raw as any).sites || [],
     menuDesigns: (raw as any).menuDesigns || [],
+    menuDefaults: (raw as any).menuDefaults || undefined,
   };
 }
 
@@ -18096,6 +18111,12 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
 // vanlig CSS-padding på selve "side"-elementet i BEGGE sammenhenger (IKKE
 // browser-@page-margin i tillegg), slik at det bare finnes ETT sted margen
 // faktisk defineres.
+const LOGO_SIZE: Record<"liten" | "normal" | "stor", { maxHeightMm: number; maxWidthPct: number }> = {
+  liten:  { maxHeightMm: 16, maxWidthPct: 40 },
+  normal: { maxHeightMm: 26, maxWidthPct: 60 },
+  stor:   { maxHeightMm: 38, maxWidthPct: 78 },
+};
+
 const MENU_PAGE = {
   widthMm: 210,
   heightMm: 297,
@@ -18110,7 +18131,7 @@ function menuDesignStyleTag() {
 @page{size:A4;margin:0}
 body{margin:0}
 .menu-page{width:${MENU_PAGE.widthMm}mm;height:${MENU_PAGE.heightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
-.menu-logo{max-height:26mm;max-width:60%;object-fit:contain;margin:0 auto 6mm;display:block}
+.menu-logo{object-fit:contain;margin:0 auto 6mm;display:block}
 .menu-title{text-align:center;font-weight:700;margin-bottom:20px}
 .menu-main{flex:1;display:flex;flex-direction:column;min-height:0}
 .menu-columns{column-gap:28px}
@@ -18135,6 +18156,7 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
   const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const scale = design.fontScale || 1;
+  const logoSize = LOGO_SIZE[design.logoSize || "normal"];
   const px = (base: number) => `${Math.round(base * scale * 10) / 10}px`;
 
   // Få elementer totalt => mer luft mellom seksjoner/retter i stedet for
@@ -18166,7 +18188,7 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
 
   return `
     <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
-      ${resolvedLogoUrl ? `<img class="menu-logo" src="${resolvedLogoUrl}" alt="Logo" />` : ""}
+      ${resolvedLogoUrl ? `<img class="menu-logo" style="max-height:${logoSize.maxHeightMm}mm;max-width:${logoSize.maxWidthPct}%" src="${resolvedLogoUrl}" alt="Logo" />` : ""}
       <div class="menu-main">
         <div class="menu-title" style="font-family:${headingFont};font-size:${px(MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
         ${columnsBlock}
@@ -18209,6 +18231,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   const [logoUploading, setLogoUploading] = useState(false);
   const [resolvedLogoUrl, setResolvedLogoUrl] = useState<string | undefined>(undefined);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const [editingDefaults, setEditingDefaults] = useState(false);
+  const [defaultsForm, setDefaultsForm] = useState<MenuDefaults>(data.menuDefaults || {});
+  const [defaultsLogoUploading, setDefaultsLogoUploading] = useState(false);
+  const [resolvedDefaultsLogoUrl, setResolvedDefaultsLogoUrl] = useState<string | undefined>(undefined);
 
   // Løser lagringsbanen til en midlertidig signert URL for BÅDE den lille
   // "nåværende logo"-forhåndsvisningen i redigeringspanelet OG selve
@@ -18224,6 +18250,18 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     });
     return () => { cancelled = true; };
   }, [form?.logoUrl]);
+
+  useEffect(() => {
+    setResolvedDefaultsLogoUrl(undefined);
+    if (!defaultsForm.logoUrl) return;
+    let cancelled = false;
+    supabase.storage.from("documents").createSignedUrl(defaultsForm.logoUrl, 60 * 60).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { console.error("Kunne ikke hente standard-logo:", error); return; }
+      if (data?.signedUrl) setResolvedDefaultsLogoUrl(data.signedUrl);
+    });
+    return () => { cancelled = true; };
+  }, [defaultsForm.logoUrl]);
 
   async function uploadMenuLogo(file: File) {
     setLogoUploading(true);
@@ -18244,9 +18282,49 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     await supabase.storage.from("documents").remove([path]).catch(() => {});
   }
 
+  async function uploadDefaultsLogo(file: File) {
+    setDefaultsLogoUploading(true);
+    try {
+      const path = `menu-logos/${Date.now()}-${file.name}`;
+      const { error } = await supabase.storage.from("documents").upload(path, file);
+      if (error) { alert(`Opplasting feilet: ${error.message}`); return; }
+      setDefaultsForm((prev) => ({ ...prev, logoUrl: path }));
+    } finally {
+      setDefaultsLogoUploading(false);
+    }
+  }
+  async function removeDefaultsLogo() {
+    if (!defaultsForm.logoUrl) return;
+    if (!confirm("Fjerne logoen fra standardmalen?")) return;
+    const path = defaultsForm.logoUrl;
+    setDefaultsForm({ ...defaultsForm, logoUrl: undefined });
+    await supabase.storage.from("documents").remove([path]).catch(() => {});
+  }
+  function saveDefaults() {
+    updateData({ menuDefaults: defaultsForm });
+    setEditingDefaults(false);
+  }
+  function startEditDefaults() {
+    setDefaultsForm(data.menuDefaults || {});
+    setEditingDefaults(true);
+  }
+
   function blankDesign(): MenuDesign {
     const now = new Date().toISOString();
-    return { id: `menu-${Date.now()}`, name: "Ny meny", columns: 1, theme: "harbour", sections: [], footerText: activeSiteName || "", fontScale: 1, createdAt: now, updatedAt: now };
+    const d = data.menuDefaults;
+    return {
+      id: `menu-${Date.now()}`,
+      name: "Ny meny",
+      columns: d?.columns || 1,
+      theme: d?.theme || "harbour",
+      sections: [],
+      footerText: d?.footerText ?? (activeSiteName || ""),
+      logoUrl: d?.logoUrl,
+      logoSize: d?.logoSize || "normal",
+      fontScale: d?.fontScale || 1,
+      createdAt: now,
+      updatedAt: now,
+    };
   }
 
   function startNew() {
@@ -18349,30 +18427,85 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     });
   }
 
-  // Importer produkt: har produktet egne "product"-linjer (retter det består
-  // av), opprettes én MenuItem PER slik linje, i ÉTT klikk (alle linjene
-  // legges til samtidig via samme .map()/setForm-kall, ikke ett og ett). Er
-  // produktet selv en enkeltrett (ingen slike linjer), opprettes kun ÉN
-  // MenuItem for produktet selv. Pris forhåndsutfylles fra produktets egen
-  // customerPrice (ren tallstreng, fritt redigerbar etterpå) - description
-  // fylles ALDRI ut automatisk, siden Product ikke har noe kundevendt
-  // beskrivelsesfelt (kun "instructions", som er interne kjøkkennotater).
+  // Importer produkt: ALLE linjene på produktet (uansett itemType - product/recipe/material)
+  // legges inn automatisk, slik at brukeren heller fjerner det som ikke er relevant enn å måtte
+  // legge til manuelt. Linjer som deler samme groupLabel (se ProductLine.groupLabel, samme
+  // gruppering som i ProductsTab/groupBounds) samles i EGEN NY seksjon med gruppenavnet som
+  // tittel - dette skjer alltid, uavhengig av hvilken seksjon som er valgt i "Importer til".
+  // Linjer UTEN groupLabel går til seksjonen valgt i "Importer til" (uendret oppførsel for
+  // produkter som ikke bruker gruppering, f.eks. Tapasbuffet).
+  // Pris forhåndsutfylles KUN for product-linjer (fra customerPrice, ren tallstreng, fritt
+  // redigerbar etterpå) - oppskrift-/råvarelinjer har ingen kundevendt pris og får tomt
+  // prisfelt. Description fylles ALDRI ut automatisk (ingen kildedata for det).
+  function lineDisplayNameForImport(l: ProductLine): string {
+    if (l.itemType === "material") return data.materials.find((x) => x.id === l.itemId)?.name || "Ukjent råvare";
+    if (l.itemType === "recipe") return data.recipes.find((x) => x.id === l.itemId)?.name || "Ukjent oppskrift";
+    const sub = data.products.find((x) => x.id === l.itemId);
+    return sub?.name || "Ukjent produkt";
+  }
+  function lineDisplayPriceForImport(l: ProductLine): string | undefined {
+    if (l.itemType !== "product") return undefined;
+    const sub = data.products.find((x) => x.id === l.itemId);
+    return sub ? String(sub.customerPrice) : undefined;
+  }
+  function lineToMenuItem(l: ProductLine): MenuItem {
+    return {
+      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: lineDisplayNameForImport(l),
+      price: lineDisplayPriceForImport(l),
+    };
+  }
   function importProduct(product: Product, targetSectionId: string) {
     if (!form) return;
-    const subProductLines = product.lines.filter((l) => l.itemType === "product");
-    const newItems: MenuItem[] = subProductLines.length
-      ? subProductLines.map((l) => {
-          const sub = data.products.find((p) => p.id === l.itemId);
-          return { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: sub?.name || "Ukjent produkt", price: sub ? String(sub.customerPrice) : undefined };
-        })
-      : [{ id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name, price: String(product.customerPrice) }];
 
-    if (targetSectionId === "__new__") {
-      const section: MenuSection = { id: `sec-${Date.now()}`, title: product.name, items: newItems };
-      setForm({ ...form, sections: [...form.sections, section] });
-    } else {
-      setForm({ ...form, sections: form.sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, ...newItems] } : s) });
+    if (!product.lines.length) {
+      // Ingen linjer i det hele tatt (bør ikke forekomme normalt) - fall tilbake til å
+      // importere produktet selv som én rett, samme som tidligere oppførsel.
+      const fallbackItem: MenuItem = { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name, price: String(product.customerPrice) };
+      if (targetSectionId === "__new__") {
+        setForm({ ...form, sections: [...form.sections, { id: `sec-${Date.now()}`, title: product.name, items: [fallbackItem] }] });
+      } else {
+        setForm({ ...form, sections: form.sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, fallbackItem] } : s) });
+      }
+      setImportSearch("");
+      return;
     }
+
+    // Del linjene i sammenhengende grupper på samme måte som groupBounds i ProductsTab: linjer
+    // med samme (ikke-tomme) groupLabel etter hverandre hører til samme gruppe.
+    const groupedSections: MenuSection[] = [];
+    const ungroupedItems: MenuItem[] = [];
+    let i = 0;
+    while (i < product.lines.length) {
+      const label = product.lines[i].groupLabel;
+      if (!label) {
+        ungroupedItems.push(lineToMenuItem(product.lines[i]));
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < product.lines.length && product.lines[j].groupLabel === label) j++;
+      const groupLines = product.lines.slice(i, j);
+      groupedSections.push({
+        id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        title: label,
+        items: groupLines.map(lineToMenuItem),
+      });
+      i = j;
+    }
+
+    setForm((prev) => {
+      if (!prev) return prev;
+      let sections = [...prev.sections, ...groupedSections];
+      if (ungroupedItems.length) {
+        if (targetSectionId === "__new__") {
+          sections = [...sections, { id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: product.name, items: ungroupedItems }];
+        } else {
+          sections = sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, ...ungroupedItems] } : s);
+        }
+      }
+      return { ...prev, sections };
+    });
     setImportSearch("");
   }
 
@@ -18429,29 +18562,117 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
 
   if (!form) {
     return (
-      <section className="card">
-        <div className="between">
-          <h2>Menyer</h2>
-          <button className="btn active" disabled={readOnly} onClick={startNew}>+ Ny meny</button>
-        </div>
-        <p className="muted">Bygg trykte/printede menyer av faste byggeklosser (seksjoner og retter), med mulighet til å importere retter direkte fra produktene dine.</p>
-        {menuDesigns.length === 0 ? (
-          <p className="muted">Ingen menyer opprettet ennå.</p>
-        ) : (
-          menuDesigns.map((d) => (
-            <div key={d.id} className="editable-row">
-              <span>
-                <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
-              </span>
-              <div>
-                <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
-                <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
-                <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+      <>
+        <section className="card">
+          <div className="between">
+            <h2>Menyer</h2>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn" disabled={readOnly} onClick={startEditDefaults}>Standardinnstillinger</button>
+              <button className="btn active" disabled={readOnly} onClick={startNew}>+ Ny meny</button>
+            </div>
+          </div>
+          <p className="muted">Bygg trykte/printede menyer av faste byggeklosser (seksjoner og retter), med mulighet til å importere retter direkte fra produktene dine.</p>
+          {menuDesigns.length === 0 ? (
+            <p className="muted">Ingen menyer opprettet ennå.</p>
+          ) : (
+            menuDesigns.map((d) => (
+              <div key={d.id} className="editable-row">
+                <span>
+                  <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
+                </span>
+                <div>
+                  <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
+                  <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
+                  <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+                </div>
+              </div>
+            ))
+          )}
+        </section>
+
+        {editingDefaults && (
+          <section className="card" style={{ marginTop: 16 }}>
+            <div className="between">
+              <h2>Standardinnstillinger for nye menyer</h2>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={() => setEditingDefaults(false)}>← Tilbake</button>
+                <button className="btn active" disabled={readOnly} onClick={saveDefaults}>Lagre standardinnstillinger</button>
               </div>
             </div>
-          ))
+            <div className="grid two" style={{ marginTop: 16, alignItems: "start", gridTemplateColumns: "1.35fr 1fr", gap: 24 }}>
+              <div className="card">
+                <div className="form-grid two">
+                  <label>Antall spalter
+                    <select value={defaultsForm.columns || 1} disabled={readOnly} onChange={(e) => setDefaultsForm({ ...defaultsForm, columns: Number(e.target.value) as 1 | 2 | 3 })}>
+                      <option value={1}>1 spalte</option>
+                      <option value={2}>2 spalter</option>
+                      <option value={3}>3 spalter</option>
+                    </select>
+                  </label>
+                  <label>Tema
+                    <select value={defaultsForm.theme || "harbour"} disabled={readOnly} onChange={(e) => setDefaultsForm({ ...defaultsForm, theme: e.target.value as "harbour" | "standard" })}>
+                      <option value="harbour">Harbour (merkevare-fonter)</option>
+                      <option value="standard">Nøytralt (systemfont)</option>
+                    </select>
+                  </label>
+                  <label>Fast fottekst<input value={defaultsForm.footerText || ""} disabled={readOnly} onChange={(e) => setDefaultsForm({ ...defaultsForm, footerText: e.target.value })} /></label>
+                  <label>Tekststørrelse
+                    <select value={defaultsForm.fontScale || 1} disabled={readOnly} onChange={(e) => setDefaultsForm({ ...defaultsForm, fontScale: Number(e.target.value) })}>
+                      <option value={0.85}>Liten</option>
+                      <option value={1}>Normal</option>
+                      <option value={1.2}>Stor</option>
+                    </select>
+                  </label>
+                  <label>Logostørrelse
+                    <select value={defaultsForm.logoSize || "normal"} disabled={readOnly} onChange={(e) => setDefaultsForm({ ...defaultsForm, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
+                      <option value="liten">Liten</option>
+                      <option value="normal">Normal</option>
+                      <option value="stor">Stor</option>
+                    </select>
+                  </label>
+                </div>
+                <h3 style={{ marginTop: 16 }}>Fast logo</h3>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  {defaultsForm.logoUrl && (
+                    <SiteLogo path={defaultsForm.logoUrl} fallbackSrc="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" alt="Standard-logo" style={{ height: 48, width: "auto", objectFit: "contain", border: "1px solid #e2e8f0", borderRadius: 8, padding: 4 }} />
+                  )}
+                  <input type="file" accept="image/*" disabled={readOnly || defaultsLogoUploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadDefaultsLogo(file); e.target.value = ""; }} />
+                  {defaultsLogoUploading && <span className="muted">Laster opp...</span>}
+                  {defaultsForm.logoUrl && <button className="link danger" disabled={readOnly} onClick={removeDefaultsLogo}>Fjern logo</button>}
+                </div>
+                <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>Disse verdiene fylles automatisk inn når du trykker "+ Ny meny". Du kan fortsatt overstyre dem per meny etterpå.</p>
+              </div>
+              <div className="card">
+                <h3>Slik ser malen ut tom</h3>
+                <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
+                  <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)" }}>
+                    <div
+                      dangerouslySetInnerHTML={{
+                        __html: menuDesignStyleTag() + buildMenuHtml(
+                          {
+                            id: "defaults-preview",
+                            name: "Ny meny",
+                            columns: defaultsForm.columns || 1,
+                            theme: defaultsForm.theme || "harbour",
+                            sections: [],
+                            footerText: defaultsForm.footerText || "",
+                            logoUrl: defaultsForm.logoUrl,
+                            logoSize: defaultsForm.logoSize || "normal",
+                            fontScale: defaultsForm.fontScale || 1,
+                            createdAt: "",
+                            updatedAt: "",
+                          },
+                          resolvedDefaultsLogoUrl
+                        ),
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         )}
-      </section>
+      </>
     );
   }
 
@@ -18467,7 +18688,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
         </div>
       </div>
 
-      <div className="grid two" style={{ marginTop: 16, alignItems: "start" }}>
+      <div className="grid two" style={{ marginTop: 16, alignItems: "start", gridTemplateColumns: "1.35fr 1fr", gap: 24 }}>
         <div className="card">
           <div className="form-grid two">
             <label>Navn på meny<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="F.eks. À la carte-meny" /></label>
@@ -18490,6 +18711,13 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
                 <option value={0.85}>Liten</option>
                 <option value={1}>Normal</option>
                 <option value={1.2}>Stor</option>
+              </select>
+            </label>
+            <label>Logostørrelse
+              <select value={form.logoSize || "normal"} disabled={readOnly} onChange={(e) => setForm({ ...form, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
+                <option value="liten">Liten</option>
+                <option value="normal">Normal</option>
+                <option value="stor">Stor</option>
               </select>
             </label>
           </div>
@@ -18538,7 +18766,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
           {form.sections.map((s, sIdx) => {
             const draft = itemDraft[s.id] || { name: "", description: "", price: "" };
             return (
-              <div key={s.id} className="soft-box" style={{ marginTop: 12 }}>
+              <div key={s.id} className="soft-box" style={{ marginTop: 12, maxWidth: "100%", boxSizing: "border-box", overflowX: "hidden" }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input value={s.title} disabled={readOnly} onChange={(e) => updateSectionTitle(s.id, e.target.value)} style={{ flex: 1, fontWeight: 700 }} />
                   <button className="link" disabled={readOnly || sIdx === 0} onClick={() => moveSection(s.id, -1)}>↑</button>
@@ -18548,19 +18776,19 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
 
                 {s.items.map((it, iIdx) => (
                   <div key={it.id} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                    <input value={it.name} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "name", e.target.value)} placeholder="Navn på rett" style={{ flex: 2, minWidth: 140 }} />
-                    <input value={it.description || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "description", e.target.value)} placeholder="Beskrivelse (valgfritt)" style={{ flex: 3, minWidth: 160 }} />
-                    <input value={it.price || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "price", e.target.value)} placeholder="Pris (valgfritt)" style={{ flex: 1, minWidth: 90 }} />
+                    <input value={it.name} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "name", e.target.value)} placeholder="Navn på rett" style={{ flex: "1 1 110px", minWidth: 100 }} />
+                    <input value={it.description || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "description", e.target.value)} placeholder="Beskrivelse (valgfritt)" style={{ flex: "2 1 130px", minWidth: 110 }} />
+                    <input value={it.price || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "price", e.target.value)} placeholder="Pris (valgfritt)" style={{ flex: "1 1 70px", minWidth: 70 }} />
                     <button className="link" disabled={readOnly || iIdx === 0} onClick={() => moveItem(s.id, it.id, -1)}>↑</button>
                     <button className="link" disabled={readOnly || iIdx === s.items.length - 1} onClick={() => moveItem(s.id, it.id, 1)}>↓</button>
                     <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
                   </div>
                 ))}
 
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <input value={draft.name} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, name: e.target.value } })} placeholder="+ Legg til rett" style={{ flex: 2, minWidth: 140 }} />
-                  <input value={draft.description} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, description: e.target.value } })} placeholder="Beskrivelse (valgfritt)" style={{ flex: 3, minWidth: 160 }} />
-                  <input value={draft.price} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, price: e.target.value } })} placeholder="Pris (valgfritt)" style={{ flex: 1, minWidth: 90 }} />
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <input value={draft.name} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, name: e.target.value } })} placeholder="+ Legg til rett" style={{ flex: "1 1 110px", minWidth: 100 }} />
+                  <input value={draft.description} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, description: e.target.value } })} placeholder="Beskrivelse (valgfritt)" style={{ flex: "2 1 130px", minWidth: 110 }} />
+                  <input value={draft.price} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, price: e.target.value } })} placeholder="Pris (valgfritt)" style={{ flex: "1 1 70px", minWidth: 70 }} />
                   <button className="btn" disabled={readOnly} onClick={() => addItem(s.id)}>+ Legg til rett</button>
                 </div>
               </div>
