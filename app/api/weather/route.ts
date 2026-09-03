@@ -24,17 +24,34 @@ function symbolToEmoji(code: string): string {
   return "🌡️";
 }
 
+function mapEntry(entry: any) {
+  const symbolCode = entry?.data?.next_1_hours?.summary?.symbol_code || entry?.data?.next_6_hours?.summary?.symbol_code || "";
+  return {
+    time: entry.time,
+    temperature: entry?.data?.instant?.details?.air_temperature ?? null,
+    symbolCode,
+    emoji: symbolToEmoji(symbolCode),
+    precipitationMm: entry?.data?.next_1_hours?.details?.precipitation_amount ?? entry?.data?.next_6_hours?.details?.precipitation_amount ?? null,
+  };
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const lat = Number(searchParams.get("lat"));
   const lon = Number(searchParams.get("lon"));
+  // Valgfri - MET returnerer uansett HELE tidsserien i ett kall (ikke ett
+  // kall per dag); date brukes kun til å FILTRERE denne ene tidsserien og
+  // til cache-nøkkelen. Uten date: samme "nå + neste 8 timer"-oppførsel
+  // som før (bakoverkompatibelt for evt. andre fremtidige kallere).
+  const date = searchParams.get("date");
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return NextResponse.json({ error: "Mangler eller ugyldig lat/lon" }, { status: 400 });
   }
 
   // Avrundet nøkkel - unngår cache-miss på ubetydelige float-forskjeller,
   // samtidig som presisjonen (~100m) er mer enn god nok for et værvarsel.
-  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  // date er med i nøkkelen slik at ulike dager caches uavhengig av hverandre.
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)},${date || "now"}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return NextResponse.json(cached.payload);
@@ -54,30 +71,37 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Ingen værdata i svaret fra MET" }, { status: 502 });
     }
 
-    const now = timeseries[0];
-    const nowSymbol = now?.data?.next_1_hours?.summary?.symbol_code || now?.data?.next_6_hours?.summary?.symbol_code || "";
-    const current = {
-      temperature: now?.data?.instant?.details?.air_temperature ?? null,
-      symbolCode: nowSymbol,
-      emoji: symbolToEmoji(nowSymbol),
-    };
+    let payload: any;
 
-    // MET leverer timesoppløsning for de nærmeste ~48 timene i compact-
-    // produktet - de neste 8 oppføringene dekker dermed resten av dagen.
-    // "precipitationMm" (nedbørsmengde) er det compact-produktet faktisk gir -
-    // en ren sannsynlighet i prosent finnes ikke i dette produktet.
-    const hourly = timeseries.slice(0, 8).map((entry: any) => {
-      const symbolCode = entry?.data?.next_1_hours?.summary?.symbol_code || "";
-      return {
-        time: entry.time,
-        temperature: entry?.data?.instant?.details?.air_temperature ?? null,
-        symbolCode,
-        emoji: symbolToEmoji(symbolCode),
-        precipitationMm: entry?.data?.next_1_hours?.details?.precipitation_amount ?? null,
-      };
-    });
+    if (date) {
+      // Filtrer den ENE tidsserien til kun oppføringer for den forespurte
+      // datoen (tidsstemplets dato-del før "T") - MET dekker kun ca. 9-10
+      // dager fremover, så en for fjern (eller fortid-)dato gir ingen treff.
+      const dayEntries = timeseries.filter((entry: any) => String(entry.time).slice(0, 10) === date);
+      if (!dayEntries.length) {
+        payload = { unavailable: true, date };
+      } else {
+        // Representativ temperatur/symbol for dagen: oppføringen nærmest kl. 12:00.
+        let closest = dayEntries[0];
+        let closestDiff = Infinity;
+        for (const entry of dayEntries) {
+          const hour = Number(String(entry.time).slice(11, 13));
+          const diff = Math.abs(hour - 12);
+          if (diff < closestDiff) { closestDiff = diff; closest = entry; }
+        }
+        const current = mapEntry(closest);
+        // Time-for-time-oversikt BEGRENSET TIL DEN DAGEN (ikke resten av "nå"-dagen).
+        const hourly = dayEntries.map(mapEntry);
+        payload = { current, hourly, date, fetchedAt: new Date().toISOString() };
+      }
+    } else {
+      const current = mapEntry(timeseries[0]);
+      // MET leverer timesoppløsning for de nærmeste ~48 timene i compact-
+      // produktet - de neste 8 oppføringene dekker dermed resten av dagen.
+      const hourly = timeseries.slice(0, 8).map(mapEntry);
+      payload = { current, hourly, fetchedAt: new Date().toISOString() };
+    }
 
-    const payload = { current, hourly, fetchedAt: new Date().toISOString() };
     cache.set(key, { fetchedAt: Date.now(), payload });
     return NextResponse.json(payload);
   } catch (e) {

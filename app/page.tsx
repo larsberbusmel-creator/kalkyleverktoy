@@ -1266,30 +1266,43 @@ function SiteLogo({ path, fallbackSrc, alt, style }: { path?: string; fallbackSr
 type WeatherHourly = { time: string; temperature: number | null; symbolCode: string; emoji: string; precipitationMm: number | null };
 type WeatherData = { current: { temperature: number | null; symbolCode: string; emoji: string }; hourly: WeatherHourly[] };
 
-// Værvarsel for aktivt sted sin by (MET/Yr Locationforecast, via /api/weather).
-// PER STED: leser koordinatene fra activeSite, viser ingenting (kun en liten
-// lenke til Admin) hvis stedet ikke har satt opp weatherLat/weatherLon ennå.
-function WeatherWidget({ site, setTab }: { site?: Site; setTab: (t: Tab) => void }) {
+// Delt henting/tilstand for /api/weather, gjenbrukt av både WeatherWidget
+// (dagsvisningen, følger selectedDate) og CompactWeatherLine (månedsvisningens
+// kompakte linje, alltid dagens dato) - unngår å duplisere fetch-logikken.
+function useWeatherForDate(lat: number | undefined, lon: number | undefined, date: string) {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const lat = site?.weatherLat;
-  const lon = site?.weatherLon;
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     setWeather(null);
     setLoadError(false);
+    setUnavailable(false);
     if (lat == null || lon == null) return;
     let cancelled = false;
-    fetch(`/api/weather?lat=${lat}&lon=${lon}`)
+    fetch(`/api/weather?lat=${lat}&lon=${lon}&date=${date}`)
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
+        if (json?.unavailable) { setUnavailable(true); return; }
         if (json?.error) { setLoadError(true); return; }
         setWeather(json);
       })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
-  }, [lat, lon]);
+  }, [lat, lon, date]);
+
+  return { weather, loadError, unavailable };
+}
+
+// Værvarsel for aktivt sted sin by (MET/Yr Locationforecast, via /api/weather),
+// for DEN VALGTE DAGEN i kalenderen (selectedDate) - ikke alltid "nå". PER
+// STED: leser koordinatene fra activeSite, viser ingenting (kun en liten
+// lenke til Admin) hvis stedet ikke har satt opp weatherLat/weatherLon ennå.
+function WeatherWidget({ site, setTab, selectedDate }: { site?: Site; setTab: (t: Tab) => void; selectedDate: string }) {
+  const lat = site?.weatherLat;
+  const lon = site?.weatherLon;
+  const { weather, loadError, unavailable } = useWeatherForDate(lat, lon, selectedDate);
 
   if (lat == null || lon == null) {
     return (
@@ -1303,7 +1316,8 @@ function WeatherWidget({ site, setTab }: { site?: Site; setTab: (t: Tab) => void
     <div className="soft-box">
       <h3>{site?.weatherCity || "Værvarsel"}</h3>
       {loadError && <p style={{ color: "#dc2626", fontSize: 13 }}>Kunne ikke hente værvarsel akkurat nå.</p>}
-      {!loadError && !weather && <p style={{ color: "#64748b", fontSize: 13 }}>Henter værvarsel...</p>}
+      {unavailable && <p style={{ color: "#64748b", fontSize: 13 }}>Værvarsel er ikke tilgjengelig så langt frem/tilbake i tid.</p>}
+      {!loadError && !unavailable && !weather && <p style={{ color: "#64748b", fontSize: 13 }}>Henter værvarsel...</p>}
       {weather && (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -1324,6 +1338,24 @@ function WeatherWidget({ site, setTab }: { site?: Site; setTab: (t: Tab) => void
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// Kompakt, ett-linjes værmelding for DAGENS DATO (alltid today(), uavhengig
+// av hvilken måned/dag brukeren blar til i selve kalenderen) - vises øverst
+// i månedsvisningen. Viser ingenting hvis stedet ikke har værvarsel satt opp,
+// eller ved feil/ingen data - ingen tom/feilende rad, ingen unødig vertikal plass.
+function CompactWeatherLine({ site }: { site?: Site }) {
+  const lat = site?.weatherLat;
+  const lon = site?.weatherLon;
+  const { weather } = useWeatherForDate(lat, lon, today());
+
+  if (lat == null || lon == null || !weather) return null;
+
+  return (
+    <div style={{ fontSize: 13, color: "#64748b", padding: "0 0 8px" }}>
+      {weather.current.emoji} {site?.weatherCity ? `${site.weatherCity}: ` : ""}{weather.current.temperature != null ? `${Math.round(weather.current.temperature)}°` : "-"}
     </div>
   );
 }
@@ -2756,6 +2788,8 @@ function CalendarDashboard({
               <button className="btn" onClick={() => changeMonth(1)}>→</button>
             </div>
 
+            {showSidePanels && <CompactWeatherLine site={activeSite} />}
+
             {/* DESKTOP: full kalender med navn og detaljer */}
             <div className="cal-desktop">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginTop: 16 }}>
@@ -2989,7 +3023,7 @@ const bg = isToday ? "#dcfce7"
 
               {showSidePanels && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                  <WeatherWidget site={activeSite} setTab={setTab} />
+                  <WeatherWidget site={activeSite} setTab={setTab} selectedDate={selectedDate} />
                   {(() => {
                     const dayRentals = (data.rentalOffers || []).filter((r) => r.date && selectedDate >= r.date && selectedDate <= (r.endDate || r.date));
                     const dayEvents = (data.eventCalculations || []).filter((ev) => selectedDate >= ev.date && selectedDate <= (ev.endDate || ev.date));
