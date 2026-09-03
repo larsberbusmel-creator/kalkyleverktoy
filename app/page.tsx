@@ -655,6 +655,9 @@ type Site = {
   logoUrl?: string; // storage path i "documents"-bucketen, løses til signert URL ved visning
   enabledTabs: Tab[];
   createdAt: string;
+  weatherCity?: string; // vises som byens navn i værvarsel-widgeten på dashbordet
+  weatherLat?: number; // koordinater trengs direkte - MET/Yr sitt API har ikke stedsnavn-oppslag
+  weatherLon?: number;
 };
 
 type AppData = {
@@ -1258,6 +1261,71 @@ function SiteLogo({ path, fallbackSrc, alt, style }: { path?: string; fallbackSr
   }, [path]);
 
   return <img src={resolvedUrl || fallbackSrc} alt={alt} style={style} />;
+}
+
+type WeatherHourly = { time: string; temperature: number | null; symbolCode: string; emoji: string; precipitationMm: number | null };
+type WeatherData = { current: { temperature: number | null; symbolCode: string; emoji: string }; hourly: WeatherHourly[] };
+
+// Værvarsel for aktivt sted sin by (MET/Yr Locationforecast, via /api/weather).
+// PER STED: leser koordinatene fra activeSite, viser ingenting (kun en liten
+// lenke til Admin) hvis stedet ikke har satt opp weatherLat/weatherLon ennå.
+function WeatherWidget({ site, setTab }: { site?: Site; setTab: (t: Tab) => void }) {
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const lat = site?.weatherLat;
+  const lon = site?.weatherLon;
+
+  useEffect(() => {
+    setWeather(null);
+    setLoadError(false);
+    if (lat == null || lon == null) return;
+    let cancelled = false;
+    fetch(`/api/weather?lat=${lat}&lon=${lon}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json?.error) { setLoadError(true); return; }
+        setWeather(json);
+      })
+      .catch(() => { if (!cancelled) setLoadError(true); });
+    return () => { cancelled = true; };
+  }, [lat, lon]);
+
+  if (lat == null || lon == null) {
+    return (
+      <p style={{ color: "#94a3b8", fontSize: 13, margin: 0 }}>
+        🌤️ <button className="link" onClick={() => setTab("users")}>Sett opp værvarsel i Admin</button>
+      </p>
+    );
+  }
+
+  return (
+    <div className="soft-box">
+      <h3>{site?.weatherCity || "Værvarsel"}</h3>
+      {loadError && <p style={{ color: "#dc2626", fontSize: 13 }}>Kunne ikke hente værvarsel akkurat nå.</p>}
+      {!loadError && !weather && <p style={{ color: "#64748b", fontSize: 13 }}>Henter værvarsel...</p>}
+      {weather && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 32 }}>{weather.current.emoji}</span>
+            <span style={{ fontSize: 28, fontWeight: 800 }}>{weather.current.temperature != null ? `${Math.round(weather.current.temperature)}°` : "-"}</span>
+          </div>
+          <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+            {weather.hourly.map((h) => (
+              <div key={h.time} style={{ textAlign: "center", minWidth: 44, flexShrink: 0 }}>
+                <div style={{ fontSize: 11, color: "#64748b" }}>{new Date(h.time).toLocaleTimeString("no-NO", { hour: "2-digit" })}</div>
+                <div style={{ fontSize: 18 }}>{h.emoji}</div>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{h.temperature != null ? `${Math.round(h.temperature)}°` : "-"}</div>
+                {h.precipitationMm != null && h.precipitationMm > 0 && (
+                  <div style={{ fontSize: 10, color: "#2563eb" }}>{h.precipitationMm}mm</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 // Gjenbrukbar søkbar multi-select (dokumentbank: koble produkter til et
@@ -2386,7 +2454,7 @@ return (
       {/* ── INNHOLD ── */}
       <div className="main-content">
         {activeTabConfig && <PageHeader icon={activeTabConfig.icon} title={activeTabConfig.label} color={activeTabConfig.color} />}
-        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} setWantsOpenStorkjokkenCustomers={setWantsOpenStorkjokkenCustomers} />}
+        {tab === "dashboard"  && <CalendarDashboard data={data} updateData={updateData} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} setWantsOpenStorkjokkenCustomers={setWantsOpenStorkjokkenCustomers} activeSite={activeSite} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} showSidePanels />}
         {tab === "materials"  && <MaterialsTab data={data} updateData={updateData} updateMaterialsRpc={updateMaterialsRpc} updateListRpc={updateListRpc} readOnly={!canEdit("materials")} setTab={setTab} setPriceAgreementToOpen={setPriceAgreementToOpen} pendingMaterialId={materialToOpen} clearPendingMaterialId={() => setMaterialToOpen(null)} linkMaterialToAgreement={linkMaterialToAgreement} unlinkMaterialFromAgreement={unlinkMaterialFromAgreement} />}
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} isDirty={dirtyTabs.has("recipes")} onDirtyChange={onDirtyChangeFor("recipes")} registerSave={registerSave} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
@@ -2540,6 +2608,10 @@ function CalendarDashboard({
   setWantsNewOrder,
   setWantsOpenStorkjokkenCustomers,
   orderFilter,
+  activeSite,
+  setRentalOfferToOpen,
+  setEventCalculationToOpen,
+  showSidePanels,
 }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -2549,6 +2621,10 @@ function CalendarDashboard({
   setWantsNewOrder: (v: boolean) => void;
   setWantsOpenStorkjokkenCustomers?: (v: boolean) => void; // valgfri - kun dashbordet (DEL A: Henteordre-snarvei), ikke rental-mini-kalenderen
   orderFilter?: (order: Order) => boolean; // valgfritt visningsfilter - f.eks. kun rental-order-* for mini-kalenderen i Leie av lokale. Påvirker KUN hva som vises her, ikke lagring/synk.
+  activeSite?: Site; // PER STED - brukes til værvarselets by/koordinater
+  setRentalOfferToOpen?: (id: string | null) => void;
+  setEventCalculationToOpen?: (id: string | null) => void;
+  showSidePanels?: boolean; // værvarsel + Leie av lokale/Eventkalkyle-boksen i høyre kolonne - KUN hoveddashbordet, ikke rental-mini-kalenderen
 }) {
   const todayDate = today();
   const [view, setView] = useState<"month" | "day">("month");
@@ -2910,6 +2986,59 @@ const bg = isToday ? "#dcfce7"
                   <p style={{ color: "#64748b" }}>Ingen ordre denne dagen.</p>
                 )}
               </div>
+
+              {showSidePanels && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                  <WeatherWidget site={activeSite} setTab={setTab} />
+                  {(() => {
+                    const dayRentals = (data.rentalOffers || []).filter((r) => r.date && selectedDate >= r.date && selectedDate <= (r.endDate || r.date));
+                    const dayEvents = (data.eventCalculations || []).filter((ev) => selectedDate >= ev.date && selectedDate <= (ev.endDate || ev.date));
+                    const hasAny = dayRentals.length > 0 || dayEvents.length > 0;
+                    return (
+                      <div className="soft-box">
+                        <h3>Leie av lokale / Eventkalkyle</h3>
+                        {hasAny ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {dayRentals.map((r) => {
+                              const venueName = r.venueExternal ? (r.venueExternalName || "Eksternt lokale") : r.venue;
+                              return (
+                                <div
+                                  key={`rental-${r.id}`}
+                                  className="click-row"
+                                  onClick={() => { if (setRentalOfferToOpen && r.id) { setRentalOfferToOpen(r.id); setTab("rental"); } }}
+                                  style={{ display: "flex", flexDirection: "column", gap: 2, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0" }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span title="Leie av lokale">🏠</span>
+                                    <b>{r.customer}</b>
+                                  </div>
+                                  <div style={{ color: "#64748b", fontSize: 13 }}>{venueName}</div>
+                                </div>
+                              );
+                            })}
+                            {dayEvents.map((ev) => (
+                              <div
+                                key={`event-${ev.id}`}
+                                className="click-row"
+                                onClick={() => { if (setEventCalculationToOpen) { setEventCalculationToOpen(ev.id); setTab("eventkalkyle"); } }}
+                                style={{ display: "flex", flexDirection: "column", gap: 2, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0" }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span title="Eventkalkyle">🎪</span>
+                                  <b>{ev.eventName}</b>
+                                </div>
+                                <div style={{ color: "#64748b", fontSize: 13 }}>{ev.location}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p style={{ color: "#64748b" }}>Ingen utleie eller eventer denne dagen.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
 
             <div className="soft-box" style={{ marginTop: 16 }}>
@@ -17841,7 +17970,7 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
   });
   const [form, setForm] = useState<UserAccessEntry>(emptyEntry());
 
-  const [siteForm, setSiteForm] = useState<{ name: string; enabledTabs: Tab[]; logoFile: File | null }>({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+  const [siteForm, setSiteForm] = useState<{ name: string; enabledTabs: Tab[]; logoFile: File | null; weatherCity: string; weatherLat: string; weatherLon: string }>({ name: "", enabledTabs: [...ALL_TABS], logoFile: null, weatherCity: "", weatherLat: "", weatherLon: "" });
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [siteBusy, setSiteBusy] = useState(false);
   const [siteFeedback, setSiteFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -18002,13 +18131,13 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
   }
 
   function startEditSite(s: Site) {
-    setSiteForm({ name: s.name, enabledTabs: [...s.enabledTabs], logoFile: null });
+    setSiteForm({ name: s.name, enabledTabs: [...s.enabledTabs], logoFile: null, weatherCity: s.weatherCity || "", weatherLat: String(s.weatherLat ?? ""), weatherLon: String(s.weatherLon ?? "") });
     setEditingSiteId(s.id);
     setSiteFeedback(null);
   }
   function cancelEditSite() {
     setEditingSiteId(null);
-    setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+    setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null, weatherCity: "", weatherLat: "", weatherLon: "" });
     setSiteFeedback(null);
   }
 
@@ -18028,6 +18157,10 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
       logoPath = path;
     }
 
+    const weatherCity = siteForm.weatherCity.trim() || undefined;
+    const weatherLat = siteForm.weatherLat.trim() ? Number(siteForm.weatherLat) : undefined;
+    const weatherLon = siteForm.weatherLon.trim() ? Number(siteForm.weatherLon) : undefined;
+
     if (editingSiteId === null) {
       const newSite: Site = {
         id: `site-${Date.now()}`,
@@ -18035,6 +18168,9 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
         enabledTabs: siteForm.enabledTabs,
         createdAt: new Date().toISOString(),
         ...(logoPath ? { logoUrl: logoPath } : {}),
+        ...(weatherCity !== undefined ? { weatherCity } : {}),
+        ...(weatherLat !== undefined ? { weatherLat } : {}),
+        ...(weatherLon !== undefined ? { weatherLon } : {}),
       };
       const { error: insertError } = await supabase.from("app_data").insert({ id: newSite.id, data: omitSharedKeys(initialData), updated_at: new Date().toISOString() });
       if (insertError) {
@@ -18050,14 +18186,14 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
         return;
       }
       setSiteBusy(false);
-      setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+      setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null, weatherCity: "", weatherLat: "", weatherLon: "" });
       setSiteFeedback({ type: "success", text: `Stedet "${newSite.name}" er opprettet.` });
     } else {
       const name = siteForm.name.trim();
       const enabledTabs = siteForm.enabledTabs;
       try {
         await updateSitesList((freshSites) => freshSites.map((s) => s.id === editingSiteId
-          ? { ...s, name, enabledTabs, ...(logoPath ? { logoUrl: logoPath } : {}) }
+          ? { ...s, name, enabledTabs, weatherCity, weatherLat, weatherLon, ...(logoPath ? { logoUrl: logoPath } : {}) }
           : s));
       } catch (e: any) {
         setSiteBusy(false);
@@ -18066,7 +18202,7 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
       }
       setSiteBusy(false);
       setEditingSiteId(null);
-      setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null });
+      setSiteForm({ name: "", enabledTabs: [...ALL_TABS], logoFile: null, weatherCity: "", weatherLat: "", weatherLon: "" });
       setSiteFeedback({ type: "success", text: `Stedet "${name}" er oppdatert.` });
     }
   }
@@ -18462,6 +18598,21 @@ function UsersTab({ data, updateData, allTabConfig, isSuperadmin, syncSharedData
             <SiteLogo path={data.sites.find((s) => s.id === editingSiteId)?.logoUrl} fallbackSrc="/logo.png" alt="Nåværende logo" style={{ height: 40, width: "auto", objectFit: "contain" }} />
           </div>
         )}
+        <p style={{ fontWeight: 700, marginBottom: 6 }}>Værvarsel på dashbordet (valgfritt)</p>
+        <p style={{ fontSize: 13, color: "#64748b", marginTop: 0, marginBottom: 6 }}>
+          Koordinater finner du enkelt ved å søke opp byen på f.eks. yr.no og lese av breddegrad/lengdegrad i URL-en eller kartet der.
+        </p>
+        <div className="form-grid three" style={{ marginBottom: 12 }}>
+          <label>By (for værvarsel)
+            <input value={siteForm.weatherCity} onChange={(e) => setSiteForm({ ...siteForm, weatherCity: e.target.value })} placeholder="F.eks. Bodø" />
+          </label>
+          <label>Breddegrad (lat)
+            <input type="number" step="any" value={siteForm.weatherLat} onChange={(e) => setSiteForm({ ...siteForm, weatherLat: e.target.value })} placeholder="F.eks. 67.28" />
+          </label>
+          <label>Lengdegrad (lon)
+            <input type="number" step="any" value={siteForm.weatherLon} onChange={(e) => setSiteForm({ ...siteForm, weatherLon: e.target.value })} placeholder="F.eks. 14.40" />
+          </label>
+        </div>
         <p style={{ fontWeight: 700, marginBottom: 6 }}>Faner dette stedet skal ha tilgang til</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           {allTabConfig.map((t) => (
