@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 
-type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "reports" | "settings" | "rombibliotek" | "users" | "eventkalkyle" | "priceAgreements";
+type Tab = "dashboard" | "materials" | "recipes" | "products" | "orders" | "production" | "inventory" | "rental" | "reports" | "settings" | "rombibliotek" | "users" | "eventkalkyle" | "priceAgreements" | "menyer";
 type Unit = "kg" | "liter" | "stk";
 type YieldUnit = "kg" | "liter" | "stk" | "porsjoner";
 type ProductType = "grunnoppskrift" | "bakst" | "cateringmeny" | "pasmuurt" | "egenprodusert" | "selskapsmeny";
@@ -375,6 +375,22 @@ type DocumentBankEntry = {
   linkedProductIds?: string[];
 };
 
+// Menydesigner ("Menyer"-fanen): faste byggeklosser (seksjoner/retter), ikke
+// et fritt lerret - se MenuDesignTab. PER STED (ikke i SHARED_TOP_LEVEL_KEYS),
+// siden ulike restauranter/steder skal kunne ha helt forskjellige menyer.
+type MenuItem = { id: string; name: string; description?: string; price?: string };
+type MenuSection = { id: string; title: string; items: MenuItem[] };
+type MenuDesign = {
+  id: string;
+  name: string;
+  columns: 1 | 2 | 3;
+  theme: "harbour" | "standard"; // "harbour" = Harbour-Bold-overskrifter + Standard CT-brødtekst, "standard" = nøytral systemfont
+  sections: MenuSection[];
+  footerText?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type PriceAgreementType = { id: string; name: string };
 
 // Avtalepriser: leverandøravtaler for råvarer, med valgfri TOVEIS kobling
@@ -711,6 +727,7 @@ type AppData = {
   priceAgreements: PriceAgreementEntry[];
   priceAgreementTypes: PriceAgreementType[];
   sites: Site[];
+  menuDesigns: MenuDesign[];
 };
 
 // Nøkler som lever i den delte "main"-raden i Supabase (app_data), på tvers av alle steder.
@@ -721,7 +738,7 @@ function omitSharedKeys<T extends Record<string, any>>(obj: T): T {
   for (const k of SHARED_TOP_LEVEL_KEYS) delete copy[k];
   return copy;
 }
-const ALL_TABS: Tab[] = ["dashboard", "materials", "recipes", "products", "orders", "production", "inventory", "rental", "reports", "settings", "rombibliotek", "users", "eventkalkyle", "priceAgreements"];
+const ALL_TABS: Tab[] = ["dashboard", "materials", "recipes", "products", "orders", "production", "inventory", "rental", "reports", "settings", "rombibliotek", "users", "eventkalkyle", "priceAgreements", "menyer"];
 
 const STORAGE_KEY = "kalkyleverktoy-prototype-v4-products";
 const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_TIME || "dev";
@@ -1050,6 +1067,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   priceAgreements: [],
   priceAgreementTypes: [],
   sites: [],
+  menuDesigns: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1205,6 +1223,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     priceAgreements: (raw as any).priceAgreements || [],
     priceAgreementTypes: (raw as any).priceAgreementTypes || [],
     sites: (raw as any).sites || [],
+    menuDesigns: (raw as any).menuDesigns || [],
   };
 }
 
@@ -2576,6 +2595,7 @@ function productCost(product: Product, visited: string[] = []) {
   { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
   { key: "eventkalkyle", label: "Eventkalkyle",     icon: "🎪", color: "#c026d3" },
   { key: "priceAgreements", label: "Avtalepriser",  icon: "🏷️", color: "#65a30d" },
+  { key: "menyer",     label: "Menyer",             icon: "📜", color: "#0284c7" },
   { key: "reports",    label: "Rapporter",          icon: "📊", color: "#0d9488" },
   { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
   { key: "users",      label: "Admin",              icon: "🔑", color: "#9333ea" },
@@ -2702,6 +2722,7 @@ return (
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} userEmail={userEmail} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} syncSharedData={syncSharedData} activeSiteId={activeSiteId} switchActiveSite={switchActiveSite} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
+        {tab === "menyer"     && <MenuDesignTab data={data} updateData={updateData} readOnly={!canEdit("menyer")} userEmail={userEmail} activeSiteName={activeSite?.name} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
           <img src="/mise-logo.png" alt="Misemetrics" style={{ width: 140, height: "auto" }} />
@@ -18058,6 +18079,388 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Delt <style>-blokk + HTML-bygging for menydesigneren - brukes av BÅDE den
+// live forhåndsvisningen i editoren (via dangerouslySetInnerHTML, slik at
+// forhåndsvisningen ALDRI kan avvike fra faktisk print/PDF-utskrift), print-
+// vinduet og PDF-eksporten (html2canvas rasteriserer nøyaktig samme DOM-node
+// som forhåndsvisningen bruker) - én kilde til sannhet i stedet for tre
+// parallelle implementasjoner som lett kunne driftet fra hverandre.
+function menuDesignStyleTag() {
+  return `<style>
+@font-face { font-family: "Harbour"; src: url("/fonts/Harbour-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "Standard CT"; src: url("/fonts/StandardCTRegularExtd.otf") format("opentype"); font-weight: 400; }
+.menu-doc{column-gap:28px;color:#111827;padding:8px}
+.menu-title{column-span:all;text-align:center;font-weight:700;font-size:28px;margin-bottom:20px}
+.menu-section{break-inside:avoid;margin-bottom:20px}
+.menu-section h2{font-weight:700;font-size:20px;margin:0 0 8px;border-bottom:2px solid #111827;padding-bottom:4px}
+.menu-item{margin-bottom:8px;break-inside:avoid}
+.menu-item-row{display:flex;justify-content:space-between;gap:8px}
+.menu-item-price{white-space:nowrap;font-weight:700}
+.menu-item-desc{margin:2px 0 0;font-size:13px;color:#475569}
+.menu-footer{column-span:all;text-align:center;margin-top:16px;font-size:12px;color:#64748b}
+@media print{body{padding:0}button{display:none}}
+</style>`;
+}
+
+function buildMenuHtml(design: MenuDesign): string {
+  const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
+  const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
+  const sectionsHtml = design.sections.map((s) => `
+    <div class="menu-section">
+      <h2 style="font-family:${headingFont}">${escapeHtml(s.title)}</h2>
+      ${s.items.map((it) => `
+        <div class="menu-item">
+          <div class="menu-item-row"><b>${escapeHtml(it.name)}</b>${it.price ? `<span class="menu-item-price">${escapeHtml(it.price)}</span>` : ""}</div>
+          ${it.description ? `<p class="menu-item-desc">${escapeHtml(it.description)}</p>` : ""}
+        </div>
+      `).join("")}
+    </div>
+  `).join("");
+  return `
+    <div class="menu-doc" style="column-count:${design.columns};font-family:${bodyFont}">
+      <div class="menu-title" style="font-family:${headingFont}">${escapeHtml(design.name)}</div>
+      ${sectionsHtml}
+      ${design.footerText ? `<div class="menu-footer">${escapeHtml(design.footerText)}</div>` : ""}
+    </div>
+  `;
+}
+
+function printMenuDesign(design: MenuDesign) {
+  const w = window.open("", "_blank"); if (!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag()}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design)}</body></html>`);
+  w.document.close(); w.focus();
+}
+
+function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }: {
+  data: AppData;
+  updateData: (p: Partial<AppData>) => void;
+  readOnly: boolean;
+  userEmail: string;
+  activeSiteName?: string;
+}) {
+  const menuDesigns = data.menuDesigns || [];
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<MenuDesign | null>(null);
+  const [newSectionTitle, setNewSectionTitle] = useState("");
+  const [itemDraft, setItemDraft] = useState<Record<string, { name: string; description: string; price: string }>>({});
+  const [importSearch, setImportSearch] = useState("");
+  const [importTargetSectionId, setImportTargetSectionId] = useState<string>("");
+  const [pdfSaving, setPdfSaving] = useState(false);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+
+  function blankDesign(): MenuDesign {
+    const now = new Date().toISOString();
+    return { id: `menu-${Date.now()}`, name: "Ny meny", columns: 1, theme: "harbour", sections: [], footerText: activeSiteName || "", createdAt: now, updatedAt: now };
+  }
+
+  function startNew() {
+    setForm(blankDesign());
+    setEditingId("new");
+  }
+  function startEdit(d: MenuDesign) {
+    setForm({ ...d, sections: d.sections.map((s) => ({ ...s, items: s.items.map((it) => ({ ...it })) })) });
+    setEditingId(d.id);
+  }
+  function cancelEdit() {
+    setForm(null);
+    setEditingId(null);
+    setImportSearch("");
+  }
+  function saveDesign() {
+    if (!form) return;
+    if (!form.name.trim()) { alert("Menyen må ha et navn."); return; }
+    const toSave: MenuDesign = { ...form, updatedAt: new Date().toISOString() };
+    const exists = menuDesigns.some((m) => m.id === toSave.id);
+    const next = exists ? menuDesigns.map((m) => m.id === toSave.id ? toSave : m) : [...menuDesigns, toSave];
+    updateData({ menuDesigns: next });
+    cancelEdit();
+  }
+  function duplicateDesign(d: MenuDesign) {
+    const now = new Date().toISOString();
+    const copy: MenuDesign = {
+      ...d,
+      id: `menu-${Date.now()}`,
+      name: `${d.name} kopi`,
+      sections: d.sections.map((s) => ({ ...s, id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, items: s.items.map((it) => ({ ...it, id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` })) })),
+      createdAt: now,
+      updatedAt: now,
+    };
+    updateData({ menuDesigns: [...menuDesigns, copy] });
+  }
+  function deleteDesign(id: string) {
+    if (!confirm("Slette denne menyen?")) return;
+    updateData({ menuDesigns: menuDesigns.filter((m) => m.id !== id) });
+    if (editingId === id) cancelEdit();
+  }
+
+  function addSection() {
+    if (!form || !newSectionTitle.trim()) return;
+    const section: MenuSection = { id: `sec-${Date.now()}`, title: newSectionTitle.trim(), items: [] };
+    setForm({ ...form, sections: [...form.sections, section] });
+    setNewSectionTitle("");
+  }
+  function removeSection(sectionId: string) {
+    if (!form) return;
+    if (!confirm("Slette denne seksjonen og alle rettene i den?")) return;
+    setForm({ ...form, sections: form.sections.filter((s) => s.id !== sectionId) });
+  }
+  function moveSection(sectionId: string, dir: -1 | 1) {
+    if (!form) return;
+    const list = [...form.sections];
+    const idx = list.findIndex((s) => s.id === sectionId);
+    const swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= list.length) return;
+    [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
+    setForm({ ...form, sections: list });
+  }
+  function updateSectionTitle(sectionId: string, title: string) {
+    if (!form) return;
+    setForm({ ...form, sections: form.sections.map((s) => s.id === sectionId ? { ...s, title } : s) });
+  }
+
+  function addItem(sectionId: string) {
+    if (!form) return;
+    const draft = itemDraft[sectionId] || { name: "", description: "", price: "" };
+    if (!draft.name.trim()) return;
+    const item: MenuItem = { id: `item-${Date.now()}`, name: draft.name.trim(), description: draft.description.trim() || undefined, price: draft.price.trim() || undefined };
+    setForm({ ...form, sections: form.sections.map((s) => s.id === sectionId ? { ...s, items: [...s.items, item] } : s) });
+    setItemDraft({ ...itemDraft, [sectionId]: { name: "", description: "", price: "" } });
+  }
+  function removeItem(sectionId: string, itemId: string) {
+    if (!form) return;
+    setForm({ ...form, sections: form.sections.map((s) => s.id === sectionId ? { ...s, items: s.items.filter((it) => it.id !== itemId) } : s) });
+  }
+  function moveItem(sectionId: string, itemId: string, dir: -1 | 1) {
+    if (!form) return;
+    setForm({
+      ...form,
+      sections: form.sections.map((s) => {
+        if (s.id !== sectionId) return s;
+        const list = [...s.items];
+        const idx = list.findIndex((it) => it.id === itemId);
+        const swapIdx = idx + dir;
+        if (idx < 0 || swapIdx < 0 || swapIdx >= list.length) return s;
+        [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
+        return { ...s, items: list };
+      }),
+    });
+  }
+  function updateItemField(sectionId: string, itemId: string, field: "name" | "description" | "price", value: string) {
+    if (!form) return;
+    setForm({
+      ...form,
+      sections: form.sections.map((s) => s.id !== sectionId ? s : { ...s, items: s.items.map((it) => it.id === itemId ? { ...it, [field]: value } : it) }),
+    });
+  }
+
+  // Importer produkt: har produktet egne "product"-linjer (retter det består
+  // av), opprettes én MenuItem per slik linje. Er produktet selv en
+  // enkeltrett (ingen slike linjer), opprettes kun ÉN MenuItem for produktet
+  // selv. Pris/beskrivelse fylles ALDRI ut automatisk - kun navnet.
+  function importProduct(product: Product, targetSectionId: string) {
+    if (!form) return;
+    const subProductLines = product.lines.filter((l) => l.itemType === "product");
+    const newItems: MenuItem[] = subProductLines.length
+      ? subProductLines.map((l) => ({ id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: data.products.find((p) => p.id === l.itemId)?.name || "Ukjent produkt" }))
+      : [{ id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name }];
+
+    if (targetSectionId === "__new__") {
+      const section: MenuSection = { id: `sec-${Date.now()}`, title: product.name, items: newItems };
+      setForm({ ...form, sections: [...form.sections, section] });
+    } else {
+      setForm({ ...form, sections: form.sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, ...newItems] } : s) });
+    }
+    setImportSearch("");
+  }
+
+  const filteredImportProducts = importSearch
+    ? data.products.filter((p) => p.name.toLowerCase().includes(importSearch.toLowerCase())).slice(0, 12)
+    : [];
+
+  async function saveDesignToDocumentBank() {
+    if (!form || !previewRef.current) return;
+    setPdfSaving(true);
+    try {
+      const html2canvasMod = await import("html2canvas");
+      const html2canvas = html2canvasMod.default;
+      const { jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff" });
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+      const imgData = canvas.toDataURL("image/png");
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      const blob = pdf.output("blob");
+      const fileName = `${form.name.trim() || "Meny"}.pdf`;
+      const path = `${Date.now()}-${fileName}`;
+      const { error } = await supabase.storage.from("documents").upload(path, blob, { contentType: "application/pdf" });
+      if (error) { alert(`Opplasting feilet: ${error.message}`); return; }
+      const entry: DocumentBankEntry = {
+        id: `doc-${Date.now()}`,
+        name: form.name.trim() || "Meny",
+        fileName,
+        storagePath: path,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: userEmail,
+        linkedProductIds: [],
+      };
+      updateData({ documentBank: [entry, ...(data.documentBank || [])] });
+      alert("Menyen er lagret til Dokumentbanken som PDF.");
+    } catch (e: any) {
+      alert(`Kunne ikke generere PDF: ${e?.message || e}`);
+    } finally {
+      setPdfSaving(false);
+    }
+  }
+
+  if (!form) {
+    return (
+      <section className="card">
+        <div className="between">
+          <h2>Menyer</h2>
+          <button className="btn active" disabled={readOnly} onClick={startNew}>+ Ny meny</button>
+        </div>
+        <p className="muted">Bygg trykte/printede menyer av faste byggeklosser (seksjoner og retter), med mulighet til å importere retter direkte fra produktene dine.</p>
+        {menuDesigns.length === 0 ? (
+          <p className="muted">Ingen menyer opprettet ennå.</p>
+        ) : (
+          menuDesigns.map((d) => (
+            <div key={d.id} className="editable-row">
+              <span>
+                <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
+              </span>
+              <div>
+                <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
+                <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
+                <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+              </div>
+            </div>
+          ))
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="card">
+      <div className="between">
+        <h2>{editingId === "new" ? "Ny meny" : "Rediger meny"}</h2>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={cancelEdit}>← Tilbake til listen</button>
+          <button className="btn" onClick={() => printMenuDesign(form)}>Print</button>
+          <button className="btn" disabled={readOnly || pdfSaving} onClick={saveDesignToDocumentBank}>{pdfSaving ? "Lagrer..." : "Lagre til Dokumentbanken"}</button>
+          <button className="btn active" disabled={readOnly} onClick={saveDesign}>Lagre meny</button>
+        </div>
+      </div>
+
+      <div className="grid two" style={{ marginTop: 16, alignItems: "start" }}>
+        <div className="card">
+          <div className="form-grid two">
+            <label>Navn på meny<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="F.eks. À la carte-meny" /></label>
+            <label>Antall spalter
+              <select value={form.columns} disabled={readOnly} onChange={(e) => setForm({ ...form, columns: Number(e.target.value) as 1 | 2 | 3 })}>
+                <option value={1}>1 spalte</option>
+                <option value={2}>2 spalter</option>
+                <option value={3}>3 spalter</option>
+              </select>
+            </label>
+            <label>Tema
+              <select value={form.theme} disabled={readOnly} onChange={(e) => setForm({ ...form, theme: e.target.value as "harbour" | "standard" })}>
+                <option value="harbour">Harbour (merkevare-fonter)</option>
+                <option value="standard">Nøytralt (systemfont)</option>
+              </select>
+            </label>
+            <label>Fottekst<input value={form.footerText || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, footerText: e.target.value })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 16 }}>Importer produkt</h3>
+          <div className="search-picker" style={{ maxWidth: 420 }}>
+            <input value={importSearch} disabled={readOnly} onChange={(e) => setImportSearch(e.target.value)} placeholder="Søk produkt..." />
+            {importSearch && (
+              <div className="search-dropdown inline">
+                {filteredImportProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+                {filteredImportProducts.map((p) => (
+                  <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => importProduct(p, importTargetSectionId || "__new__")}>
+                    <b>{p.name}</b>
+                    <small>{p.productNumber}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {form.sections.length > 0 && (
+            <label style={{ marginTop: 8, display: "block", maxWidth: 420 }}>
+              Importer til
+              <select value={importTargetSectionId} disabled={readOnly} onChange={(e) => setImportTargetSectionId(e.target.value)}>
+                <option value="__new__">Ny seksjon (fra produktnavn)</option>
+                {form.sections.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+              </select>
+            </label>
+          )}
+
+          <h3 style={{ marginTop: 16 }}>Seksjoner</h3>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={newSectionTitle} disabled={readOnly} onChange={(e) => setNewSectionTitle(e.target.value)} placeholder="Tittel på ny seksjon" style={{ flex: 1 }} />
+            <button className="btn" disabled={readOnly} onClick={addSection}>+ Legg til seksjon</button>
+          </div>
+
+          {form.sections.map((s, sIdx) => {
+            const draft = itemDraft[s.id] || { name: "", description: "", price: "" };
+            return (
+              <div key={s.id} className="soft-box" style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input value={s.title} disabled={readOnly} onChange={(e) => updateSectionTitle(s.id, e.target.value)} style={{ flex: 1, fontWeight: 700 }} />
+                  <button className="link" disabled={readOnly || sIdx === 0} onClick={() => moveSection(s.id, -1)}>↑</button>
+                  <button className="link" disabled={readOnly || sIdx === form.sections.length - 1} onClick={() => moveSection(s.id, 1)}>↓</button>
+                  <button className="link danger" disabled={readOnly} onClick={() => removeSection(s.id)}>Slett seksjon</button>
+                </div>
+
+                {s.items.map((it, iIdx) => (
+                  <div key={it.id} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                    <input value={it.name} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "name", e.target.value)} placeholder="Navn på rett" style={{ flex: 2, minWidth: 140 }} />
+                    <input value={it.description || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "description", e.target.value)} placeholder="Beskrivelse (valgfritt)" style={{ flex: 3, minWidth: 160 }} />
+                    <input value={it.price || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "price", e.target.value)} placeholder="Pris (valgfritt)" style={{ flex: 1, minWidth: 90 }} />
+                    <button className="link" disabled={readOnly || iIdx === 0} onClick={() => moveItem(s.id, it.id, -1)}>↑</button>
+                    <button className="link" disabled={readOnly || iIdx === s.items.length - 1} onClick={() => moveItem(s.id, it.id, 1)}>↓</button>
+                    <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
+                  </div>
+                ))}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input value={draft.name} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, name: e.target.value } })} placeholder="+ Legg til rett" style={{ flex: 2, minWidth: 140 }} />
+                  <input value={draft.description} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, description: e.target.value } })} placeholder="Beskrivelse (valgfritt)" style={{ flex: 3, minWidth: 160 }} />
+                  <input value={draft.price} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, price: e.target.value } })} placeholder="Pris (valgfritt)" style={{ flex: 1, minWidth: 90 }} />
+                  <button className="btn" disabled={readOnly} onClick={() => addItem(s.id)}>+ Legg til rett</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="card">
+          <h3>Forhåndsvisning</h3>
+          <div
+            ref={previewRef}
+            style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 12, maxWidth: 720 }}
+            dangerouslySetInnerHTML={{ __html: buildMenuHtml(form) }}
+          />
         </div>
       </div>
     </section>
