@@ -387,6 +387,8 @@ type MenuDesign = {
   theme: "harbour" | "standard"; // "harbour" = Harbour-Bold-overskrifter + Standard CT-brødtekst, "standard" = nøytral systemfont
   sections: MenuSection[];
   footerText?: string;
+  logoUrl?: string; // storage path i "documents"-bucketen (samme mønster som Site.logoUrl), løses til signert URL ved visning
+  fontScale?: number; // enkel skaleringsfaktor for ALL tekst (0.85/1/1.2 - se MENU_PAGE), default 1
   createdAt: string;
   updatedAt: string;
 };
@@ -18085,55 +18087,107 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
   );
 }
 
-// Delt <style>-blokk + HTML-bygging for menydesigneren - brukes av BÅDE den
-// live forhåndsvisningen i editoren (via dangerouslySetInnerHTML, slik at
-// forhåndsvisningen ALDRI kan avvike fra faktisk print/PDF-utskrift), print-
-// vinduet og PDF-eksporten (html2canvas rasteriserer nøyaktig samme DOM-node
-// som forhåndsvisningen bruker) - én kilde til sannhet i stedet for tre
-// parallelle implementasjoner som lett kunne driftet fra hverandre.
+// Delt sidemål/marger/fontstørrelser for menydesigneren - BÅDE skjerm-
+// forhåndsvisningen og selve print-vinduet bruker NØYAKTIG denne
+// konstanten (aldri to separate tallsett), slik at forhåndsvisningen
+// garantert ser ut som faktisk utskrift. mm-enheter fungerer identisk i
+// CSS på skjerm og i print (fast 96px/mm-referanse), så samme mm-verdier
+// brukes direkte begge steder - ingen omregning nødvendig. Marger er
+// vanlig CSS-padding på selve "side"-elementet i BEGGE sammenhenger (IKKE
+// browser-@page-margin i tillegg), slik at det bare finnes ETT sted margen
+// faktisk defineres.
+const MENU_PAGE = {
+  widthMm: 210,
+  heightMm: 297,
+  marginMm: 18,
+  fontPx: { title: 28, section: 20, body: 14, desc: 13, footer: 12 },
+};
+
 function menuDesignStyleTag() {
   return `<style>
 @font-face { font-family: "Harbour"; src: url("/fonts/Harbour-Bold.ttf") format("truetype"); font-weight: 700; }
 @font-face { font-family: "Standard CT"; src: url("/fonts/StandardCTRegularExtd.otf") format("opentype"); font-weight: 400; }
-.menu-doc{column-gap:28px;color:#111827;padding:8px}
-.menu-title{column-span:all;text-align:center;font-weight:700;font-size:28px;margin-bottom:20px}
-.menu-section{break-inside:avoid;margin-bottom:20px}
-.menu-section h2{font-weight:700;font-size:20px;margin:0 0 8px;border-bottom:2px solid #111827;padding-bottom:4px}
-.menu-item{margin-bottom:8px;break-inside:avoid}
+@page{size:A4;margin:0}
+body{margin:0}
+.menu-page{width:${MENU_PAGE.widthMm}mm;height:${MENU_PAGE.heightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
+.menu-logo{max-height:26mm;max-width:60%;object-fit:contain;margin:0 auto 6mm;display:block}
+.menu-title{text-align:center;font-weight:700;margin-bottom:20px}
+.menu-main{flex:1;display:flex;flex-direction:column;min-height:0}
+.menu-columns{column-gap:28px}
+.menu-section{break-inside:avoid}
+.menu-section h2{font-weight:700;margin:0 0 8px;border-bottom:2px solid #111827;padding-bottom:4px}
+.menu-item{break-inside:avoid}
 .menu-item-row{display:flex;justify-content:space-between;gap:8px}
 .menu-item-price{white-space:nowrap;font-weight:700}
-.menu-item-desc{margin:2px 0 0;font-size:13px;color:#475569}
-.menu-footer{column-span:all;text-align:center;margin-top:16px;font-size:12px;color:#64748b}
-@media print{body{padding:0}button{display:none}}
+.menu-item-desc{margin:2px 0 0;color:#475569}
+.menu-footer{text-align:center;margin-top:16px;color:#64748b}
+@media print{button{display:none}}
 </style>`;
 }
 
-function buildMenuHtml(design: MenuDesign): string {
+// Bygger INNHOLDET for én meny - brukes av BÅDE den live forhåndsvisningen
+// (via dangerouslySetInnerHTML), print-vinduet og PDF-eksporten (html2canvas
+// rasteriserer nøyaktig samme DOM-node som forhåndsvisningen bruker) - én
+// kilde til sannhet i stedet for flere parallelle implementasjoner.
+// resolvedLogoUrl er den FERDIG SIGNERTE URL-en (ikke storage-path), siden
+// denne funksjonen bygger en ren HTML-streng uten tilgang til Supabase-klienten.
+function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
   const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
+  const scale = design.fontScale || 1;
+  const px = (base: number) => `${Math.round(base * scale * 10) / 10}px`;
+
+  // Få elementer totalt => mer luft mellom seksjoner/retter i stedet for
+  // tomrom nederst på siden. Ved 1 spalte distribueres seksjonene jevnt
+  // over hele høyden med flex (justify-content) - fungerer ikke sammen med
+  // CSS multi-kolonne-flyt (column-count har ingen justify-content-
+  // semantikk), så ved 2-3 spalter økes i stedet avstanden mellom
+  // seksjoner/retter direkte som et praktisk, likeverdig alternativ.
+  const totalCount = design.sections.length + design.sections.reduce((sum, s) => sum + s.items.length, 0);
+  const sparse = totalCount > 0 && totalCount < 9;
+  const sectionGap = sparse ? 40 : 20;
+  const itemGap = sparse ? 16 : 8;
+
   const sectionsHtml = design.sections.map((s) => `
-    <div class="menu-section">
-      <h2 style="font-family:${headingFont}">${escapeHtml(s.title)}</h2>
+    <div class="menu-section" style="margin-bottom:${sectionGap}px">
+      <h2 style="font-family:${headingFont};font-size:${px(MENU_PAGE.fontPx.section)}">${escapeHtml(s.title)}</h2>
       ${s.items.map((it) => `
-        <div class="menu-item">
+        <div class="menu-item" style="margin-bottom:${itemGap}px">
           <div class="menu-item-row"><b>${escapeHtml(it.name)}</b>${it.price ? `<span class="menu-item-price">${escapeHtml(it.price)}</span>` : ""}</div>
-          ${it.description ? `<p class="menu-item-desc">${escapeHtml(it.description)}</p>` : ""}
+          ${it.description ? `<p class="menu-item-desc" style="font-size:${px(MENU_PAGE.fontPx.desc)}">${escapeHtml(it.description)}</p>` : ""}
         </div>
       `).join("")}
     </div>
   `).join("");
+
+  const columnsBlock = design.columns === 1
+    ? `<div class="menu-columns" style="flex:1;display:flex;flex-direction:column;justify-content:${sparse ? "space-evenly" : "flex-start"}">${sectionsHtml}</div>`
+    : `<div class="menu-columns" style="column-count:${design.columns}">${sectionsHtml}</div>`;
+
   return `
-    <div class="menu-doc" style="column-count:${design.columns};font-family:${bodyFont}">
-      <div class="menu-title" style="font-family:${headingFont}">${escapeHtml(design.name)}</div>
-      ${sectionsHtml}
-      ${design.footerText ? `<div class="menu-footer">${escapeHtml(design.footerText)}</div>` : ""}
+    <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
+      ${resolvedLogoUrl ? `<img class="menu-logo" src="${resolvedLogoUrl}" alt="Logo" />` : ""}
+      <div class="menu-main">
+        <div class="menu-title" style="font-family:${headingFont};font-size:${px(MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
+        ${columnsBlock}
+      </div>
+      ${design.footerText ? `<div class="menu-footer" style="font-size:${px(MENU_PAGE.fontPx.footer)}">${escapeHtml(design.footerText)}</div>` : ""}
     </div>
   `;
 }
 
-function printMenuDesign(design: MenuDesign) {
+// NB: footer garanteres kun nederst på DEN SISTE siden når menyen er lang
+// nok til å spenne over flere print-sider - en ordentlig "footer på alle
+// sider"-løsning krever egne @page-topp/bunn-marginalier og er bevisst
+// utenfor omfanget her.
+async function printMenuDesign(design: MenuDesign) {
   const w = window.open("", "_blank"); if (!w) return;
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag()}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design)}</body></html>`);
+  let logoUrl: string | undefined;
+  if (design.logoUrl) {
+    const { data } = await supabase.storage.from("documents").createSignedUrl(design.logoUrl, 60 * 60);
+    logoUrl = data?.signedUrl;
+  }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag()}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl)}</body></html>`);
   w.document.close(); w.focus();
 }
 
@@ -18152,11 +18206,47 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   const [importSearch, setImportSearch] = useState("");
   const [importTargetSectionId, setImportTargetSectionId] = useState<string>("");
   const [pdfSaving, setPdfSaving] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [resolvedLogoUrl, setResolvedLogoUrl] = useState<string | undefined>(undefined);
   const previewRef = useRef<HTMLDivElement | null>(null);
+
+  // Løser lagringsbanen til en midlertidig signert URL for BÅDE den lille
+  // "nåværende logo"-forhåndsvisningen i redigeringspanelet OG selve
+  // menyinnholdet (buildMenuHtml krever en ferdig URL, ikke en storage-path).
+  useEffect(() => {
+    setResolvedLogoUrl(undefined);
+    if (!form?.logoUrl) return;
+    let cancelled = false;
+    supabase.storage.from("documents").createSignedUrl(form.logoUrl, 60 * 60).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { console.error("Kunne ikke hente menylogo:", error); return; }
+      if (data?.signedUrl) setResolvedLogoUrl(data.signedUrl);
+    });
+    return () => { cancelled = true; };
+  }, [form?.logoUrl]);
+
+  async function uploadMenuLogo(file: File) {
+    setLogoUploading(true);
+    try {
+      const path = `menu-logos/${Date.now()}-${file.name}`;
+      const { error } = await supabase.storage.from("documents").upload(path, file);
+      if (error) { alert(`Opplasting feilet: ${error.message}`); return; }
+      setForm((prev) => prev ? { ...prev, logoUrl: path } : prev);
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+  async function removeMenuLogo() {
+    if (!form?.logoUrl) return;
+    if (!confirm("Fjerne logoen fra denne menyen?")) return;
+    const path = form.logoUrl;
+    setForm({ ...form, logoUrl: undefined });
+    await supabase.storage.from("documents").remove([path]).catch(() => {});
+  }
 
   function blankDesign(): MenuDesign {
     const now = new Date().toISOString();
-    return { id: `menu-${Date.now()}`, name: "Ny meny", columns: 1, theme: "harbour", sections: [], footerText: activeSiteName || "", createdAt: now, updatedAt: now };
+    return { id: `menu-${Date.now()}`, name: "Ny meny", columns: 1, theme: "harbour", sections: [], footerText: activeSiteName || "", fontScale: 1, createdAt: now, updatedAt: now };
   }
 
   function startNew() {
@@ -18290,7 +18380,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       const html2canvasMod = await import("html2canvas");
       const html2canvas = html2canvasMod.default;
       const { jsPDF } = await import("jspdf");
-      const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff" });
+      const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
@@ -18388,6 +18478,23 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
               </select>
             </label>
             <label>Fottekst<input value={form.footerText || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, footerText: e.target.value })} /></label>
+            <label>Tekststørrelse
+              <select value={form.fontScale || 1} disabled={readOnly} onChange={(e) => setForm({ ...form, fontScale: Number(e.target.value) })}>
+                <option value={0.85}>Liten</option>
+                <option value={1}>Normal</option>
+                <option value={1.2}>Stor</option>
+              </select>
+            </label>
+          </div>
+
+          <h3 style={{ marginTop: 16 }}>Logo</h3>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            {form.logoUrl && (
+              <SiteLogo path={form.logoUrl} fallbackSrc="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" alt="Meny-logo" style={{ height: 48, width: "auto", objectFit: "contain", border: "1px solid #e2e8f0", borderRadius: 8, padding: 4 }} />
+            )}
+            <input type="file" accept="image/*" disabled={readOnly || logoUploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadMenuLogo(file); e.target.value = ""; }} />
+            {logoUploading && <span className="muted">Laster opp...</span>}
+            {form.logoUrl && <button className="link danger" disabled={readOnly} onClick={removeMenuLogo}>Fjern logo</button>}
           </div>
 
           <h3 style={{ marginTop: 16 }}>Importer produkt</h3>
@@ -18456,11 +18563,19 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
 
         <div className="card">
           <h3>Forhåndsvisning</h3>
-          <div
-            ref={previewRef}
-            style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 12, maxWidth: 720 }}
-            dangerouslySetInnerHTML={{ __html: buildMenuHtml(form) }}
-          />
+          <p className="muted" style={{ fontSize: 12 }}>Viser faktiske A4-proporsjoner og marger - identisk med print/PDF.</p>
+          {/* Skygge/kant er en ren skjerm-affordanse (papir-følelse à la Google
+              Docs) og legges på en INNPAKNINGS-div UTENFOR previewRef, slik at
+              PDF-eksporten (som rasteriserer previewRef direkte) blir en ren
+              gjengivelse av selve siden, uten en falsk skygge brent inn i PDF-en. */}
+          <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
+            <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)" }}>
+              <div
+                ref={previewRef}
+                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag() + buildMenuHtml(form, resolvedLogoUrl) }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </section>
