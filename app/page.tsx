@@ -418,8 +418,10 @@ type MenuDesign = {
   logoUrl?: string; // storage path i "documents"-bucketen (samme mønster som Site.logoUrl), løses til signert URL ved visning
   fontScale?: number; // enkel skaleringsfaktor for ALL tekst (0.85/1/1.2 - se MENU_PAGE), default 1
   logoSize?: "liten" | "normal" | "stor"; // størrelse på menylogoen, default "normal" - se LOGO_SIZE
+  orientation?: "portrait" | "landscape"; // sideformat - "portrait" (stående) er default når feltet er udefinert, se DEL 14
   textStyles?: Record<string, MenuTextStyle>;
   dividerStyles?: Record<string, MenuDividerStyle>;
+  textBlocks?: MenuTextBlock[]; // frie, fritt tilføyde tekstfelt - vises under seksjonene, se DEL 13
   createdAt: string;
   updatedAt: string;
 };
@@ -431,8 +433,10 @@ type MenuDesign = {
 // "item:{itemId}:name" | "item:{itemId}:description" | "item:{itemId}:price".
 // Nøkler i dividerStyles: sectionId direkte (én skillelinje under hver seksjonstittel).
 // Mangler et element en overstyring, brukes tema/tekststørrelse/standardfarge som i dag.
-type MenuTextStyle = { fontKey?: string; sizePx?: number; color?: string };
+type MenuTextStyle = { fontKey?: string; sizePx?: number; color?: string; textAlign?: "left" | "center" | "right" };
 type MenuDividerStyle = { enabled: boolean; color?: string };
+type MenuTextBlock = { id: string; text: string };
+type MenuTemplate = { id: string; name: string; columns: 1 | 2 | 3; theme: "harbour" | "standard"; footerText?: string; fontScale?: number; logoSize?: "liten" | "normal" | "stor" };
 
 // Fast standardmal per sted for "+ Ny meny" (fottekst/logo/tema/spalter/
 // tekststørrelse) - se MenuDesignTab sin "Standardinnstillinger"-seksjon.
@@ -788,6 +792,7 @@ type AppData = {
   // allerede eksisterende, urelaterte "menuCategories: string[]"-feltet (Catering/Selskap/
   // Bryllup-kategoriene brukt et helt annet sted i appen) - se defaultMenuCategories.
   menuDesignCategories?: MenuCategory[];
+  menuTemplates?: MenuTemplate[];
 };
 
 // Nøkler som lever i den delte "main"-raden i Supabase (app_data), på tvers av alle steder.
@@ -1131,6 +1136,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   menuDefaults: undefined,
   menuRecentColors: [],
   menuDesignCategories: [],
+  menuTemplates: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1290,6 +1296,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     menuDefaults: (raw as any).menuDefaults || undefined,
     menuRecentColors: (raw as any).menuRecentColors || [],
     menuDesignCategories: (raw as any).menuDesignCategories || [],
+    menuTemplates: (raw as any).menuTemplates || [],
   };
 }
 
@@ -2804,7 +2811,7 @@ return (
         {tab === "settings"   && <SettingsTab data={data} updateData={updateData} exportData={exportData} importData={importData} setTab={setTab} readOnly={!canEdit("settings")} userEmail={userEmail} />}
         {tab === "users"      && <UsersTab data={data} updateData={updateData} allTabConfig={allTabConfig.filter((t) => t.key !== "users")} isSuperadmin={isSuperadmin} syncSharedData={syncSharedData} activeSiteId={activeSiteId} switchActiveSite={switchActiveSite} />}
         {tab === "rombibliotek" && <RoomLibraryTab data={data} updateData={updateData} setTab={setTab} />}
-        {tab === "menyer"     && <MenuDesignTab data={data} updateData={updateData} readOnly={!canEdit("menyer")} userEmail={userEmail} activeSiteName={activeSite?.name} />}
+        {tab === "menyer"     && <MenuDesignTab data={data} updateData={updateData} readOnly={!canEdit("menyer")} userEmail={userEmail} activeSiteName={activeSite?.name} isDirty={dirtyTabs.has("menyer")} onDirtyChange={onDirtyChangeFor("menyer")} registerSave={registerSave} />}
 
         <footer style={{ display: "flex", justifyContent: "center", marginTop: 40, paddingBottom: 20, opacity: 0.85 }}>
           <img src="/mise-logo.png" alt="Misemetrics" style={{ width: 140, height: "auto" }} />
@@ -18226,13 +18233,15 @@ const MENU_PAGE = {
   fontPx: { title: 28, section: 20, body: 14, desc: 13, footer: 12 },
 };
 
-function menuDesignStyleTag() {
+function menuDesignStyleTag(orientation?: "portrait" | "landscape") {
+  const pageWidthMm = orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
+  const pageHeightMm = orientation === "landscape" ? MENU_PAGE.widthMm : MENU_PAGE.heightMm;
   return `<style>
 @font-face { font-family: "Harbour"; src: url("/fonts/Harbour-Bold.ttf") format("truetype"); font-weight: 700; }
 @font-face { font-family: "Standard CT"; src: url("/fonts/StandardCTRegularExtd.otf") format("opentype"); font-weight: 400; }
-@page{size:A4;margin:0}
+@page{size:A4${orientation === "landscape" ? " landscape" : ""};margin:0}
 body{margin:0}
-.menu-page{width:${MENU_PAGE.widthMm}mm;height:${MENU_PAGE.heightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
+.menu-page{width:${pageWidthMm}mm;height:${pageHeightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
 .menu-logo{object-fit:contain;margin:0 auto 6mm;display:block}
 .menu-title{text-align:center;font-weight:700;margin-bottom:20px}
 .menu-main{flex:1;display:flex;flex-direction:column;min-height:0}
@@ -18246,6 +18255,7 @@ body{margin:0}
 .menu-item-desc{margin:2px 0 0;color:#475569}
 .menu-item-allergens{margin:2px 0 0;font-size:11px}
 .menu-price{text-align:center;font-weight:700;margin-top:12px}
+.menu-text-block{margin:8px 0 0;white-space:pre-wrap}
 .pdf-export .menu-empty-placeholder{visibility:hidden}
 .menu-footer{text-align:center;margin-top:16px;color:#64748b}
 @media print{button{display:none}}
@@ -18275,7 +18285,7 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
     const family = o?.fontKey ? (menuFontFamily(o.fontKey) || fallbackFamily) : fallbackFamily;
     const sizePx = o?.sizePx ? `${o.sizePx}px` : px(fallbackPx);
     const color = o?.color || fallbackColor;
-    return `font-family:${family};font-size:${sizePx}${color ? `;color:${color}` : ""}`;
+    return `font-family:${family};font-size:${sizePx}${color ? `;color:${color}` : ""}${o?.textAlign ? `;text-align:${o.textAlign}` : ""}`;
   }
   function dividerStyleFor(sectionId: string): MenuDividerStyle {
     return (design.dividerStyles || {})[sectionId] || { enabled: true, color: "#111827" };
@@ -18329,6 +18339,7 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
       <div class="menu-main">
         <div class="menu-title" data-menu-key="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
         ${columnsBlock}
+        ${(design.textBlocks || []).map((b) => `<p class="menu-text-block" data-menu-key="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(b.text)}</p>`).join("")}
       </div>
       ${design.menuPrice
         ? `<div class="menu-price" data-menu-key="menuPrice" style="${overriddenStyle("menuPrice", bodyFont, MENU_PAGE.fontPx.title, "#111827")}">${escapeHtml(design.menuPrice)}</div>`
@@ -18351,7 +18362,7 @@ async function printMenuDesign(design: MenuDesign) {
     const { data } = await supabase.storage.from("documents").createSignedUrl(design.logoUrl, 60 * 60);
     logoUrl = data?.signedUrl;
   }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag()}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl)}</body></html>`);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag(design.orientation)}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl)}</body></html>`);
   w.document.close(); w.focus();
 }
 
@@ -18467,7 +18478,7 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
     );
   }
   const style = getTextStyleOverride(selectedKey);
-  const isMultiline = selectedKey.endsWith(":description") || selectedKey.endsWith(":allergens");
+  const isMultiline = selectedKey.endsWith(":description") || selectedKey.endsWith(":allergens") || selectedKey.startsWith("textblock:");
   return (
     <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
       <div className="between">
@@ -18491,16 +18502,35 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
         <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Farge</div>
         <MenuColorPicker value={style.color} recentColors={recentColors} readOnly={readOnly} onPick={(c) => pickColor(selectedKey, c)} />
       </div>
+      <div style={{ marginTop: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Justering</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {(["left", "center", "right"] as const).map((a) => (
+            <button
+              key={a}
+              type="button"
+              className={`btn${(style.textAlign || "left") === a ? " active" : ""}`}
+              disabled={readOnly}
+              onClick={() => patchTextStyle(selectedKey, { textAlign: a })}
+            >
+              {a === "left" ? "Venstrestilt" : a === "center" ? "Midtstilt" : "Høyrestilt"}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
 
-function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }: {
+function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, isDirty, onDirtyChange, registerSave }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   readOnly: boolean;
   userEmail: string;
   activeSiteName?: string;
+  isDirty: boolean;
+  onDirtyChange: (dirty: boolean) => void;
+  registerSave: (fn: (() => boolean) | null) => void;
 }) {
   const menuDesigns = data.menuDesigns || [];
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -18526,6 +18556,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   const [priceFetchOpenItemId, setPriceFetchOpenItemId] = useState<string | null>(null);
   const [priceFetchSearch, setPriceFetchSearch] = useState("");
   const [menuPriceFetchSearch, setMenuPriceFetchSearch] = useState("");
+  const [newTextBlockDraft, setNewTextBlockDraft] = useState("");
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [managingTemplates, setManagingTemplates] = useState(false);
+  const [templateForm, setTemplateForm] = useState<MenuTemplate | null>(null);
 
   // Kategorier for menyer - enkel navngitt liste, delt per sted i databasen (samme mønster som
   // menuRecentColors), opprettes direkte i "Menyer"-listevisningen. Kalt menuDesignCategories i
@@ -18538,6 +18572,19 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     updateData({ menuDesignCategories: [...(data.menuDesignCategories || []), category] });
     setNewCategoryName("");
   }
+
+  // Sporer ulagrede endringer i "form" (selve menyen som redigeres) - samme mønster som
+  // RecipesTab/ProductsTab/OrdersTab bruker. markClean() MÅ kalles rett etter at et skjema lastes
+  // (ny/rediger) og etter vellykket lagring/avbryt - se startNew/startNewBlank/startEdit/
+  // cancelEdit/saveDesign lenger ned. Kun selve menyredigeringen ("form") spores - IKKE
+  // Standardinnstillinger (defaultsForm) eller malbiblioteket (templateForm), som er egne,
+  // sjeldnere brukte skjemaer med lavere risiko for datatap.
+  const { markClean } = useFormDirtyTracking(!!form, onDirtyChange, [form]);
+
+  useEffect(() => {
+    registerSave(() => saveDesign());
+    return () => registerSave(null);
+  });
 
   // Løser lagringsbanen til en midlertidig signert URL for BÅDE den lille
   // "nåværende logo"-forhåndsvisningen i redigeringspanelet OG selve
@@ -18612,6 +18659,45 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     setEditingDefaults(true);
   }
 
+  function startNewTemplateForm() {
+    setTemplateForm({ id: `tpl-${Date.now()}`, name: "", columns: 1, theme: "harbour", fontScale: 1, logoSize: "normal" });
+  }
+  function editTemplateForm(t: MenuTemplate) {
+    setTemplateForm({ ...t });
+  }
+  function saveTemplateForm() {
+    if (!templateForm) return;
+    if (!templateForm.name.trim()) { alert("Malen må ha et navn."); return; }
+    const list = data.menuTemplates || [];
+    const exists = list.some((t) => t.id === templateForm.id);
+    const next = exists ? list.map((t) => t.id === templateForm.id ? templateForm : t) : [...list, templateForm];
+    updateData({ menuTemplates: next });
+    setTemplateForm(null);
+  }
+  function deleteTemplate(id: string) {
+    if (!confirm("Slette denne malen?")) return;
+    updateData({ menuTemplates: (data.menuTemplates || []).filter((t) => t.id !== id) });
+    if (templateForm?.id === id) setTemplateForm(null);
+  }
+  function startFromTemplate(t: MenuTemplate) {
+    const now = new Date().toISOString();
+    setForm({
+      id: `menu-${Date.now()}`,
+      name: "Ny meny",
+      columns: t.columns,
+      theme: t.theme,
+      sections: [],
+      footerText: t.footerText ?? (activeSiteName || ""),
+      logoSize: t.logoSize || "normal",
+      fontScale: t.fontScale || 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    setEditingId("new");
+    setTemplatePickerOpen(false);
+    markClean();
+  }
+
   function blankDesign(): MenuDesign {
     const now = new Date().toISOString();
     const d = data.menuDefaults;
@@ -18633,6 +18719,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   function startNew() {
     setForm(blankDesign());
     setEditingId("new");
+    markClean();
   }
   function startNewBlank() {
     const now = new Date().toISOString();
@@ -18649,24 +18736,38 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       updatedAt: now,
     });
     setEditingId("new");
+    markClean();
   }
   function startEdit(d: MenuDesign) {
     setForm({ ...d, sections: d.sections.map((s) => ({ ...s, items: s.items.map((it) => ({ ...it })) })) });
     setEditingId(d.id);
+    markClean();
   }
   function cancelEdit() {
     setForm(null);
     setEditingId(null);
     setImportSearch("");
+    markClean();
   }
-  function saveDesign() {
-    if (!form) return;
-    if (!form.name.trim()) { alert("Menyen må ha et navn."); return; }
-    const toSave: MenuDesign = { ...form, updatedAt: new Date().toISOString() };
+  function saveDesign(): boolean {
+    if (!form) return true;
+    if (!form.name.trim()) { alert("Menyen må ha et navn."); return false; }
+    // Sikkerhetsnett: sørger for at ALLE priser (også de som er skrevet/redigert direkte i
+    // egenskapspanelet, som ikke reformateres underveis for å unngå å ødelegge tekst mens man
+    // skriver) har ",-" på slutten idet menyen faktisk lagres - se formatItemPrice.
+    const priceFormatted: MenuDesign = {
+      ...form,
+      sections: form.sections.map((s) => ({
+        ...s,
+        items: s.items.map((it) => it.price ? { ...it, price: formatItemPrice(it.price) } : it),
+      })),
+    };
+    const toSave: MenuDesign = { ...priceFormatted, updatedAt: new Date().toISOString() };
     const exists = menuDesigns.some((m) => m.id === toSave.id);
     const next = exists ? menuDesigns.map((m) => m.id === toSave.id ? toSave : m) : [...menuDesigns, toSave];
     updateData({ menuDesigns: next });
     cancelEdit();
+    return true;
   }
   function duplicateDesign(d: MenuDesign) {
     const now = new Date().toISOString();
@@ -18697,6 +18798,18 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (!confirm("Slette denne seksjonen og alle rettene i den?")) return;
     setForm({ ...form, sections: form.sections.filter((s) => s.id !== sectionId) });
   }
+  function addTextBlock() {
+    if (!form) return;
+    const text = newTextBlockDraft.trim();
+    if (!text) return;
+    const block: MenuTextBlock = { id: `txt-${Date.now()}`, text };
+    setForm({ ...form, textBlocks: [...(form.textBlocks || []), block] });
+    setNewTextBlockDraft("");
+  }
+  function removeTextBlock(id: string) {
+    if (!form) return;
+    setForm({ ...form, textBlocks: (form.textBlocks || []).filter((b) => b.id !== id) });
+  }
   function moveSection(sectionId: string, dir: -1 | 1) {
     if (!form) return;
     const list = [...form.sections];
@@ -18711,11 +18824,21 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     setForm({ ...form, sections: form.sections.map((s) => s.id === sectionId ? { ...s, title } : s) });
   }
 
+  // Automatisk ",-" etter pris PER RETT (IKKE menyPrice, som er fritekst og ofte allerede har
+  // egen formatering som "Kr 595,- pr person"). Brukes direkte ved diskrete handlinger (Hent pris,
+  // "+ Legg til rett") for umiddelbar tilbakemelding, OG som et sikkerhetsnett i saveDesign for alt
+  // som er skrevet inn/endret manuelt i egenskapspanelet.
+  function formatItemPrice(raw: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) return trimmed;
+    return /,-\s*$/.test(trimmed) ? trimmed : `${trimmed},-`;
+  }
+
   function addItem(sectionId: string) {
     if (!form) return;
     const draft = itemDraft[sectionId] || { name: "", description: "", price: "" };
     if (!draft.name.trim()) return;
-    const item: MenuItem = { id: `item-${Date.now()}`, name: draft.name.trim(), description: draft.description.trim() || undefined, price: draft.price.trim() || undefined };
+    const item: MenuItem = { id: `item-${Date.now()}`, name: draft.name.trim(), description: draft.description.trim() || undefined, price: draft.price.trim() ? formatItemPrice(draft.price.trim()) : undefined };
     setForm({ ...form, sections: form.sections.map((s) => s.id === sectionId ? { ...s, items: [...s.items, item] } : s) });
     setItemDraft({ ...itemDraft, [sectionId]: { name: "", description: "", price: "" } });
   }
@@ -18781,6 +18904,8 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (key === "title") return form.name;
     if (key === "footer") return form.footerText || "";
     if (key === "menuPrice") return form.menuPrice || "";
+    const textBlockMatch = key.match(/^textblock:(.+)$/);
+    if (textBlockMatch) return (form.textBlocks || []).find((b) => b.id === textBlockMatch[1])?.text || "";
     const secMatch = key.match(/^section:(.+):title$/);
     if (secMatch) return form.sections.find((s) => s.id === secMatch[1])?.title || "";
     const itemAllergenMatch = key.match(/^item:(.+):allergens$/);
@@ -18807,6 +18932,11 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (key === "title") { setForm({ ...form, name: value }); return; }
     if (key === "footer") { setForm({ ...form, footerText: value }); return; }
     if (key === "menuPrice") { setForm({ ...form, menuPrice: value }); return; }
+    const textBlockMatch = key.match(/^textblock:(.+)$/);
+    if (textBlockMatch) {
+      setForm({ ...form, textBlocks: (form.textBlocks || []).map((b) => b.id === textBlockMatch[1] ? { ...b, text: value } : b) });
+      return;
+    }
     const secMatch = key.match(/^section:(.+):title$/);
     if (secMatch) { updateSectionTitle(secMatch[1], value); return; }
     const itemAllergenMatch = key.match(/^item:(.+):allergens$/);
@@ -18945,7 +19075,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   // etterpå, selv om raden opprinnelig ble lagt til for hånd.
   function setItemPriceFromProduct(sectionId: string, itemId: string, product: Product, basis: "customer" | "storkjokken") {
     if (!form) return;
-    const price = basis === "customer" ? String(product.customerPrice ?? "") : String(product.storkjokkenPriceExVat ?? "");
+    const price = formatItemPrice(basis === "customer" ? String(product.customerPrice ?? "") : String(product.storkjokkenPriceExVat ?? ""));
     const sourceRef: { type: "product"; id: string } = { type: "product", id: product.id };
     setForm({
       ...form,
@@ -19035,7 +19165,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       const { jsPDF } = await import("jspdf");
       previewRef.current.classList.add("pdf-export");
       const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pdf = new jsPDF({ orientation: form.orientation === "landscape" ? "landscape" : "portrait", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const imgWidth = pageWidth;
@@ -19090,7 +19220,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       const { jsPDF } = await import("jspdf");
       previewRef.current.classList.add("pdf-export");
       const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pdf = new jsPDF({ orientation: form.orientation === "landscape" ? "landscape" : "portrait", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const imgWidth = pageWidth;
@@ -19135,10 +19265,74 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn" onClick={() => setShowDocBank((v) => !v)}>Dokumentbank</button>
               <button className="btn" disabled={readOnly} onClick={startEditDefaults}>Standardinnstillinger</button>
+              <button className="btn" disabled={readOnly} onClick={() => setTemplatePickerOpen((v) => !v)}>Maler</button>
               <button className="btn" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
               <button className="btn active" disabled={readOnly} onClick={startNew}>+ Fra standardmal</button>
             </div>
           </div>
+          {templatePickerOpen && (
+            <div className="soft-box" style={{ marginTop: 8 }}>
+              <div className="between">
+                <b>Malbibliotek</b>
+                <button type="button" className="link" disabled={readOnly} onClick={() => { const next = !managingTemplates; setManagingTemplates(next); if (next) startNewTemplateForm(); else setTemplateForm(null); }}>
+                  {managingTemplates ? "Ferdig" : "Administrer maler"}
+                </button>
+              </div>
+              {(data.menuTemplates || []).length === 0 && !managingTemplates && <p className="muted" style={{ fontSize: 13 }}>Ingen maler opprettet ennå. Trykk "Administrer maler" for å lage en.</p>}
+              {(data.menuTemplates || []).map((t) => (
+                <div key={t.id} className="editable-row">
+                  <span>{t.name}</span>
+                  <div>
+                    {!managingTemplates && <button className="link" disabled={readOnly} onClick={() => startFromTemplate(t)}>Bruk</button>}
+                    {managingTemplates && <button className="link" disabled={readOnly} onClick={() => editTemplateForm(t)}>Rediger</button>}
+                    {managingTemplates && <button className="link danger" disabled={readOnly} onClick={() => deleteTemplate(t.id)}>Slett</button>}
+                  </div>
+                </div>
+              ))}
+              {managingTemplates && (
+                <div style={{ marginTop: 12, borderTop: "1px solid #e2e8f0", paddingTop: 12 }}>
+                  {!templateForm && <button type="button" className="btn" disabled={readOnly} onClick={startNewTemplateForm}>+ Ny mal</button>}
+                  {templateForm && (
+                    <div className="form-grid two">
+                      <label>Navn på mal<input value={templateForm.name} disabled={readOnly} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })} placeholder="F.eks. Bryllupsmeny" /></label>
+                      <label>Antall spalter
+                        <select value={templateForm.columns} disabled={readOnly} onChange={(e) => setTemplateForm({ ...templateForm, columns: Number(e.target.value) as 1 | 2 | 3 })}>
+                          <option value={1}>1 spalte</option>
+                          <option value={2}>2 spalter</option>
+                          <option value={3}>3 spalter</option>
+                        </select>
+                      </label>
+                      <label>Tema
+                        <select value={templateForm.theme} disabled={readOnly} onChange={(e) => setTemplateForm({ ...templateForm, theme: e.target.value as "harbour" | "standard" })}>
+                          <option value="harbour">Harbour (merkevare-fonter)</option>
+                          <option value="standard">Nøytralt (systemfont)</option>
+                        </select>
+                      </label>
+                      <label>Fottekst<input value={templateForm.footerText || ""} disabled={readOnly} onChange={(e) => setTemplateForm({ ...templateForm, footerText: e.target.value })} /></label>
+                      <label>Tekststørrelse
+                        <select value={templateForm.fontScale || 1} disabled={readOnly} onChange={(e) => setTemplateForm({ ...templateForm, fontScale: Number(e.target.value) })}>
+                          <option value={0.85}>Liten</option>
+                          <option value={1}>Normal</option>
+                          <option value={1.2}>Stor</option>
+                        </select>
+                      </label>
+                      <label>Logostørrelse
+                        <select value={templateForm.logoSize || "normal"} disabled={readOnly} onChange={(e) => setTemplateForm({ ...templateForm, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
+                          <option value="liten">Liten</option>
+                          <option value="normal">Normal</option>
+                          <option value="stor">Stor</option>
+                        </select>
+                      </label>
+                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                        <button type="button" className="btn active" disabled={readOnly} onClick={saveTemplateForm}>Lagre mal</button>
+                        <button type="button" className="btn" onClick={() => setTemplateForm(null)}>Avbryt</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <p className="muted">Bygg trykte/printede menyer av faste byggeklosser (seksjoner og retter), med mulighet til å importere retter direkte fra produktene dine.</p>
 
           <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap", margin: "8px 0 16px" }}>
@@ -19158,9 +19352,36 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
 
           {menuDesigns.length === 0 ? (
             <p className="muted">Ingen menyer opprettet ennå.</p>
+          ) : categoryFilter === "all" ? (
+            // Gruppert per kategori (inkl. en egen "Uten kategori"-gruppe) når ingen bestemt
+            // kategori-filter er valgt - én flat liste blir fort uoversiktlig etter hvert som
+            // antall menyer og kategorier vokser.
+            [
+              ...(data.menuDesignCategories || []).map((c) => ({ id: c.id, name: c.name })),
+              { id: "none", name: "Uten kategori" },
+            ]
+              .map((group) => ({ group, items: menuDesigns.filter((d) => group.id === "none" ? !d.categoryId : d.categoryId === group.id) }))
+              .filter(({ items }) => items.length > 0)
+              .map(({ group, items }) => (
+                <div key={group.id} style={{ marginTop: 12 }}>
+                  <h3 style={{ fontSize: 14, color: "#64748b", margin: "0 0 6px" }}>{group.name}</h3>
+                  {items.map((d) => (
+                    <div key={d.id} className="editable-row">
+                      <span>
+                        <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
+                      </span>
+                      <div>
+                        <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
+                        <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
+                        <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))
           ) : (
             menuDesigns
-              .filter((d) => categoryFilter === "all" ? true : categoryFilter === "none" ? !d.categoryId : d.categoryId === categoryFilter)
+              .filter((d) => categoryFilter === "none" ? !d.categoryId : d.categoryId === categoryFilter)
               .map((d) => (
                 <div key={d.id} className="editable-row">
                   <span>
@@ -19319,6 +19540,12 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
                   <option value={3}>3 spalter</option>
                 </select>
               </label>
+              <label>Sideformat
+                <select value={form.orientation || "portrait"} disabled={readOnly} onChange={(e) => setForm({ ...form, orientation: e.target.value as "portrait" | "landscape" })}>
+                  <option value="portrait">Stående</option>
+                  <option value="landscape">Liggende</option>
+                </select>
+              </label>
               <label>Tema
                 <select value={form.theme} disabled={readOnly} onChange={(e) => setForm({ ...form, theme: e.target.value as "harbour" | "standard" })}>
                   <option value="harbour">Harbour (merkevare-fonter)</option>
@@ -19413,6 +19640,25 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             </div>
           </details>
 
+          <details style={{ marginTop: 12 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Tekstfelt</summary>
+            <div style={{ marginTop: 12 }}>
+              {(form.textBlocks || []).map((b) => (
+                <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                  <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`textblock:${b.id}`)}>
+                    {b.text.trim() ? (b.text.length > 40 ? `${b.text.slice(0, 40)}...` : b.text) : "(tomt tekstfelt)"}
+                  </button>
+                  <button className="link danger" disabled={readOnly} onClick={() => removeTextBlock(b.id)}>Slett</button>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8 }}>
+                <input value={newTextBlockDraft} disabled={readOnly} onChange={(e) => setNewTextBlockDraft(e.target.value)} placeholder="Tekst for nytt felt..." style={{ flex: 1 }} />
+                <button className="btn" disabled={readOnly} onClick={addTextBlock}>+ Legg til tekstfelt</button>
+              </div>
+              <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>Frie tekstfelt vises under seksjonene på menysiden, i den rekkefølgen de er lagt til. Klikk på et felt over (eller på selve teksten i forhåndsvisningen når den er fylt ut) for å redigere innhold, font, størrelse, farge og justering.</p>
+            </div>
+          </details>
+
           {form.sections.map((s) => {
             const draft = itemDraft[s.id] || { name: "", description: "", price: "" };
             return (
@@ -19495,7 +19741,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick}>
               <div
                 ref={previewRef}
-                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag() + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true }) }}
+                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true }) }}
               />
             </div>
           </div>
