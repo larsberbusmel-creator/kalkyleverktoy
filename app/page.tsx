@@ -373,6 +373,7 @@ type DocumentBankEntry = {
   uploadedAt: string;
   uploadedBy: string;
   linkedProductIds?: string[];
+  source?: "upload" | "menu-editor";
 };
 
 // Menydesigner ("Menyer"-fanen): faste byggeklosser (seksjoner/retter), ikke
@@ -390,9 +391,21 @@ type MenuDesign = {
   logoUrl?: string; // storage path i "documents"-bucketen (samme mønster som Site.logoUrl), løses til signert URL ved visning
   fontScale?: number; // enkel skaleringsfaktor for ALL tekst (0.85/1/1.2 - se MENU_PAGE), default 1
   logoSize?: "liten" | "normal" | "stor"; // størrelse på menylogoen, default "normal" - se LOGO_SIZE
+  textStyles?: Record<string, MenuTextStyle>;
+  dividerStyles?: Record<string, MenuDividerStyle>;
   createdAt: string;
   updatedAt: string;
 };
+
+// Fase 1 av Menyer-editoren: individuelle stil-overstyringer per tekstelement/skillelinje,
+// samlet i to ordbøker på selve menyen i stedet for felt på hvert MenuItem/MenuSection (enklere
+// datamodell, og lar oss legge til flere stylbare elementer senere uten å endre disse typene).
+// Nøkler i textStyles: "title" | "footer" | "section:{sectionId}:title" |
+// "item:{itemId}:name" | "item:{itemId}:description" | "item:{itemId}:price".
+// Nøkler i dividerStyles: sectionId direkte (én skillelinje under hver seksjonstittel).
+// Mangler et element en overstyring, brukes tema/tekststørrelse/standardfarge som i dag.
+type MenuTextStyle = { fontKey?: string; sizePx?: number; color?: string };
+type MenuDividerStyle = { enabled: boolean; color?: string };
 
 // Fast standardmal per sted for "+ Ny meny" (fottekst/logo/tema/spalter/
 // tekststørrelse) - se MenuDesignTab sin "Standardinnstillinger"-seksjon.
@@ -743,6 +756,7 @@ type AppData = {
   sites: Site[];
   menuDesigns: MenuDesign[];
   menuDefaults?: MenuDefaults;
+  menuRecentColors?: string[];
 };
 
 // Nøkler som lever i den delte "main"-raden i Supabase (app_data), på tvers av alle steder.
@@ -1084,6 +1098,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   sites: [],
   menuDesigns: [],
   menuDefaults: undefined,
+  menuRecentColors: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1241,6 +1256,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     sites: (raw as any).sites || [],
     menuDesigns: (raw as any).menuDesigns || [],
     menuDefaults: (raw as any).menuDefaults || undefined,
+    menuRecentColors: (raw as any).menuRecentColors || [],
   };
 }
 
@@ -18111,6 +18127,31 @@ function RoomLibraryTab({ data, updateData, setTab }: { data: AppData; updateDat
 // vanlig CSS-padding på selve "side"-elementet i BEGGE sammenhenger (IKKE
 // browser-@page-margin i tillegg), slik at det bare finnes ETT sted margen
 // faktisk defineres.
+// Bevisst kun systemfonter (utenom de to merkevare-fontene) - ingen nye fontfiler eller
+// eksterne web-fonter, fordi html2canvas (PDF-eksporten) er sårbar for at eksterne fonter ikke er
+// ferdig lastet ved rastrering, og systemfonter garanterer identisk resultat i forhåndsvisning/
+// print/PDF med en gang. En ekte tilleggs-webfont senere legges til på samme måte som Harbour/
+// Standard CT (egen fontfil i public/fonts + @font-face) - egen, liten runde, ikke gjettet på her.
+const MENU_FONTS: { key: string; label: string; family: string }[] = [
+  { key: "harbour", label: "Harbour (merkevare)", family: "'Harbour', Georgia, serif" },
+  { key: "standardct", label: "Standard CT (merkevare)", family: "'Standard CT', Arial, sans-serif" },
+  { key: "system-sans", label: "Nøytral sans", family: "Arial, Helvetica, sans-serif" },
+  { key: "system-serif", label: "Klassisk serif", family: "Georgia, 'Times New Roman', serif" },
+  { key: "system-serif-elegant", label: "Elegant serif", family: "'Palatino Linotype', 'Book Antiqua', Palatino, serif" },
+  { key: "system-rounded", label: "Rund/vennlig sans", family: "Verdana, Geneva, sans-serif" },
+  { key: "system-condensed", label: "Smal sans", family: "'Trebuchet MS', 'Segoe UI', sans-serif" },
+  { key: "system-mono", label: "Skrivemaskin", family: "'Courier New', Courier, monospace" },
+];
+function menuFontFamily(key?: string): string | undefined {
+  return MENU_FONTS.find((f) => f.key === key)?.family;
+}
+
+const MENU_COLOR_PALETTE: string[] = [
+  "#111827", "#1f2937", "#374151", "#6b7280", "#9ca3af", "#d1d5db", "#f3f4f6", "#ffffff",
+  "#7c2d12", "#b45309", "#a16207", "#4d7c0f", "#15803d", "#0f766e", "#0369a1", "#1d4ed8",
+  "#5b21b6", "#a21caf", "#be123c", "#dc2626",
+];
+
 const LOGO_SIZE: Record<"liten" | "normal" | "stor", { maxHeightMm: number; maxWidthPct: number }> = {
   liten:  { maxHeightMm: 16, maxWidthPct: 40 },
   normal: { maxHeightMm: 26, maxWidthPct: 60 },
@@ -18136,7 +18177,8 @@ body{margin:0}
 .menu-main{flex:1;display:flex;flex-direction:column;min-height:0}
 .menu-columns{column-gap:28px}
 .menu-section{break-inside:avoid}
-.menu-section h2{font-weight:700;margin:0 0 8px;border-bottom:2px solid #111827;padding-bottom:4px}
+.menu-section h2{font-weight:700;margin:0 0 8px}
+.menu-divider{margin:0 0 8px}
 .menu-item{break-inside:avoid}
 .menu-item-row{display:flex;justify-content:space-between;gap:8px}
 .menu-item-price{white-space:nowrap;font-weight:700}
@@ -18159,6 +18201,22 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
   const logoSize = LOGO_SIZE[design.logoSize || "normal"];
   const px = (base: number) => `${Math.round(base * scale * 10) / 10}px`;
 
+  // Fase 1: klikkbare elementer i forhåndsvisningen (data-menu-key) + individuelle
+  // stil-overstyringer (font/størrelse/farge) fra design.textStyles/dividerStyles - se
+  // MenuDesignTab sin egenskaps-boks. Mangler et element en overstyring, faller det tilbake
+  // til tema-/skaleringslogikken over, uendret.
+  const textStyles = design.textStyles || {};
+  function overriddenStyle(key: string, fallbackFamily: string, fallbackPx: number, fallbackColor?: string): string {
+    const o = textStyles[key];
+    const family = o?.fontKey ? (menuFontFamily(o.fontKey) || fallbackFamily) : fallbackFamily;
+    const sizePx = o?.sizePx ? `${o.sizePx}px` : px(fallbackPx);
+    const color = o?.color || fallbackColor;
+    return `font-family:${family};font-size:${sizePx}${color ? `;color:${color}` : ""}`;
+  }
+  function dividerStyleFor(sectionId: string): MenuDividerStyle {
+    return (design.dividerStyles || {})[sectionId] || { enabled: true, color: "#111827" };
+  }
+
   // Få elementer totalt => mer luft mellom seksjoner/retter i stedet for
   // tomrom nederst på siden. Ved 1 spalte distribueres seksjonene jevnt
   // over hele høyden med flex (justify-content) - fungerer ikke sammen med
@@ -18170,17 +18228,24 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
   const sectionGap = sparse ? 40 : 20;
   const itemGap = sparse ? 16 : 8;
 
-  const sectionsHtml = design.sections.map((s) => `
+  const sectionsHtml = design.sections.map((s) => {
+    const divider = dividerStyleFor(s.id);
+    return `
     <div class="menu-section" style="margin-bottom:${sectionGap}px">
-      <h2 style="font-family:${headingFont};font-size:${px(MENU_PAGE.fontPx.section)}">${escapeHtml(s.title)}</h2>
+      <h2 data-menu-key="section:${s.id}:title" style="${overriddenStyle(`section:${s.id}:title`, headingFont, MENU_PAGE.fontPx.section)}">${escapeHtml(s.title)}</h2>
+      ${divider.enabled ? `<div class="menu-divider" data-menu-key="section:${s.id}:divider" style="height:2px;background:${divider.color || "#111827"}"></div>` : ""}
       ${s.items.map((it) => `
         <div class="menu-item" style="margin-bottom:${itemGap}px">
-          <div class="menu-item-row"><b>${escapeHtml(it.name)}</b>${it.price ? `<span class="menu-item-price">${escapeHtml(it.price)}</span>` : ""}</div>
-          ${it.description ? `<p class="menu-item-desc" style="font-size:${px(MENU_PAGE.fontPx.desc)}">${escapeHtml(it.description)}</p>` : ""}
+          <div class="menu-item-row">
+            <b data-menu-key="item:${it.id}:name" style="${overriddenStyle(`item:${it.id}:name`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(it.name)}</b>
+            ${it.price ? `<span class="menu-item-price" data-menu-key="item:${it.id}:price" style="${overriddenStyle(`item:${it.id}:price`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(it.price)}</span>` : ""}
+          </div>
+          ${it.description ? `<p class="menu-item-desc" data-menu-key="item:${it.id}:description" style="${overriddenStyle(`item:${it.id}:description`, bodyFont, MENU_PAGE.fontPx.desc, "#475569")}">${escapeHtml(it.description)}</p>` : ""}
         </div>
       `).join("")}
     </div>
-  `).join("");
+  `;
+  }).join("");
 
   const columnsBlock = design.columns === 1
     ? `<div class="menu-columns" style="flex:1;display:flex;flex-direction:column;justify-content:${sparse ? "space-evenly" : "flex-start"}">${sectionsHtml}</div>`
@@ -18190,10 +18255,10 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
     <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
       ${resolvedLogoUrl ? `<img class="menu-logo" style="max-height:${logoSize.maxHeightMm}mm;max-width:${logoSize.maxWidthPct}%" src="${resolvedLogoUrl}" alt="Logo" />` : ""}
       <div class="menu-main">
-        <div class="menu-title" style="font-family:${headingFont};font-size:${px(MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
+        <div class="menu-title" data-menu-key="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
         ${columnsBlock}
       </div>
-      ${design.footerText ? `<div class="menu-footer" style="font-size:${px(MENU_PAGE.fontPx.footer)}">${escapeHtml(design.footerText)}</div>` : ""}
+      ${design.footerText ? `<div class="menu-footer" data-menu-key="footer" style="${overriddenStyle("footer", bodyFont, MENU_PAGE.fontPx.footer, "#64748b")}">${escapeHtml(design.footerText)}</div>` : ""}
     </div>
   `;
 }
@@ -18211,6 +18276,146 @@ async function printMenuDesign(design: MenuDesign) {
   }
   w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag()}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl)}</body></html>`);
   w.document.close(); w.focus();
+}
+
+// Delt fargevelger for Menyer-editoren: fast palett (MENU_COLOR_PALETTE) + en native
+// fargevelger for egendefinert farge + en "nylig brukt"-rad. "Nylig brukt" kommer inn som prop
+// (leses fra data.menuRecentColors, delt for HELE stedet i databasen) og onPick kalles med den
+// valgte fargen - selve lagringen av "nylig brukt" gjøres av kalleren, ikke her.
+function MenuColorPicker({ value, recentColors, onPick, readOnly }: {
+  value?: string;
+  recentColors: string[];
+  onPick: (color: string) => void;
+  readOnly: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {MENU_COLOR_PALETTE.map((c) => (
+          <button
+            key={c}
+            type="button"
+            disabled={readOnly}
+            onClick={() => onPick(c)}
+            title={c}
+            style={{
+              width: 22, height: 22, borderRadius: 5, background: c, cursor: readOnly ? "default" : "pointer",
+              border: value === c ? "2px solid #2563eb" : "1px solid rgba(0,0,0,.15)",
+              padding: 0,
+            }}
+          />
+        ))}
+        <label style={{ width: 22, height: 22, borderRadius: 5, border: "1px dashed #94a3b8", display: "flex", alignItems: "center", justifyContent: "center", cursor: readOnly ? "default" : "pointer", fontSize: 12 }}>
+          +
+          <input type="color" disabled={readOnly} value={value || "#111827"} onChange={(e) => onPick(e.target.value)} style={{ width: 0, height: 0, opacity: 0, position: "absolute" }} />
+        </label>
+      </div>
+      {recentColors.length > 0 && (
+        <div>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Nylig brukt</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {recentColors.slice(0, 10).map((c) => (
+              <button key={c} type="button" disabled={readOnly} onClick={() => onPick(c)} title={c} style={{ width: 18, height: 18, borderRadius: 4, background: c, border: "1px solid rgba(0,0,0,.15)", padding: 0, cursor: readOnly ? "default" : "pointer" }} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Egen dropdown (samme mønster som .search-picker/.search-dropdown/.search-result) i stedet for
+// en vanlig <select>, siden <option> ikke pålitelig støtter egen font-family per valg i alle
+// nettlesere.
+function MenuFontPicker({ value, onPick, readOnly }: { value?: string; onPick: (key: string) => void; readOnly: boolean }) {
+  const [open, setOpen] = useState(false);
+  const current = MENU_FONTS.find((f) => f.key === value) || MENU_FONTS[0];
+  return (
+    <div className="search-picker" style={{ position: "relative", maxWidth: 260 }}>
+      <button type="button" className="btn" disabled={readOnly} onClick={() => setOpen((o) => !o)} style={{ width: "100%", textAlign: "left", fontFamily: current.family }}>
+        {current.label}
+      </button>
+      {open && (
+        <div className="search-dropdown inline">
+          {MENU_FONTS.map((f) => (
+            <button key={f.key} type="button" className="search-result" style={{ fontFamily: f.family, fontSize: 15 }} onClick={() => { onPick(f.key); setOpen(false); }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Egenskaps-boks: dukker opp når et element er valgt i forhåndsvisningen (klikk → data-menu-key)
+// og lar brukeren redigere selve teksten (kontrollert felt, IKKE in-place i previewen - se
+// designbeslutningen i toppen av denne runden) samt font/størrelse/farge, eller skillelinjens
+// synlighet/farge.
+function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly }: {
+  form: MenuDesign;
+  selectedKey: string;
+  onClose: () => void;
+  menuKeyText: (key: string) => string;
+  setMenuKeyText: (key: string, value: string) => void;
+  isDividerKey: (key: string) => boolean;
+  dividerSectionId: (key: string) => string;
+  getTextStyleOverride: (key: string) => MenuTextStyle;
+  patchTextStyle: (key: string, patch: Partial<MenuTextStyle>) => void;
+  getDividerOverride: (sectionId: string) => MenuDividerStyle;
+  patchDivider: (sectionId: string, patch: Partial<MenuDividerStyle>) => void;
+  pickColor: (key: string, color: string) => void;
+  recentColors: string[];
+  readOnly: boolean;
+}) {
+  if (isDividerKey(selectedKey)) {
+    const sectionId = dividerSectionId(selectedKey);
+    const divider = getDividerOverride(sectionId);
+    return (
+      <div className="soft-box" style={{ position: "sticky", top: 12 }}>
+        <div className="between">
+          <b>Skillelinje</b>
+          <button className="link" onClick={onClose}>Lukk</button>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <input type="checkbox" disabled={readOnly} checked={divider.enabled} onChange={(e) => patchDivider(sectionId, { enabled: e.target.checked })} />
+          Vis skillelinje
+        </label>
+        {divider.enabled && (
+          <div style={{ marginTop: 8 }}>
+            <MenuColorPicker value={divider.color} recentColors={recentColors} readOnly={readOnly} onPick={(c) => pickColor(selectedKey, c)} />
+          </div>
+        )}
+      </div>
+    );
+  }
+  const style = getTextStyleOverride(selectedKey);
+  const isMultiline = selectedKey.endsWith(":description");
+  return (
+    <div className="soft-box" style={{ position: "sticky", top: 12 }}>
+      <div className="between">
+        <b>Rediger tekst</b>
+        <button className="link" onClick={onClose}>Lukk</button>
+      </div>
+      {isMultiline ? (
+        <textarea disabled={readOnly} value={menuKeyText(selectedKey)} onChange={(e) => setMenuKeyText(selectedKey, e.target.value)} rows={3} style={{ width: "100%", marginTop: 8 }} />
+      ) : (
+        <input disabled={readOnly} value={menuKeyText(selectedKey)} onChange={(e) => setMenuKeyText(selectedKey, e.target.value)} style={{ width: "100%", marginTop: 8 }} />
+      )}
+      <div style={{ marginTop: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Font</div>
+        <MenuFontPicker value={style.fontKey} readOnly={readOnly} onPick={(fontKey) => patchTextStyle(selectedKey, { fontKey })} />
+      </div>
+      <label style={{ display: "block", marginTop: 12 }}>
+        Tekststørrelse (px)
+        <input type="number" min={8} max={72} disabled={readOnly} value={style.sizePx || ""} placeholder="Standard" onChange={(e) => patchTextStyle(selectedKey, { sizePx: e.target.value ? Number(e.target.value) : undefined })} style={{ width: 100 }} />
+      </label>
+      <div style={{ marginTop: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Farge</div>
+        <MenuColorPicker value={style.color} recentColors={recentColors} readOnly={readOnly} onPick={(c) => pickColor(selectedKey, c)} />
+      </div>
+    </div>
+  );
 }
 
 function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }: {
@@ -18235,6 +18440,9 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   const [defaultsForm, setDefaultsForm] = useState<MenuDefaults>(data.menuDefaults || {});
   const [defaultsLogoUploading, setDefaultsLogoUploading] = useState(false);
   const [resolvedDefaultsLogoUrl, setResolvedDefaultsLogoUrl] = useState<string | undefined>(undefined);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [showDocBank, setShowDocBank] = useState(false);
+  const [docBankFilter, setDocBankFilter] = useState<"all" | "upload" | "menu-editor">("all");
 
   // Løser lagringsbanen til en midlertidig signert URL for BÅDE den lille
   // "nåværende logo"-forhåndsvisningen i redigeringspanelet OG selve
@@ -18331,6 +18539,22 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     setForm(blankDesign());
     setEditingId("new");
   }
+  function startNewBlank() {
+    const now = new Date().toISOString();
+    setForm({
+      id: `menu-${Date.now()}`,
+      name: "Ny meny",
+      columns: 1,
+      theme: "standard",
+      sections: [],
+      footerText: "",
+      fontScale: 1,
+      logoSize: "normal",
+      createdAt: now,
+      updatedAt: now,
+    });
+    setEditingId("new");
+  }
   function startEdit(d: MenuDesign) {
     setForm({ ...d, sections: d.sections.map((s) => ({ ...s, items: s.items.map((it) => ({ ...it })) })) });
     setEditingId(d.id);
@@ -18425,6 +18649,104 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       ...form,
       sections: form.sections.map((s) => s.id !== sectionId ? s : { ...s, items: s.items.map((it) => it.id === itemId ? { ...it, [field]: value } : it) }),
     });
+  }
+
+  // moveSection/moveItem beholdes urørt (kan trengs senere) men kalles ikke lenger fra UI-et -
+  // seksjoner/retter omorganiseres nå med dra-og-slipp (native HTML5 DnD, ingen ny avhengighet).
+  function reorderSections(fromId: string, toId: string) {
+    if (!form || fromId === toId) return;
+    const list = [...form.sections];
+    const fromIdx = list.findIndex((s) => s.id === fromId);
+    const toIdx = list.findIndex((s) => s.id === toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, moved);
+    setForm({ ...form, sections: list });
+  }
+  function reorderItems(sectionId: string, fromId: string, toId: string) {
+    if (!form || fromId === toId) return;
+    setForm({
+      ...form,
+      sections: form.sections.map((s) => {
+        if (s.id !== sectionId) return s;
+        const list = [...s.items];
+        const fromIdx = list.findIndex((it) => it.id === fromId);
+        const toIdx = list.findIndex((it) => it.id === toId);
+        if (fromIdx < 0 || toIdx < 0) return s;
+        const [moved] = list.splice(fromIdx, 1);
+        list.splice(toIdx, 0, moved);
+        return { ...s, items: list };
+      }),
+    });
+  }
+
+  // Tolker en data-menu-key fra forhåndsvisningen og henter/setter riktig underliggende tekst.
+  function menuKeyText(key: string): string {
+    if (!form) return "";
+    if (key === "title") return form.name;
+    if (key === "footer") return form.footerText || "";
+    const secMatch = key.match(/^section:(.+):title$/);
+    if (secMatch) return form.sections.find((s) => s.id === secMatch[1])?.title || "";
+    const itemMatch = key.match(/^item:(.+):(name|description|price)$/);
+    if (itemMatch) {
+      const [, itemId, field] = itemMatch;
+      for (const s of form.sections) {
+        const it = s.items.find((x) => x.id === itemId);
+        if (it) return (it as any)[field] || "";
+      }
+    }
+    return "";
+  }
+  function setMenuKeyText(key: string, value: string) {
+    if (!form) return;
+    if (key === "title") { setForm({ ...form, name: value }); return; }
+    if (key === "footer") { setForm({ ...form, footerText: value }); return; }
+    const secMatch = key.match(/^section:(.+):title$/);
+    if (secMatch) { updateSectionTitle(secMatch[1], value); return; }
+    const itemMatch = key.match(/^item:(.+):(name|description|price)$/);
+    if (itemMatch) {
+      const [, itemId, field] = itemMatch;
+      const section = form.sections.find((s) => s.items.some((it) => it.id === itemId));
+      if (section) updateItemField(section.id, itemId, field as "name" | "description" | "price", value);
+    }
+  }
+  function isDividerKey(key: string): boolean {
+    return /^section:(.+):divider$/.test(key);
+  }
+  function dividerSectionId(key: string): string {
+    return key.replace(/^section:/, "").replace(/:divider$/, "");
+  }
+  function getTextStyleOverride(key: string): MenuTextStyle {
+    return (form?.textStyles || {})[key] || {};
+  }
+  function patchTextStyle(key: string, patch: Partial<MenuTextStyle>) {
+    if (!form) return;
+    setForm({ ...form, textStyles: { ...(form.textStyles || {}), [key]: { ...(form.textStyles || {})[key], ...patch } } });
+  }
+  function getDividerOverride(sectionId: string): MenuDividerStyle {
+    return (form?.dividerStyles || {})[sectionId] || { enabled: true, color: "#111827" };
+  }
+  function patchDivider(sectionId: string, patch: Partial<MenuDividerStyle>) {
+    if (!form) return;
+    setForm({ ...form, dividerStyles: { ...(form.dividerStyles || {}), [sectionId]: { ...getDividerOverride(sectionId), ...patch } } });
+  }
+  // Fargen legges først i "nylig brukt for stedet" (delt i databasen, maks 20, nyeste først,
+  // ingen duplikater) - egen updateData-kall, uavhengig av selve menyen som redigeres.
+  function pickColor(key: string, color: string) {
+    if (isDividerKey(key)) {
+      patchDivider(dividerSectionId(key), { color });
+    } else {
+      patchTextStyle(key, { color });
+    }
+    const next = [color, ...(data.menuRecentColors || []).filter((c) => c !== color)].slice(0, 20);
+    updateData({ menuRecentColors: next });
+  }
+  // Delegert klikk-håndtering: ett onClick på hele forhåndsvisnings-wrapperen finner nærmeste
+  // data-menu-key oppover DOM-treet, i stedet for én klikk-lytter per element.
+  function handlePreviewClick(e: React.MouseEvent<HTMLDivElement>) {
+    const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
+    if (!target) { setSelectedKey(null); return; }
+    setSelectedKey(target.getAttribute("data-menu-key"));
   }
 
   // Importer produkt: ALLE linjene på produktet (uansett itemType - product/recipe/material)
@@ -18550,6 +18872,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
         uploadedAt: new Date().toISOString(),
         uploadedBy: userEmail,
         linkedProductIds: [],
+        source: "menu-editor",
       };
       updateData({ documentBank: [entry, ...(data.documentBank || [])] });
       alert("Menyen er lagret til Dokumentbanken som PDF.");
@@ -18560,6 +18883,17 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     }
   }
 
+  async function openDocumentBankEntry(entry: DocumentBankEntry) {
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(entry.storagePath, 60 * 5);
+    if (error || !data?.signedUrl) { alert(`Kunne ikke åpne dokumentet: ${error?.message || "ukjent feil"}`); return; }
+    window.open(data.signedUrl, "_blank");
+  }
+  const filteredDocBank = (data.documentBank || []).filter((d) => {
+    if (docBankFilter === "all") return true;
+    if (docBankFilter === "upload") return (d.source || "upload") === "upload";
+    return d.source === "menu-editor";
+  });
+
   if (!form) {
     return (
       <>
@@ -18568,7 +18902,8 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             <h2>Menyer</h2>
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn" disabled={readOnly} onClick={startEditDefaults}>Standardinnstillinger</button>
-              <button className="btn active" disabled={readOnly} onClick={startNew}>+ Ny meny</button>
+              <button className="btn" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
+              <button className="btn active" disabled={readOnly} onClick={startNew}>+ Fra standardmal</button>
             </div>
           </div>
           <p className="muted">Bygg trykte/printede menyer av faste byggeklosser (seksjoner og retter), med mulighet til å importere retter direkte fra produktene dine.</p>
@@ -18682,6 +19017,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
         <h2>{editingId === "new" ? "Ny meny" : "Rediger meny"}</h2>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={cancelEdit}>← Tilbake til listen</button>
+          <button className="btn" onClick={() => setShowDocBank((v) => !v)}>Dokumentbank</button>
           <button className="btn" onClick={() => printMenuDesign(form)}>Print</button>
           <button className="btn" disabled={readOnly || pdfSaving} onClick={saveDesignToDocumentBank}>{pdfSaving ? "Lagrer..." : "Lagre til Dokumentbanken"}</button>
           <button className="btn active" disabled={readOnly} onClick={saveDesign}>Lagre meny</button>
@@ -18763,24 +19099,38 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             <button className="btn" disabled={readOnly} onClick={addSection}>+ Legg til seksjon</button>
           </div>
 
-          {form.sections.map((s, sIdx) => {
+          {form.sections.map((s) => {
             const draft = itemDraft[s.id] || { name: "", description: "", price: "" };
             return (
-              <div key={s.id} className="soft-box" style={{ marginTop: 12, maxWidth: "100%", boxSizing: "border-box", overflowX: "hidden" }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input value={s.title} disabled={readOnly} onChange={(e) => updateSectionTitle(s.id, e.target.value)} style={{ flex: 1, fontWeight: 700 }} />
-                  <button className="link" disabled={readOnly || sIdx === 0} onClick={() => moveSection(s.id, -1)}>↑</button>
-                  <button className="link" disabled={readOnly || sIdx === form.sections.length - 1} onClick={() => moveSection(s.id, 1)}>↓</button>
+              <div
+                key={s.id}
+                className="soft-box"
+                style={{ marginTop: 12, maxWidth: "100%", boxSizing: "border-box", overflowX: "hidden" }}
+                draggable={!readOnly}
+                onDragStart={(e) => e.dataTransfer.setData("text/menu-section-id", s.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-section-id"); if (fromId) reorderSections(fromId, s.id); }}
+              >
+                <div style={{ display: "flex", gap: 8, alignItems: "center", cursor: readOnly ? "default" : "grab" }}>
+                  <span title="Dra for å flytte seksjon" style={{ color: "#94a3b8" }}>⠿</span>
+                  <button type="button" className="link" style={{ flex: 1, textAlign: "left", fontWeight: 700 }} onClick={() => setSelectedKey(`section:${s.id}:title`)}>{s.title || "(uten tittel)"}</button>
+                  <button type="button" className="link" onClick={() => setSelectedKey(`section:${s.id}:divider`)}>Skillelinje</button>
                   <button className="link danger" disabled={readOnly} onClick={() => removeSection(s.id)}>Slett seksjon</button>
                 </div>
 
-                {s.items.map((it, iIdx) => (
-                  <div key={it.id} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                    <input value={it.name} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "name", e.target.value)} placeholder="Navn på rett" style={{ flex: "1 1 110px", minWidth: 100 }} />
-                    <input value={it.description || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "description", e.target.value)} placeholder="Beskrivelse (valgfritt)" style={{ flex: "2 1 130px", minWidth: 110 }} />
-                    <input value={it.price || ""} disabled={readOnly} onChange={(e) => updateItemField(s.id, it.id, "price", e.target.value)} placeholder="Pris (valgfritt)" style={{ flex: "1 1 70px", minWidth: 70 }} />
-                    <button className="link" disabled={readOnly || iIdx === 0} onClick={() => moveItem(s.id, it.id, -1)}>↑</button>
-                    <button className="link" disabled={readOnly || iIdx === s.items.length - 1} onClick={() => moveItem(s.id, it.id, 1)}>↓</button>
+                {s.items.map((it) => (
+                  <div
+                    key={it.id}
+                    style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}
+                    draggable={!readOnly}
+                    onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData("text/menu-item-id", it.id); }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.stopPropagation(); e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-item-id"); if (fromId) reorderItems(s.id, fromId, it.id); }}
+                  >
+                    <span title="Dra for å flytte rett" style={{ color: "#94a3b8", cursor: readOnly ? "default" : "grab" }}>⠿</span>
+                    <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`item:${it.id}:name`)}>
+                      {it.name || "(uten navn)"}{it.price ? ` · ${it.price}` : ""}
+                    </button>
                     <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
                   </div>
                 ))}
@@ -18798,21 +19148,60 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
 
         <div className="card">
           <h3>Forhåndsvisning</h3>
-          <p className="muted" style={{ fontSize: 12 }}>Viser faktiske A4-proporsjoner og marger - identisk med print/PDF.</p>
-          {/* Skygge/kant er en ren skjerm-affordanse (papir-følelse à la Google
-              Docs) og legges på en INNPAKNINGS-div UTENFOR previewRef, slik at
-              PDF-eksporten (som rasteriserer previewRef direkte) blir en ren
-              gjengivelse av selve siden, uten en falsk skygge brent inn i PDF-en. */}
+          <p className="muted" style={{ fontSize: 12 }}>Viser faktiske A4-proporsjoner og marger - identisk med print/PDF. Klikk på en tekst for å redigere den.</p>
           <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
-            <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)" }}>
+            <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick}>
               <div
                 ref={previewRef}
                 dangerouslySetInnerHTML={{ __html: menuDesignStyleTag() + buildMenuHtml(form, resolvedLogoUrl) }}
               />
             </div>
           </div>
+          {selectedKey && (
+            <div style={{ marginTop: 16 }}>
+              <MenuPropertyPanel
+                form={form}
+                selectedKey={selectedKey}
+                onClose={() => setSelectedKey(null)}
+                menuKeyText={menuKeyText}
+                setMenuKeyText={setMenuKeyText}
+                isDividerKey={isDividerKey}
+                dividerSectionId={dividerSectionId}
+                getTextStyleOverride={getTextStyleOverride}
+                patchTextStyle={patchTextStyle}
+                getDividerOverride={getDividerOverride}
+                patchDivider={patchDivider}
+                pickColor={pickColor}
+                recentColors={data.menuRecentColors || []}
+                readOnly={readOnly}
+              />
+            </div>
+          )}
         </div>
       </div>
+
+      {showDocBank && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="between">
+            <h3>Dokumentbank</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className={`btn${docBankFilter === "all" ? " active" : ""}`} onClick={() => setDocBankFilter("all")}>Alle</button>
+              <button className={`btn${docBankFilter === "upload" ? " active" : ""}`} onClick={() => setDocBankFilter("upload")}>Opplastet</button>
+              <button className={`btn${docBankFilter === "menu-editor" ? " active" : ""}`} onClick={() => setDocBankFilter("menu-editor")}>Fra menyeditoren</button>
+            </div>
+          </div>
+          {filteredDocBank.length === 0 ? (
+            <p className="muted">Ingen dokumenter i denne visningen.</p>
+          ) : (
+            filteredDocBank.map((d) => (
+              <div key={d.id} className="editable-row">
+                <span><b>{d.name}</b> · {d.fileName}</span>
+                <button className="link" onClick={() => openDocumentBankEntry(d)}>Åpne</button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </section>
   );
 }
