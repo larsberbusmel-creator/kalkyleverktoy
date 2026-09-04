@@ -376,11 +376,35 @@ type DocumentBankEntry = {
   source?: "upload" | "menu-editor";
 };
 
+// Delt type for avkrysningsvalgene ved ordre-utskrift (Ordre-fanen og Produksjon/Catering-panelet
+// bruker samme printFlags-state og samme printOrder/buildOrderPrintHtml). linkedDocuments styrer om
+// dokumenter koblet til produktene i ordren (DocumentBankEntry.linkedProductIds) også skal åpnes/
+// printes sammen med selve ordreutskriften - se orderLinkedDocuments() og printOrder() lenger ned.
+type OrderPrintFlags = { recipes: boolean; shopping: boolean; packingList: boolean; linkedDocuments: boolean };
+
+// Finner alle Dokumentbank-oppføringer som er koblet til minst ett av produktene i en ordre. Ren
+// funksjon (tar documentBank som parameter i stedet for å lukke over data) slik at den kan kalles
+// både fra printOrder (som eier "data" direkte) og fra Ordre-/Produksjons-komponentene (som har
+// "data" som prop) uten noen ny prop-threading.
+function orderLinkedDocuments(order: Order, documentBank: DocumentBankEntry[]): DocumentBankEntry[] {
+  const productIds = new Set(order.orderLines.map((l) => l.productId));
+  const seen = new Set<string>();
+  const result: DocumentBankEntry[] = [];
+  (documentBank || []).forEach((doc) => {
+    if (seen.has(doc.id)) return;
+    if ((doc.linkedProductIds || []).some((pid) => productIds.has(pid))) {
+      seen.add(doc.id);
+      result.push(doc);
+    }
+  });
+  return result;
+}
+
 // Menydesigner ("Menyer"-fanen): faste byggeklosser (seksjoner/retter), ikke
 // et fritt lerret - se MenuDesignTab. PER STED (ikke i SHARED_TOP_LEVEL_KEYS),
 // siden ulike restauranter/steder skal kunne ha helt forskjellige menyer.
-type MenuItem = { id: string; name: string; description?: string; price?: string };
-type MenuSection = { id: string; title: string; items: MenuItem[] };
+type MenuItem = { id: string; name: string; description?: string; price?: string; sourceRef?: { type: "product" | "material" | "recipe"; id: string } };
+type MenuSection = { id: string; title: string; items: MenuItem[]; allergensText?: string };
 type MenuDesign = {
   id: string;
   name: string;
@@ -1587,7 +1611,7 @@ export default function Page() {
   // Produksjon nå også trenger å kunne printe enkeltordre med samme
   // oppskrifter/varebestilling-avkrysninger og samme printOrder()-funksjon -
   // én delt implementasjon i stedet for to parallelle.
-  const [printFlags, setPrintFlags] = useState({ recipes: false, shopping: false, packingList: false });
+  const [printFlags, setPrintFlags] = useState({ recipes: false, shopping: false, packingList: false, linkedDocuments: false });
 
   function registerSave(fn: (() => boolean) | null) {
     saveActiveTabRef.current = fn;
@@ -2524,7 +2548,7 @@ function productCost(product: Product, visited: string[] = []) {
     return `<style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111827;padding:10px;line-height:1.15;font-size:10px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #e5e7eb;border-radius:8px;padding:6px;margin-bottom:6px}.box p{margin:2px 0}h2{font-size:12px;margin:6px 0 3px}table{width:100%;border-collapse:collapse;margin-top:4px}th,td{border-bottom:1px solid #e5e7eb;padding:2px 5px;text-align:left;font-size:10px}th{background:#f3f4f6}.right{text-align:right}.total{font-size:14px;font-weight:900}.prod-product{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:8px 0;break-inside:avoid}.prod-product h2{margin:0 0 6px;font-size:13px}.recipe-block{margin:8px 0;background:#f8fafc;border:1px solid #94a3b8;border-radius:6px;padding:6px;break-inside:avoid}.recipe-block h3{margin:0 0 4px;font-size:11px}.page-break{page-break-before:always}@media print{button{display:none}body{padding:6px}}</style>`;
   }
 
-  function buildOrderPrintHtml(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
+  function buildOrderPrintHtml(order: Order, flags: OrderPrintFlags = { recipes: false, shopping: false, packingList: false, linkedDocuments: false }) {
     const rows = order.orderLines.map((line) => {
       const product = data.products.find((p) => p.id === line.productId);
       const lineTotal = (product?.customerPrice || 0) * line.quantity;
@@ -2593,10 +2617,26 @@ function productCost(product: Product, visited: string[] = []) {
     return `<div class="top"><div style="display:flex;align-items:center;gap:14px"><img src="/logo.png" style="height:50px;width:auto;object-fit:contain" /><div><b style="font-size:14px">KJØKKENORDRE</b><br><small style="color:#64748b">${today()}</small></div></div><div style="text-align:right"><b style="font-size:18px">${formatDateNo(order.date)} ${order.time || ""}</b><br><p style="margin:0">${order.type}${order.orderNumber ? ` · Ordrenr: ${escapeHtml(order.orderNumber)}` : ""}</p></div></div><div class="grid"><div class="box"><h2>Kunde</h2><p><b>${escapeHtml(customerName || "Ikke angitt")}</b></p><p>Kontakt: ${escapeHtml(order.customer || "-")}</p><p>Telefon: ${escapeHtml(order.phone || "-")}</p><p>Betaling: ${escapeHtml(order.paymentInfo || "-")}</p><p>Levering: ${escapeHtml(order.deliveryAddress || "-")}</p>${order.reference ? `<p>Referanse: ${escapeHtml(order.reference)}</p>` : ""}${order.note ? `<p><b>Notat:</b><br>${escapeHtml(order.note).replace(/\n/g, "<br>")}</p>` : ""}</div><div class="box"><h2>Hensyn</h2><p><b>Dietter:</b> ${escapeHtml(diets)}</p><p><b>Allergier:</b> ${escapeHtml(allergens)}</p></div></div>${allergenWarningHtml}<h2>Ordrelinjer</h2><table><thead><tr><th>Antall</th><th>Produkt/meny</th><th>Pris inkl. mva</th><th>Sum</th></tr></thead><tbody>${rows}</tbody></table>${prodSection}<div class="box"><p>Sum før rabatt: ${currency(subtotalInc)}</p><p>Rabatt ${order.discountPercent || 0}%: -${currency(discountAmount)}</p><p class="total">Total inkl. mva: ${currency(totalInc)}</p><p>Total eks. mva: ${currency(totalEx)}</p></div>${packingListSection}`;
   }
 
-  function printOrder(order: Order, flags: { recipes: boolean; shopping: boolean; packingList: boolean } = { recipes: false, shopping: false, packingList: false }) {
+  function printOrder(order: Order, flags: OrderPrintFlags = { recipes: false, shopping: false, packingList: false, linkedDocuments: false }) {
     const w = window.open("", "_blank"); if (!w) return;
     w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>Ordre ${order.date}</title>${orderPrintStyleTag()}</head><body><button onclick="window.print()">Print</button>${buildOrderPrintHtml(order, flags)}</body></html>`);
     w.document.close(); w.focus();
+
+    // Åpner ALLE ekstra faner synkront FØR noen await (samme popup-blokkerings-sikre mønster som
+    // printMenuDesign allerede bruker) - unngår at nettleseren blokkerer faner som først åpnes
+    // etter en asynkron signert-URL-henting.
+    if (flags.linkedDocuments) {
+      const linkedDocs = orderLinkedDocuments(order, data.documentBank || []);
+      const docWindows = linkedDocs.map((doc) => ({ doc, win: window.open("", "_blank") }));
+      (async () => {
+        for (const { doc, win } of docWindows) {
+          if (!win) continue;
+          const { data: signed, error } = await supabase.storage.from("documents").createSignedUrl(doc.storagePath, 60 * 60);
+          if (error || !signed?.signedUrl) { win.close(); continue; }
+          win.location.href = signed.signedUrl;
+        }
+      })();
+    }
   }
 
   if (siteAccessError) return <main style={{ padding: 24, color: "#dc2626", fontWeight: 700 }}>{siteAccessError}</main>;
@@ -7243,14 +7283,14 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
   registerSave: (fn: (() => boolean) | null) => void;
   // Løftet opp til Page()-nivå (se kommentar der) - delt med Catering-panelet i
   // Produksjon, slik at begge printer enkeltordre via samme printOrder().
-  printFlags: { recipes: boolean; shopping: boolean; packingList: boolean };
-  setPrintFlags: (f: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
+  printFlags: OrderPrintFlags;
+  setPrintFlags: (f: OrderPrintFlags) => void;
   selectedAllergens: (order: Order) => string[];
   orderSubtotalIncVat: (order: Order) => number;
   orderDiscountAmount: (order: Order) => number;
   orderTotalIncVat: (order: Order) => number;
   orderAllergenWarnings: (order: Order) => string[];
-  printOrder: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
+  printOrder: (order: Order, flags?: OrderPrintFlags) => void;
 }) {
   const emptyOrder = (): Order => ({
     id: "", orderNumber: "", type: "catering", customerType: "privat", customer: "",
@@ -8524,6 +8564,12 @@ function OrdersTab({ data, updateData, updateListRpc, productAllergens, recipeAl
                         Inkluder pakkeliste
                       </label>
                     )}
+                    {orderLinkedDocuments(o, data.documentBank || []).length > 0 && (
+                      <label className="check">
+                        <input type="checkbox" checked={printFlags.linkedDocuments} onChange={(e) => setPrintFlags({ ...printFlags, linkedDocuments: e.target.checked })} />
+                        Inkluder tilknyttet dokument(er)
+                      </label>
+                    )}
                   </div>
                 )}
                 {isSuperadmin && (
@@ -8628,10 +8674,10 @@ function ProductionTab({
   readOnly: boolean;
   // Delt med Ordre-fanen (løftet til Page()-nivå) - Catering-panelet printer
   // enkeltordre og datointervaller via SAMME printOrder()/buildOrderPrintHtml().
-  printFlags: { recipes: boolean; shopping: boolean; packingList: boolean };
-  setPrintFlags: (f: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
-  printOrder: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => void;
-  buildOrderPrintHtml: (order: Order, flags?: { recipes: boolean; shopping: boolean; packingList: boolean }) => string;
+  printFlags: OrderPrintFlags;
+  setPrintFlags: (f: OrderPrintFlags) => void;
+  printOrder: (order: Order, flags?: OrderPrintFlags) => void;
+  buildOrderPrintHtml: (order: Order, flags?: OrderPrintFlags) => string;
   orderPrintStyleTag: () => string;
 }) {
   const productionCategories: { id: ProductionCategory; name: string }[] = [
@@ -9825,7 +9871,7 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
   // frittstående pakkseddel/oppskrift-visning som aldri ble koblet til den
   // delte print-funksjonaliteten. Sideskift foran hver ordre unntatt den
   // aller første, slik at hver ordre alltid starter på egen side.
-  function printCateringDay(flags: { recipes: boolean; shopping: boolean; packingList: boolean }) {
+  function printCateringDay(flags: OrderPrintFlags) {
     if (!cateringOrders.length) { alert("Ingen cateringordre denne dagen."); return; }
     const ordersHtml = cateringOrders.map((o, i) => `${i === 0 ? "" : '<div class="page-break"></div>'}${buildOrderPrintHtml(o, flags)}`).join("");
     const w = window.open("", "_blank"); if (!w) return;
@@ -9837,7 +9883,7 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
   // ordrens eget type-felt), men på tvers av HELE datointervallet - lar
   // brukeren printe f.eks. en hel ukes cateringordre i ett samlet dokument
   // i stedet for én dag om gangen.
-  function printCateringRange(fromDate: string, toDate: string, flags: { recipes: boolean; shopping: boolean; packingList: boolean }) {
+  function printCateringRange(fromDate: string, toDate: string, flags: OrderPrintFlags) {
     const dates = listDates(fromDate, toDate);
     const rangeCateringOrders = data.orders
       .filter((o) => {
@@ -11437,6 +11483,12 @@ const body = `<div class="page"><div class="top"><div><h1>${escapeHtml(product.n
                             <label className="check">
                               <input type="checkbox" checked={printFlags.packingList} onChange={(e) => setPrintFlags({ ...printFlags, packingList: e.target.checked })} />
                               Inkluder pakkeliste
+                            </label>
+                          )}
+                          {orderLinkedDocuments(o, data.documentBank || []).length > 0 && (
+                            <label className="check">
+                              <input type="checkbox" checked={printFlags.linkedDocuments} onChange={(e) => setPrintFlags({ ...printFlags, linkedDocuments: e.target.checked })} />
+                              Inkluder tilknyttet dokument(er)
                             </label>
                           )}
                           <button className="btn" style={{ marginTop: 8 }} onClick={() => printOrder(o, printFlags)}>
@@ -18183,6 +18235,8 @@ body{margin:0}
 .menu-item-row{display:flex;justify-content:space-between;gap:8px}
 .menu-item-price{white-space:nowrap;font-weight:700}
 .menu-item-desc{margin:2px 0 0;color:#475569}
+.menu-section-allergens{margin:6px 0 0;font-size:11px}
+.pdf-export .menu-empty-placeholder{visibility:hidden}
 .menu-footer{text-align:center;margin-top:16px;color:#64748b}
 @media print{button{display:none}}
 </style>`;
@@ -18194,7 +18248,7 @@ body{margin:0}
 // kilde til sannhet i stedet for flere parallelle implementasjoner.
 // resolvedLogoUrl er den FERDIG SIGNERTE URL-en (ikke storage-path), siden
 // denne funksjonen bygger en ren HTML-streng uten tilgang til Supabase-klienten.
-function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
+function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean }): string {
   const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const scale = design.fontScale || 1;
@@ -18238,11 +18292,15 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string): string {
         <div class="menu-item" style="margin-bottom:${itemGap}px">
           <div class="menu-item-row">
             <b data-menu-key="item:${it.id}:name" style="${overriddenStyle(`item:${it.id}:name`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(it.name)}</b>
-            ${it.price ? `<span class="menu-item-price" data-menu-key="item:${it.id}:price" style="${overriddenStyle(`item:${it.id}:price`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(it.price)}</span>` : ""}
+            ${it.price
+              ? `<span class="menu-item-price" data-menu-key="item:${it.id}:price" style="${overriddenStyle(`item:${it.id}:price`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(it.price)}</span>`
+              : opts?.editorPreview
+                ? `<span class="menu-item-price menu-empty-placeholder" data-menu-key="item:${it.id}:price" style="${overriddenStyle(`item:${it.id}:price`, bodyFont, MENU_PAGE.fontPx.body)};color:#94a3b8;font-style:italic;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px">+ pris</span>`
+                : ""}
           </div>
-          ${it.description ? `<p class="menu-item-desc" data-menu-key="item:${it.id}:description" style="${overriddenStyle(`item:${it.id}:description`, bodyFont, MENU_PAGE.fontPx.desc, "#475569")}">${escapeHtml(it.description)}</p>` : ""}
         </div>
       `).join("")}
+      <p class="menu-section-allergens" data-menu-key="section:${s.id}:allergens" style="${overriddenStyle(`section:${s.id}:allergens`, bodyFont, MENU_PAGE.fontPx.desc, "#94a3b8")}">Allergener: ${escapeHtml(s.allergensText || "ingen registrert")}</p>
     </div>
   `;
   }).join("");
@@ -18372,7 +18430,7 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
     const sectionId = dividerSectionId(selectedKey);
     const divider = getDividerOverride(sectionId);
     return (
-      <div className="soft-box" style={{ position: "sticky", top: 12 }}>
+      <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
         <div className="between">
           <b>Skillelinje</b>
           <button className="link" onClick={onClose}>Lukk</button>
@@ -18390,9 +18448,9 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
     );
   }
   const style = getTextStyleOverride(selectedKey);
-  const isMultiline = selectedKey.endsWith(":description");
+  const isMultiline = selectedKey.endsWith(":description") || selectedKey.endsWith(":allergens");
   return (
-    <div className="soft-box" style={{ position: "sticky", top: 12 }}>
+    <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
       <div className="between">
         <b>Rediger tekst</b>
         <button className="link" onClick={onClose}>Lukk</button>
@@ -18433,6 +18491,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   const [importSearch, setImportSearch] = useState("");
   const [importTargetSectionId, setImportTargetSectionId] = useState<string>("");
   const [pdfSaving, setPdfSaving] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const [resolvedLogoUrl, setResolvedLogoUrl] = useState<string | undefined>(undefined);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -18687,6 +18746,8 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (key === "footer") return form.footerText || "";
     const secMatch = key.match(/^section:(.+):title$/);
     if (secMatch) return form.sections.find((s) => s.id === secMatch[1])?.title || "";
+    const secAllergenMatch = key.match(/^section:(.+):allergens$/);
+    if (secAllergenMatch) return form.sections.find((s) => s.id === secAllergenMatch[1])?.allergensText || "";
     const itemMatch = key.match(/^item:(.+):(name|description|price)$/);
     if (itemMatch) {
       const [, itemId, field] = itemMatch;
@@ -18703,6 +18764,12 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (key === "footer") { setForm({ ...form, footerText: value }); return; }
     const secMatch = key.match(/^section:(.+):title$/);
     if (secMatch) { updateSectionTitle(secMatch[1], value); return; }
+    const secAllergenMatch = key.match(/^section:(.+):allergens$/);
+    if (secAllergenMatch) {
+      const sectionId = secAllergenMatch[1];
+      setForm({ ...form, sections: form.sections.map((s) => s.id === sectionId ? { ...s, allergensText: value } : s) });
+      return;
+    }
     const itemMatch = key.match(/^item:(.+):(name|description|price)$/);
     if (itemMatch) {
       const [, itemId, field] = itemMatch;
@@ -18770,11 +18837,61 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     const sub = data.products.find((x) => x.id === l.itemId);
     return sub ? String(sub.customerPrice) : undefined;
   }
+  // Lokale kopier av recipeAllergens/productAllergens (de originale er definert i en annen
+  // komponent lenger opp i filen og derfor ikke kallbare herfra) - samme rekursive
+  // oppslagslogikk, brukt til å fylle den nye seksjons-allergenlinjen automatisk ved import.
+  function menuRecipeAllergens(recipe: Recipe, visited: string[] = []): string[] {
+    if (visited.includes(recipe.id)) return [];
+    return Array.from(new Set(recipe.lines.flatMap((line) => {
+      if (line.itemType === "recipe") {
+        const r = data.recipes.find((x) => x.id === line.itemId);
+        return r ? menuRecipeAllergens(r, [...visited, recipe.id]) : [];
+      }
+      return data.materials.find((m) => m.id === line.itemId)?.allergens || [];
+    })));
+  }
+  function menuProductAllergens(product: Product, visited: string[] = []): string[] {
+    if (visited.includes(product.id)) return [];
+    return Array.from(new Set(product.lines.flatMap((line) => {
+      if (line.itemType === "material") return data.materials.find((m) => m.id === line.itemId)?.allergens || [];
+      if (line.itemType === "recipe") {
+        const r = data.recipes.find((x) => x.id === line.itemId);
+        return r ? menuRecipeAllergens(r) : [];
+      }
+      const p = data.products.find((x) => x.id === line.itemId);
+      return p ? menuProductAllergens(p, [...visited, product.id]) : [];
+    })));
+  }
+  function resolveItemAllergens(item: MenuItem): string[] {
+    if (!item.sourceRef) return [];
+    if (item.sourceRef.type === "material") return data.materials.find((m) => m.id === item.sourceRef!.id)?.allergens || [];
+    if (item.sourceRef.type === "recipe") {
+      const r = data.recipes.find((x) => x.id === item.sourceRef!.id);
+      return r ? menuRecipeAllergens(r) : [];
+    }
+    const p = data.products.find((x) => x.id === item.sourceRef!.id);
+    return p ? menuProductAllergens(p) : [];
+  }
+  function computeSectionAllergens(items: MenuItem[]): string {
+    return Array.from(new Set(items.flatMap((it) => resolveItemAllergens(it)).map(normalizeAllergen).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, "no-NO"))
+      .join(", ");
+  }
+  // Manuell "hent på nytt"-knapp per seksjon (🔄 i UI-et) - regner ut allergensText på nytt fra
+  // CURRENT items sine sourceRef, i tilfelle brukeren har lagt til/fjernet retter i etterkant.
+  function regenerateSectionAllergens(sectionId: string) {
+    if (!form) return;
+    setForm({
+      ...form,
+      sections: form.sections.map((s) => s.id === sectionId ? { ...s, allergensText: computeSectionAllergens(s.items) } : s),
+    });
+  }
   function lineToMenuItem(l: ProductLine): MenuItem {
     return {
       id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: lineDisplayNameForImport(l),
       price: lineDisplayPriceForImport(l),
+      sourceRef: { type: l.itemType, id: l.itemId },
     };
   }
   function importProduct(product: Product, targetSectionId: string) {
@@ -18783,11 +18900,14 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (!product.lines.length) {
       // Ingen linjer i det hele tatt (bør ikke forekomme normalt) - fall tilbake til å
       // importere produktet selv som én rett, samme som tidligere oppførsel.
-      const fallbackItem: MenuItem = { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name, price: String(product.customerPrice) };
+      const fallbackItem: MenuItem = { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name, price: String(product.customerPrice), sourceRef: { type: "product", id: product.id } };
       if (targetSectionId === "__new__") {
-        setForm({ ...form, sections: [...form.sections, { id: `sec-${Date.now()}`, title: product.name, items: [fallbackItem] }] });
+        setForm({ ...form, sections: [...form.sections, { id: `sec-${Date.now()}`, title: product.name, items: [fallbackItem], allergensText: computeSectionAllergens([fallbackItem]) }] });
       } else {
-        setForm({ ...form, sections: form.sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, fallbackItem] } : s) });
+        setForm({
+          ...form,
+          sections: form.sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, fallbackItem], allergensText: computeSectionAllergens([...s.items, fallbackItem]) } : s),
+        });
       }
       setImportSearch("");
       return;
@@ -18808,10 +18928,12 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       let j = i;
       while (j < product.lines.length && product.lines[j].groupLabel === label) j++;
       const groupLines = product.lines.slice(i, j);
+      const groupItems = groupLines.map(lineToMenuItem);
       groupedSections.push({
         id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         title: label,
-        items: groupLines.map(lineToMenuItem),
+        items: groupItems,
+        allergensText: computeSectionAllergens(groupItems),
       });
       i = j;
     }
@@ -18821,9 +18943,9 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       let sections = [...prev.sections, ...groupedSections];
       if (ungroupedItems.length) {
         if (targetSectionId === "__new__") {
-          sections = [...sections, { id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: product.name, items: ungroupedItems }];
+          sections = [...sections, { id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: product.name, items: ungroupedItems, allergensText: computeSectionAllergens(ungroupedItems) }];
         } else {
-          sections = sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, ...ungroupedItems] } : s);
+          sections = sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, ...ungroupedItems], allergensText: computeSectionAllergens([...s.items, ...ungroupedItems]) } : s);
         }
       }
       return { ...prev, sections };
@@ -18842,6 +18964,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       const html2canvasMod = await import("html2canvas");
       const html2canvas = html2canvasMod.default;
       const { jsPDF } = await import("jspdf");
+      previewRef.current.classList.add("pdf-export");
       const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
@@ -18879,7 +19002,47 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     } catch (e: any) {
       alert(`Kunne ikke generere PDF: ${e?.message || e}`);
     } finally {
+      previewRef.current?.classList.remove("pdf-export");
       setPdfSaving(false);
+    }
+  }
+
+  // Direkte nedlasting til brukerens egen maskin (f.eks. for å sende på mail) - egen funksjon
+  // ved siden av saveDesignToDocumentBank (som fortsatt lagrer i Dokumentbanken via Supabase
+  // Storage). Duplisert canvas/PDF-oppbygging fremfor en delt hjelpefunksjon - samme, bevisst
+  // lavrisiko-mønster som lineDisplayNameForImport/lineDisplayPriceForImport allerede bruker i
+  // denne komponenten i stedet for å gjenbruke rot-komponentens tilsvarende logikk.
+  async function downloadMenuAsPdf() {
+    if (!form || !previewRef.current) return;
+    setPdfDownloading(true);
+    try {
+      const html2canvasMod = await import("html2canvas");
+      const html2canvas = html2canvasMod.default;
+      const { jsPDF } = await import("jspdf");
+      previewRef.current.classList.add("pdf-export");
+      const canvas = await html2canvas(previewRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+      const imgData = canvas.toDataURL("image/png");
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      pdf.save(`${form.name.trim() || "Meny"}.pdf`);
+    } catch (e: any) {
+      alert(`Kunne ikke generere PDF: ${e?.message || e}`);
+    } finally {
+      previewRef.current?.classList.remove("pdf-export");
+      setPdfDownloading(false);
     }
   }
 
@@ -19020,128 +19183,145 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
           <button className="btn" onClick={() => setShowDocBank((v) => !v)}>Dokumentbank</button>
           <button className="btn" onClick={() => printMenuDesign(form)}>Print</button>
           <button className="btn" disabled={readOnly || pdfSaving} onClick={saveDesignToDocumentBank}>{pdfSaving ? "Lagrer..." : "Lagre til Dokumentbanken"}</button>
+          <button className="btn" disabled={pdfDownloading} onClick={downloadMenuAsPdf}>{pdfDownloading ? "Genererer..." : "Last ned PDF"}</button>
           <button className="btn active" disabled={readOnly} onClick={saveDesign}>Lagre meny</button>
         </div>
       </div>
 
       <div className="grid two" style={{ marginTop: 16, alignItems: "start", gridTemplateColumns: "1.35fr 1fr", gap: 24 }}>
         <div className="card">
-          <div className="form-grid two">
-            <label>Navn på meny<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="F.eks. À la carte-meny" /></label>
-            <label>Antall spalter
-              <select value={form.columns} disabled={readOnly} onChange={(e) => setForm({ ...form, columns: Number(e.target.value) as 1 | 2 | 3 })}>
-                <option value={1}>1 spalte</option>
-                <option value={2}>2 spalter</option>
-                <option value={3}>3 spalter</option>
-              </select>
-            </label>
-            <label>Tema
-              <select value={form.theme} disabled={readOnly} onChange={(e) => setForm({ ...form, theme: e.target.value as "harbour" | "standard" })}>
-                <option value="harbour">Harbour (merkevare-fonter)</option>
-                <option value="standard">Nøytralt (systemfont)</option>
-              </select>
-            </label>
-            <label>Fottekst<input value={form.footerText || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, footerText: e.target.value })} /></label>
-            <label>Tekststørrelse
-              <select value={form.fontScale || 1} disabled={readOnly} onChange={(e) => setForm({ ...form, fontScale: Number(e.target.value) })}>
-                <option value={0.85}>Liten</option>
-                <option value={1}>Normal</option>
-                <option value={1.2}>Stor</option>
-              </select>
-            </label>
-            <label>Logostørrelse
-              <select value={form.logoSize || "normal"} disabled={readOnly} onChange={(e) => setForm({ ...form, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
-                <option value="liten">Liten</option>
-                <option value="normal">Normal</option>
-                <option value="stor">Stor</option>
-              </select>
-            </label>
-          </div>
+          <details open>
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Menyinfo</summary>
+            <div className="form-grid two" style={{ marginTop: 12 }}>
+              <label>Navn på meny<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="F.eks. À la carte-meny" /></label>
+              <label>Antall spalter
+                <select value={form.columns} disabled={readOnly} onChange={(e) => setForm({ ...form, columns: Number(e.target.value) as 1 | 2 | 3 })}>
+                  <option value={1}>1 spalte</option>
+                  <option value={2}>2 spalter</option>
+                  <option value={3}>3 spalter</option>
+                </select>
+              </label>
+              <label>Tema
+                <select value={form.theme} disabled={readOnly} onChange={(e) => setForm({ ...form, theme: e.target.value as "harbour" | "standard" })}>
+                  <option value="harbour">Harbour (merkevare-fonter)</option>
+                  <option value="standard">Nøytralt (systemfont)</option>
+                </select>
+              </label>
+              <label>Fottekst<input value={form.footerText || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, footerText: e.target.value })} /></label>
+              <label>Tekststørrelse
+                <select value={form.fontScale || 1} disabled={readOnly} onChange={(e) => setForm({ ...form, fontScale: Number(e.target.value) })}>
+                  <option value={0.85}>Liten</option>
+                  <option value={1}>Normal</option>
+                  <option value={1.2}>Stor</option>
+                </select>
+              </label>
+              <label>Logostørrelse
+                <select value={form.logoSize || "normal"} disabled={readOnly} onChange={(e) => setForm({ ...form, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
+                  <option value="liten">Liten</option>
+                  <option value="normal">Normal</option>
+                  <option value="stor">Stor</option>
+                </select>
+              </label>
+            </div>
+          </details>
 
-          <h3 style={{ marginTop: 16 }}>Logo</h3>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            {form.logoUrl && (
-              <SiteLogo path={form.logoUrl} fallbackSrc="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" alt="Meny-logo" style={{ height: 48, width: "auto", objectFit: "contain", border: "1px solid #e2e8f0", borderRadius: 8, padding: 4 }} />
+          <details style={{ marginTop: 12 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Logo</summary>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+              {form.logoUrl && (
+                <SiteLogo path={form.logoUrl} fallbackSrc="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" alt="Meny-logo" style={{ height: 48, width: "auto", objectFit: "contain", border: "1px solid #e2e8f0", borderRadius: 8, padding: 4 }} />
+              )}
+              <input type="file" accept="image/*" disabled={readOnly || logoUploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadMenuLogo(file); e.target.value = ""; }} />
+              {logoUploading && <span className="muted">Laster opp...</span>}
+              {form.logoUrl && <button className="link danger" disabled={readOnly} onClick={removeMenuLogo}>Fjern logo</button>}
+            </div>
+          </details>
+
+          <details style={{ marginTop: 12 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Importer produkter</summary>
+            <div className="search-picker" style={{ maxWidth: 420, marginTop: 12 }}>
+              <input value={importSearch} disabled={readOnly} onChange={(e) => setImportSearch(e.target.value)} placeholder="Søk produkt..." />
+              {importSearch && (
+                <div className="search-dropdown inline">
+                  {filteredImportProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+                  {filteredImportProducts.map((p) => (
+                    <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => importProduct(p, importTargetSectionId || "__new__")}>
+                      <b>{p.name}</b>
+                      <small>{p.productNumber}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {form.sections.length > 0 && (
+              <label style={{ marginTop: 8, display: "block", maxWidth: 420 }}>
+                Importer til
+                <select value={importTargetSectionId} disabled={readOnly} onChange={(e) => setImportTargetSectionId(e.target.value)}>
+                  <option value="__new__">Ny seksjon (fra produktnavn)</option>
+                  {form.sections.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+                </select>
+              </label>
             )}
-            <input type="file" accept="image/*" disabled={readOnly || logoUploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadMenuLogo(file); e.target.value = ""; }} />
-            {logoUploading && <span className="muted">Laster opp...</span>}
-            {form.logoUrl && <button className="link danger" disabled={readOnly} onClick={removeMenuLogo}>Fjern logo</button>}
-          </div>
+          </details>
 
-          <h3 style={{ marginTop: 16 }}>Importer produkt</h3>
-          <div className="search-picker" style={{ maxWidth: 420 }}>
-            <input value={importSearch} disabled={readOnly} onChange={(e) => setImportSearch(e.target.value)} placeholder="Søk produkt..." />
-            {importSearch && (
-              <div className="search-dropdown inline">
-                {filteredImportProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
-                {filteredImportProducts.map((p) => (
-                  <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => importProduct(p, importTargetSectionId || "__new__")}>
-                    <b>{p.name}</b>
-                    <small>{p.productNumber}</small>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          {form.sections.length > 0 && (
-            <label style={{ marginTop: 8, display: "block", maxWidth: 420 }}>
-              Importer til
-              <select value={importTargetSectionId} disabled={readOnly} onChange={(e) => setImportTargetSectionId(e.target.value)}>
-                <option value="__new__">Ny seksjon (fra produktnavn)</option>
-                {form.sections.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-              </select>
-            </label>
-          )}
-
-          <h3 style={{ marginTop: 16 }}>Seksjoner</h3>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={newSectionTitle} disabled={readOnly} onChange={(e) => setNewSectionTitle(e.target.value)} placeholder="Tittel på ny seksjon" style={{ flex: 1 }} />
-            <button className="btn" disabled={readOnly} onClick={addSection}>+ Legg til seksjon</button>
-          </div>
+          <details style={{ marginTop: 12 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Ny seksjon</summary>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <input value={newSectionTitle} disabled={readOnly} onChange={(e) => setNewSectionTitle(e.target.value)} placeholder="Tittel på ny seksjon" style={{ flex: 1 }} />
+              <button className="btn" disabled={readOnly} onClick={addSection}>+ Legg til seksjon</button>
+            </div>
+          </details>
 
           {form.sections.map((s) => {
             const draft = itemDraft[s.id] || { name: "", description: "", price: "" };
             return (
-              <div
+              <details
                 key={s.id}
                 className="soft-box"
                 style={{ marginTop: 12, maxWidth: "100%", boxSizing: "border-box", overflowX: "hidden" }}
-                draggable={!readOnly}
-                onDragStart={(e) => e.dataTransfer.setData("text/menu-section-id", s.id)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-section-id"); if (fromId) reorderSections(fromId, s.id); }}
               >
-                <div style={{ display: "flex", gap: 8, alignItems: "center", cursor: readOnly ? "default" : "grab" }}>
+                <summary
+                  style={{ display: "flex", gap: 8, alignItems: "center", cursor: readOnly ? "default" : "grab", listStyle: "none" }}
+                  draggable={!readOnly}
+                  onDragStart={(e) => e.dataTransfer.setData("text/menu-section-id", s.id)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-section-id"); if (fromId) reorderSections(fromId, s.id); }}
+                >
                   <span title="Dra for å flytte seksjon" style={{ color: "#94a3b8" }}>⠿</span>
-                  <button type="button" className="link" style={{ flex: 1, textAlign: "left", fontWeight: 700 }} onClick={() => setSelectedKey(`section:${s.id}:title`)}>{s.title || "(uten tittel)"}</button>
-                  <button type="button" className="link" onClick={() => setSelectedKey(`section:${s.id}:divider`)}>Skillelinje</button>
-                  <button className="link danger" disabled={readOnly} onClick={() => removeSection(s.id)}>Slett seksjon</button>
-                </div>
+                  <span style={{ flex: 1, fontWeight: 700 }}>{s.title || "(uten tittel)"}</span>
+                  <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:title`); }}>Tittel</button>
+                  <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:divider`); }}>Skillelinje</button>
+                  <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:allergens`); }}>Allergener</button>
+                  <button type="button" className="link" title="Hent allergener på nytt fra rettene i seksjonen" onClick={(e) => { e.stopPropagation(); regenerateSectionAllergens(s.id); }}>🔄</button>
+                  <button className="link danger" disabled={readOnly} onClick={(e) => { e.stopPropagation(); removeSection(s.id); }}>Slett seksjon</button>
+                </summary>
 
-                {s.items.map((it) => (
-                  <div
-                    key={it.id}
-                    style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}
-                    draggable={!readOnly}
-                    onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData("text/menu-item-id", it.id); }}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.stopPropagation(); e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-item-id"); if (fromId) reorderItems(s.id, fromId, it.id); }}
-                  >
-                    <span title="Dra for å flytte rett" style={{ color: "#94a3b8", cursor: readOnly ? "default" : "grab" }}>⠿</span>
-                    <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`item:${it.id}:name`)}>
-                      {it.name || "(uten navn)"}{it.price ? ` · ${it.price}` : ""}
-                    </button>
-                    <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
+                <div style={{ marginTop: 8 }}>
+                  {s.items.map((it) => (
+                    <div
+                      key={it.id}
+                      style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}
+                      draggable={!readOnly}
+                      onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData("text/menu-item-id", it.id); }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.stopPropagation(); e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-item-id"); if (fromId) reorderItems(s.id, fromId, it.id); }}
+                    >
+                      <span title="Dra for å flytte rett" style={{ color: "#94a3b8", cursor: readOnly ? "default" : "grab" }}>⠿</span>
+                      <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`item:${it.id}:name`)}>
+                        {it.name || "(uten navn)"}{it.price ? ` · ${it.price}` : ""}
+                      </button>
+                      <button type="button" className="link" onClick={() => setSelectedKey(`item:${it.id}:price`)}>Pris</button>
+                      <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
+                    </div>
+                  ))}
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <input value={draft.name} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, name: e.target.value } })} placeholder="+ Legg til rett" style={{ flex: "1 1 110px", minWidth: 100 }} />
+                    <input value={draft.price} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, price: e.target.value } })} placeholder="Pris (valgfritt)" style={{ flex: "1 1 70px", minWidth: 70 }} />
+                    <button className="btn" disabled={readOnly} onClick={() => addItem(s.id)}>+ Legg til rett</button>
                   </div>
-                ))}
-
-                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                  <input value={draft.name} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, name: e.target.value } })} placeholder="+ Legg til rett" style={{ flex: "1 1 110px", minWidth: 100 }} />
-                  <input value={draft.description} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, description: e.target.value } })} placeholder="Beskrivelse (valgfritt)" style={{ flex: "2 1 130px", minWidth: 110 }} />
-                  <input value={draft.price} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, price: e.target.value } })} placeholder="Pris (valgfritt)" style={{ flex: "1 1 70px", minWidth: 70 }} />
-                  <button className="btn" disabled={readOnly} onClick={() => addItem(s.id)}>+ Legg til rett</button>
                 </div>
-              </div>
+              </details>
             );
           })}
         </div>
@@ -19153,12 +19333,12 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick}>
               <div
                 ref={previewRef}
-                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag() + buildMenuHtml(form, resolvedLogoUrl) }}
+                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag() + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true }) }}
               />
             </div>
           </div>
           {selectedKey && (
-            <div style={{ marginTop: 16 }}>
+            <div style={{ position: "fixed", top: 84, right: 24, width: 320, maxWidth: "90vw", maxHeight: "80vh", overflowY: "auto", zIndex: 500 }}>
               <MenuPropertyPanel
                 form={form}
                 selectedKey={selectedKey}
