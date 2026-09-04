@@ -509,13 +509,16 @@ type ProductList = {
   createdAt: string;
 };
 
-type ProductionCategory = "smabakst" | "brod" | "spesialbrod" | "pasmuurt";
+type ProductionCategory = string;
 
-// Samme rekkefølge/navn som productionCategories-arrayet inne i
-// Produksjon-fanen (BakeriTab) - duplisert her fordi denne (modulnivå)
-// trengs av expandProductForProduction/productionTwoColumnHtml og
-// ProductsTab, som ikke har tilgang til det komponent-lokale arrayet.
-const PRODUCTION_CATEGORY_ORDER: { id: ProductionCategory; name: string }[] = [
+// Standard-startsett for produksjonskategorier (Berbusmel-brukeren starter
+// med disse). Kategoriene er nå redigerbare/utvidbare av brukeren via
+// data.productionCategories - denne konstanten er kun fallback/default og
+// startverdi for nye installasjoner. Dette gjelder KUN kategoriene
+// produksjonsgriden selv fordeler produkter på, ikke det generelle
+// produktkategori-systemet (productCategories) som brukes ved
+// oppbygging/redigering av produkter andre steder i appen.
+const defaultProductionCategories: { id: ProductionCategory; name: string }[] = [
   { id: "smabakst", name: "Småbakst" },
   { id: "brod", name: "Brød" },
   { id: "spesialbrod", name: "Spesialbrød" },
@@ -536,7 +539,7 @@ function guessProductionCategory(category: string): ProductionCategory | undefin
 
 type BakeryProductionTemplateLine = {
   id: string;
-  category: ProductionCategory;
+  category?: ProductionCategory;
   productId: string;
   sortOrder: number;
 };
@@ -753,6 +756,7 @@ type AppData = {
   productCategories: string[];
   materialCategories: string[];
   recipeCategories: string[];
+  productionCategories: { id: string; name: string }[];
   packingListTemplates: PackingListTemplate[];
   inventoryCounts?: Record<string, InventoryMonthData>;
   calendarNotes: CalendarNote[];
@@ -1100,6 +1104,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   productCategories: defaultProductCategories,
   materialCategories: defaultMaterialCategories,
   recipeCategories: defaultRecipeCategories,
+  productionCategories: defaultProductionCategories,
   inventoryCounts: {},
   calendarNotes: [],
 
@@ -1195,6 +1200,7 @@ function migrateData(raw: Partial<AppData>): AppData {
   if (c === "Frysevare") return "Bakeri, egenprodusert";
   return c;
 }).filter((c: string, i: number, arr: string[]) => arr.indexOf(c) === i),
+    productionCategories: (raw as any).productionCategories || defaultProductionCategories,
     inventoryCounts: raw.inventoryCounts || {},
     bakeryProductionTemplateLines:
     
@@ -2596,7 +2602,7 @@ function productCost(product: Product, visited: string[] = []) {
       const isBakeryOrder = order.type === "bakeri" || order.type === "egenprodusert";
       const prodRows = order.orderLines.map((line) => {
         const product = data.products.find((p) => p.id === line.productId); if (!product) return "";
-        const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, Number(line.quantity) || 0, [], line.menuSelections, undefined, isBakeryOrder));
+        const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, Number(line.quantity) || 0, [], line.menuSelections, undefined, isBakeryOrder), data.productionCategories || defaultProductionCategories);
         return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
       }).join("");
       const recipePages = !flags.recipes ? "" : order.orderLines.map((line) => {
@@ -6167,7 +6173,7 @@ th{background:#f3f4f6}
       onChange={(e) => setForm({ ...form, productionCategory: (e.target.value || undefined) as ProductionCategory | undefined })}
     >
       <option value="">Uspesifisert</option>
-      {PRODUCTION_CATEGORY_ORDER.map((c) => (
+      {(data.productionCategories || defaultProductionCategories).map((c) => (
         <option key={c.id} value={c.id}>{c.name}</option>
       ))}
     </select>
@@ -7110,7 +7116,7 @@ function expandProductForProduction(data: AppData, product: Product, multiplier:
   });
 }
 
-function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number; productionCategory?: ProductionCategory }[]) {
+function productionTwoColumnHtml(items: { name: string; amount: number; unit: string; courseName?: string; perUnit?: number; productionCategory?: ProductionCategory }[], categories: { id: string; name: string }[] = defaultProductionCategories) {
   type Row = (typeof items)[number];
   type Group = { key?: string; categoryHeader?: string; rows: Row[] };
 
@@ -7125,12 +7131,12 @@ function productionTwoColumnHtml(items: { name: string; amount: number; unit: st
     const key = r.productionCategory || "__ukategorisert";
     (buckets[key] ||= []).push(r);
   });
-  const orderedKeys = [...PRODUCTION_CATEGORY_ORDER.map((c) => c.id), "__ukategorisert"].filter((k) => (buckets[k] || []).length > 0);
+  const orderedKeys = [...categories.map((c) => c.id), "__ukategorisert"].filter((k) => (buckets[k] || []).length > 0);
   const showCategoryHeaders = orderedKeys.length > 1;
 
   const groups: Group[] = [];
   orderedKeys.forEach((key) => {
-    const label = key === "__ukategorisert" ? "Ukategorisert" : PRODUCTION_CATEGORY_ORDER.find((c) => c.id === key)!.name;
+    const label = key === "__ukategorisert" ? "Ukategorisert" : categories.find((c) => c.id === key)!.name;
     (buckets[key] || []).forEach((r, i) => {
       const last = groups[groups.length - 1];
       if (i > 0 && last && last.key === r.courseName) {
@@ -8696,12 +8702,10 @@ function ProductionTab({
   buildOrderPrintHtml: (order: Order, flags?: OrderPrintFlags) => string;
   orderPrintStyleTag: () => string;
 }) {
-  const productionCategories: { id: ProductionCategory; name: string }[] = [
-    { id: "smabakst", name: "Småbakst" },
-    { id: "brod", name: "Brød" },
-    { id: "spesialbrod", name: "Spesialbrød" },
-    { id: "pasmuurt", name: "Påsmurt" },
-  ];
+  const productionCategories: { id: ProductionCategory; name: string }[] =
+    data.productionCategories && data.productionCategories.length > 0
+      ? data.productionCategories
+      : defaultProductionCategories;
 
   const [activeDate, setActiveDate] = useState(today());
 
@@ -8719,7 +8723,10 @@ function ProductionTab({
   const [invoiceWarning, setInvoiceWarning] = useState("");
   const [newCustomer, setNewCustomer] = useState({ name: "", orgNumber: "", address: "", deliveryAddress: "", phone: "", email: "" });
   const [newTemplateProductId, setNewTemplateProductId] = useState("");
-  const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>("smabakst");
+  const [newTemplateCategory, setNewTemplateCategory] = useState<ProductionCategory>(productionCategories[0]?.id || "");
+  const [showProductionCategoryManager, setShowProductionCategoryManager] = useState(false);
+  const [newProductionCategoryName, setNewProductionCategoryName] = useState("");
+  const [draggedTemplateLineId, setDraggedTemplateLineId] = useState<string | null>(null);
   const [expandedCateringOrderId, setExpandedCateringOrderId] = useState<string | null>(null);
   const [cateringRangeFrom, setCateringRangeFrom] = useState(activeDate);
   const [cateringRangeTo, setCateringRangeTo] = useState(activeDate);
@@ -8843,11 +8850,17 @@ function ProductionTab({
 
   const templateLines = data.bakeryProductionTemplateLines || [];
   const visibleTemplateLines = templateLines
-    .filter((line) => categoryFilter === "alle" || line.category === categoryFilter)
+    .filter((line) => {
+      if (categoryFilter === "alle") return true;
+      if (categoryFilter === "__ukategorisert") return !line.category;
+      return line.category === categoryFilter;
+    })
     .sort((a, b) => {
-      const catA = productionCategories.findIndex((c) => c.id === a.category);
-      const catB = productionCategories.findIndex((c) => c.id === b.category);
-      return catA - catB || a.sortOrder - b.sortOrder;
+      const catA = a.category ? productionCategories.findIndex((c) => c.id === a.category) : -1;
+      const catB = b.category ? productionCategories.findIndex((c) => c.id === b.category) : -1;
+      const orderA = catA === -1 ? productionCategories.length : catA;
+      const orderB = catB === -1 ? productionCategories.length : catB;
+      return orderA - orderB || a.sortOrder - b.sortOrder;
     });
 
   function saveDay(nextDay: BakeryProductionDay) {
@@ -8953,6 +8966,60 @@ function ProductionTab({
 
   function removeTemplateLine(id: string) {
     updateData({ bakeryProductionTemplateLines: (data.bakeryProductionTemplateLines || []).filter((x) => x.id !== id) });
+  }
+
+  // Flytter en produktmal-linje til en (evt. ny) kategori, og/eller endrer
+  // rekkefølgen INNAD i kategorien - brukes av drag-and-drop både for å flytte
+  // mellom kategoriboksene og for å sortere om innad i en kategori.
+  // targetCategoryId = undefined betyr "Ukategorisert". beforeLineId, hvis
+  // satt, er id-en til linjen den slippes FORAN; hvis ikke satt legges den
+  // bakerst i kategorien (f.eks. sluppet direkte på selve kategoriboksen).
+  function moveTemplateLine(lineId: string, targetCategoryId: string | undefined, beforeLineId?: string) {
+    const all = data.bakeryProductionTemplateLines || [];
+    const moving = all.find((l) => l.id === lineId);
+    if (!moving) return;
+    const rest = all.filter((l) => l.id !== lineId);
+    const siblings = rest.filter((l) => (l.category || undefined) === (targetCategoryId || undefined));
+    const others = rest.filter((l) => (l.category || undefined) !== (targetCategoryId || undefined));
+    const movedLine = { ...moving, category: targetCategoryId };
+    const insertAt = beforeLineId ? siblings.findIndex((l) => l.id === beforeLineId) : -1;
+    const nextSiblings = [...siblings];
+    if (insertAt === -1) {
+      nextSiblings.push(movedLine);
+    } else {
+      nextSiblings.splice(insertAt, 0, movedLine);
+    }
+    const renumbered = nextSiblings.map((l, i) => ({ ...l, sortOrder: i + 1 }));
+    updateData({ bakeryProductionTemplateLines: [...others, ...renumbered] });
+  }
+
+  function saveProductionCategories(next: { id: string; name: string }[]) {
+    updateData({ productionCategories: next });
+  }
+
+  function addProductionCategory() {
+    if (!newProductionCategoryName.trim()) return;
+    const id = `pc-${Date.now()}`;
+    saveProductionCategories([...productionCategories, { id, name: newProductionCategoryName.trim() }]);
+    setNewProductionCategoryName("");
+  }
+
+  function renameProductionCategory(id: string, name: string) {
+    saveProductionCategories(productionCategories.map((c) => (c.id === id ? { ...c, name } : c)));
+  }
+
+  function deleteProductionCategory(id: string) {
+    const affected = (data.bakeryProductionTemplateLines || []).filter((l) => l.category === id).length;
+    const cat = productionCategories.find((c) => c.id === id);
+    if (affected > 0 && !confirm(`Slette "${cat?.name || ""}"? ${affected} produkt(er) i denne kategorien flyttes til "Ukategorisert".`)) return;
+    if (affected > 0) {
+      updateData({
+        productionCategories: productionCategories.filter((c) => c.id !== id),
+        bakeryProductionTemplateLines: (data.bakeryProductionTemplateLines || []).map((l) => (l.category === id ? { ...l, category: undefined } : l)),
+      });
+    } else {
+      saveProductionCategories(productionCategories.filter((c) => c.id !== id));
+    }
   }
 
   function generateUniquePin(): string {
@@ -9690,10 +9757,10 @@ function printProductionDay() {
       const key = row.line.category || "__ukategorisert";
       (rowsByCategory[key] ||= []).push(row);
     });
-    const orderedCatKeys = [...PRODUCTION_CATEGORY_ORDER.map((c) => c.id), "__ukategorisert"].filter((k) => (rowsByCategory[k] || []).length > 0);
+    const orderedCatKeys = [...productionCategories.map((c) => c.id), "__ukategorisert"].filter((k) => (rowsByCategory[k] || []).length > 0);
     const showSummaryCategoryHeaders = orderedCatKeys.length > 1;
     const summaryRows = orderedCatKeys.map((key) => {
-      const label = key === "__ukategorisert" ? "Ukategorisert" : PRODUCTION_CATEGORY_ORDER.find((c) => c.id === key)!.name;
+      const label = key === "__ukategorisert" ? "Ukategorisert" : productionCategories.find((c) => c.id === key)!.name;
       const headerRow = showSummaryCategoryHeaders
         ? `<tr><td colspan="3" style="background:#e2e8f0;font-weight:900;padding:6px 8px;text-transform:uppercase">${escapeHtml(label)}</td></tr>`
         : "";
@@ -10185,6 +10252,7 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
         {productionCategories.map((cat) => (
           <button key={cat.id} className={categoryFilter === cat.id ? "btn active" : "btn"} onClick={() => setCategoryFilter(cat.id)}>{cat.name}</button>
         ))}
+        <button className={categoryFilter === "__ukategorisert" ? "btn active" : "btn"} onClick={() => setCategoryFilter("__ukategorisert")}>Ukategorisert</button>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
@@ -10297,19 +10365,20 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
                 </tr>
               </thead>
               <tbody>
-                {filteredVisibleLines.map((line) => {
+                {filteredVisibleLines.map((line, i) => {
                   const product = data.products.find((p) => p.id === line.productId);
                   if (!product) return null;
                   const qtyRow = localQuantities[product.id] || {};
                   const total = totalForProduct(product.id, { ...activeDay, quantities: localQuantities });
+                  const rowBg = i % 2 === 0 ? "#ffffff" : "#f8fafc";
                   return (
-                    <tr key={line.id}>
-                      <td className="pg-col-product" style={{ position: "sticky", zIndex: 1, backgroundColor: "white" }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
-                      <td className="pg-col-category" style={{ position: "sticky", zIndex: 1, backgroundColor: "white" }}>{productionCategories.find((c) => c.id === line.category)?.name}<br /><small className="pg-col-category-sub" style={{ color: "#64748b" }}>{product.category}</small></td>
-                      <td className="pg-col-sum" style={{ position: "sticky", zIndex: 1, backgroundColor: "white" }}><b>{total}</b></td>
-                      <td className="pg-col-orders" style={{ position: "sticky", zIndex: 1, backgroundColor: "white", color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
+                    <tr key={line.id} style={{ backgroundColor: rowBg }}>
+                      <td className="pg-col-product" style={{ position: "sticky", zIndex: 1, backgroundColor: rowBg }}><b>{product.name}</b><br /><small style={{ color: "#64748b" }}>{product.productNumber || "-"}</small></td>
+                      <td className="pg-col-category" style={{ position: "sticky", zIndex: 1, backgroundColor: rowBg }}>{productionCategories.find((c) => c.id === line.category)?.name || "Ukategorisert"}<br /><small className="pg-col-category-sub" style={{ color: "#64748b" }}>{product.category}</small></td>
+                      <td className="pg-col-sum" style={{ position: "sticky", zIndex: 1, backgroundColor: rowBg }}><b>{total}</b></td>
+                      <td className="pg-col-orders" style={{ position: "sticky", zIndex: 1, backgroundColor: rowBg, color: "#64748b" }}>{ordersQuantityForProduct(product.id, activeDate) || "-"}</td>
                       {columns.map((col) => (
-                        <td key={col.id} className="pg-qty-cell">
+                        <td key={col.id} className="pg-qty-cell" style={{ backgroundColor: rowBg }}>
                           <input type="number" value={qtyRow[col.id] || ""} disabled={readOnly} onChange={(e) => setCell(product.id, col.id, Number(e.target.value) || 0)} style={{ minWidth: 70, textAlign: "center" }} />
                         </td>
                       ))}
@@ -10496,6 +10565,40 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
           {panel === "template" && (
             <div className="card">
               <h3>Produktmal for produksjonsgrid</h3>
+
+              <div className="section-toggle" onClick={() => setShowProductionCategoryManager(!showProductionCategoryManager)}>
+                <h3>Kategorier for produksjonsgrid</h3>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="section-toggle-count">{productionCategories.length}</span>
+                  {showProductionCategoryManager ? "▲" : "▼"}
+                </span>
+              </div>
+              {showProductionCategoryManager && (
+                <div className="soft-box">
+                  <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                    Disse kategoriene brukes kun til å fordele produkter i produksjonsgriden, og
+                    påvirker ikke kategoriene produkter bygges/redigeres med andre steder i appen.
+                    Sletter du en kategori som har produkter i seg, flyttes de til "Ukategorisert".
+                  </p>
+                  <div>
+                    {productionCategories.map((cat) => (
+                      <div key={cat.id} className="editable-row">
+                        <input
+                          defaultValue={cat.name}
+                          disabled={readOnly}
+                          onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== cat.name) renameProductionCategory(cat.id, e.target.value.trim()); }}
+                        />
+                        <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => deleteProductionCategory(cat.id)}>Slett</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="form-grid three">
+                    <input value={newProductionCategoryName} disabled={readOnly} onChange={(e) => setNewProductionCategoryName(e.target.value)} placeholder="Ny kategori" />
+                    <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addProductionCategory}>Legg til</button>
+                  </div>
+                </div>
+              )}
+
               <div className="form-grid three">
                 <select value={newTemplateCategory} disabled={readOnly} onChange={(e) => setNewTemplateCategory(e.target.value as ProductionCategory)}>
                   {productionCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
@@ -10520,20 +10623,48 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
                 </div>
                 <button className="btn active" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={addTemplateLine}>Legg til i mal</button>
               </div>
+              <p className="muted" style={{ fontSize: 12 }}>Dra en produktrad for å flytte den til en annen kategori, eller for å endre rekkefølgen innad i kategorien.</p>
               <div className="grid two">
-                {productionCategories.map((cat) => (
-                  <div key={cat.id} className="soft-box">
+                {[...productionCategories, { id: "__ukategorisert", name: "Ukategorisert" }].map((cat) => (
+                  <div
+                    key={cat.id}
+                    className="soft-box"
+                    onDragOver={(e) => { if (!readOnly) e.preventDefault(); }}
+                    onDrop={(e) => {
+                      if (readOnly) return;
+                      e.preventDefault();
+                      const lineId = e.dataTransfer.getData("text/production-line");
+                      if (lineId) moveTemplateLine(lineId, cat.id === "__ukategorisert" ? undefined : cat.id);
+                    }}
+                  >
                     <h3>{cat.name}</h3>
-                    {templateLines.filter((line) => line.category === cat.id).map((line) => {
-                      const product = data.products.find((p) => p.id === line.productId);
-                      if (!product) return null;
-                      return (
-                        <div key={line.id} className="editable-row">
-                          <div><b>{product.name}</b><br /><small>{product.productNumber || "-"}</small></div>
-                          <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeTemplateLine(line.id)}>Fjern</button>
-                        </div>
-                      );
-                    })}
+                    {templateLines
+                      .filter((line) => (cat.id === "__ukategorisert" ? !line.category : line.category === cat.id))
+                      .map((line) => {
+                        const product = data.products.find((p) => p.id === line.productId);
+                        if (!product) return null;
+                        return (
+                          <div
+                            key={line.id}
+                            className="editable-row"
+                            draggable={!readOnly}
+                            onDragStart={(e) => { e.dataTransfer.setData("text/production-line", line.id); setDraggedTemplateLineId(line.id); }}
+                            onDragEnd={() => setDraggedTemplateLineId(null)}
+                            onDragOver={(e) => { if (!readOnly) e.preventDefault(); }}
+                            onDrop={(e) => {
+                              if (readOnly) return;
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const draggedId = e.dataTransfer.getData("text/production-line");
+                              if (draggedId && draggedId !== line.id) moveTemplateLine(draggedId, cat.id === "__ukategorisert" ? undefined : cat.id, line.id);
+                            }}
+                            style={draggedTemplateLineId === line.id ? { opacity: 0.5 } : undefined}
+                          >
+                            <div><b>{product.name}</b><br /><small>{product.productNumber || "-"}</small></div>
+                            <button className="link danger" disabled={readOnly} title={readOnly ? "Du har ikke redigeringstilgang" : undefined} onClick={() => removeTemplateLine(line.id)}>Fjern</button>
+                          </div>
+                        );
+                      })}
                   </div>
                 ))}
               </div>
@@ -17131,7 +17262,7 @@ function EventTab({ data, updateData, updateListRpc, productUnitCost, recommende
         const prodRows = syntheticOrder.orderLines.map((line) => {
           const product = data.products.find((p) => p.id === line.productId);
           if (!product) return "";
-          const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, line.quantity, [], line.menuSelections));
+          const twoColHtml = productionTwoColumnHtml(expandProductForProduction(data, product, line.quantity, [], line.menuSelections), data.productionCategories || defaultProductionCategories);
           return `<div style="margin-bottom:8px;break-inside:avoid"><div style="background:#111827;color:white;font-weight:700;padding:3px 6px;font-size:11px">${line.quantity} × ${escapeHtml(product.name)}</div>${twoColHtml}</div>`;
         }).join("");
         html += `<div class="print-block"><h2>Produksjonsgrunnlag (fra prognose)</h2>${prodRows}</div>`;
