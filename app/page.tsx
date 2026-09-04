@@ -403,8 +403,9 @@ function orderLinkedDocuments(order: Order, documentBank: DocumentBankEntry[]): 
 // Menydesigner ("Menyer"-fanen): faste byggeklosser (seksjoner/retter), ikke
 // et fritt lerret - se MenuDesignTab. PER STED (ikke i SHARED_TOP_LEVEL_KEYS),
 // siden ulike restauranter/steder skal kunne ha helt forskjellige menyer.
-type MenuItem = { id: string; name: string; description?: string; price?: string; sourceRef?: { type: "product" | "material" | "recipe"; id: string } };
-type MenuSection = { id: string; title: string; items: MenuItem[]; allergensText?: string };
+type MenuItem = { id: string; name: string; description?: string; price?: string; sourceRef?: { type: "product" | "material" | "recipe"; id: string }; allergensText?: string };
+type MenuSection = { id: string; title: string; items: MenuItem[] };
+type MenuCategory = { id: string; name: string };
 type MenuDesign = {
   id: string;
   name: string;
@@ -412,6 +413,8 @@ type MenuDesign = {
   theme: "harbour" | "standard"; // "harbour" = Harbour-Bold-overskrifter + Standard CT-brødtekst, "standard" = nøytral systemfont
   sections: MenuSection[];
   footerText?: string;
+  menuPrice?: string; // fritekstpris vist NEDERST på selve menysiden (ikke per rett) - kan hentes fra et produkts kundepris, se "Menypris"-boksen i editoren
+  categoryId?: string; // valgfri kobling til en MenuCategory (data.menuDesignCategories) - satt/opprettet i "Menyer"-listevisningen
   logoUrl?: string; // storage path i "documents"-bucketen (samme mønster som Site.logoUrl), løses til signert URL ved visning
   fontScale?: number; // enkel skaleringsfaktor for ALL tekst (0.85/1/1.2 - se MENU_PAGE), default 1
   logoSize?: "liten" | "normal" | "stor"; // størrelse på menylogoen, default "normal" - se LOGO_SIZE
@@ -781,6 +784,10 @@ type AppData = {
   menuDesigns: MenuDesign[];
   menuDefaults?: MenuDefaults;
   menuRecentColors?: string[];
+  // NB: kalt "menuDesignCategories" (ikke "menuCategories") for å unngå kollisjon med det
+  // allerede eksisterende, urelaterte "menuCategories: string[]"-feltet (Catering/Selskap/
+  // Bryllup-kategoriene brukt et helt annet sted i appen) - se defaultMenuCategories.
+  menuDesignCategories?: MenuCategory[];
 };
 
 // Nøkler som lever i den delte "main"-raden i Supabase (app_data), på tvers av alle steder.
@@ -1123,6 +1130,7 @@ rental: { customer: "", venue: "Kaféen", venuePrice: 11000, waiters: 1, waiterH
   menuDesigns: [],
   menuDefaults: undefined,
   menuRecentColors: [],
+  menuDesignCategories: [],
 };
 
 function migrateData(raw: Partial<AppData>): AppData {
@@ -1281,6 +1289,7 @@ rentalOffers: (raw as any).rentalOffers || [],
     menuDesigns: (raw as any).menuDesigns || [],
     menuDefaults: (raw as any).menuDefaults || undefined,
     menuRecentColors: (raw as any).menuRecentColors || [],
+    menuDesignCategories: (raw as any).menuDesignCategories || [],
   };
 }
 
@@ -18235,7 +18244,8 @@ body{margin:0}
 .menu-item-row{display:flex;justify-content:space-between;gap:8px}
 .menu-item-price{white-space:nowrap;font-weight:700}
 .menu-item-desc{margin:2px 0 0;color:#475569}
-.menu-section-allergens{margin:6px 0 0;font-size:11px}
+.menu-item-allergens{margin:2px 0 0;font-size:11px}
+.menu-price{text-align:center;font-weight:700;margin-top:12px}
 .pdf-export .menu-empty-placeholder{visibility:hidden}
 .menu-footer{text-align:center;margin-top:16px;color:#64748b}
 @media print{button{display:none}}
@@ -18298,9 +18308,13 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
                 ? `<span class="menu-item-price menu-empty-placeholder" data-menu-key="item:${it.id}:price" style="${overriddenStyle(`item:${it.id}:price`, bodyFont, MENU_PAGE.fontPx.body)};color:#94a3b8;font-style:italic;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px">+ pris</span>`
                 : ""}
           </div>
+          ${it.allergensText
+            ? `<p class="menu-item-allergens" data-menu-key="item:${it.id}:allergens" style="${overriddenStyle(`item:${it.id}:allergens`, bodyFont, MENU_PAGE.fontPx.desc, "#94a3b8")}">${escapeHtml(it.allergensText)}</p>`
+            : opts?.editorPreview
+              ? `<p class="menu-item-allergens menu-empty-placeholder" data-menu-key="item:${it.id}:allergens" style="${overriddenStyle(`item:${it.id}:allergens`, bodyFont, MENU_PAGE.fontPx.desc, "#94a3b8")};font-style:italic;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px;display:inline-block">+ allergener</p>`
+              : ""}
         </div>
       `).join("")}
-      <p class="menu-section-allergens" data-menu-key="section:${s.id}:allergens" style="${overriddenStyle(`section:${s.id}:allergens`, bodyFont, MENU_PAGE.fontPx.desc, "#94a3b8")}">Allergener: ${escapeHtml(s.allergensText || "ingen registrert")}</p>
     </div>
   `;
   }).join("");
@@ -18316,6 +18330,11 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
         <div class="menu-title" data-menu-key="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
         ${columnsBlock}
       </div>
+      ${design.menuPrice
+        ? `<div class="menu-price" data-menu-key="menuPrice" style="${overriddenStyle("menuPrice", bodyFont, MENU_PAGE.fontPx.title, "#111827")}">${escapeHtml(design.menuPrice)}</div>`
+        : opts?.editorPreview
+          ? `<div class="menu-price menu-empty-placeholder" data-menu-key="menuPrice" style="${overriddenStyle("menuPrice", bodyFont, MENU_PAGE.fontPx.title, "#111827")};font-style:italic;color:#94a3b8;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px;display:inline-block">+ menypris</div>`
+          : ""}
       ${design.footerText ? `<div class="menu-footer" data-menu-key="footer" style="${overriddenStyle("footer", bodyFont, MENU_PAGE.fontPx.footer, "#64748b")}">${escapeHtml(design.footerText)}</div>` : ""}
     </div>
   `;
@@ -18502,6 +18521,23 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [showDocBank, setShowDocBank] = useState(false);
   const [docBankFilter, setDocBankFilter] = useState<"all" | "upload" | "menu-editor">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [priceFetchOpenItemId, setPriceFetchOpenItemId] = useState<string | null>(null);
+  const [priceFetchSearch, setPriceFetchSearch] = useState("");
+  const [menuPriceFetchSearch, setMenuPriceFetchSearch] = useState("");
+
+  // Kategorier for menyer - enkel navngitt liste, delt per sted i databasen (samme mønster som
+  // menuRecentColors), opprettes direkte i "Menyer"-listevisningen. Kalt menuDesignCategories i
+  // AppData (ikke menuCategories) for å unngå kollisjon med det eksisterende, urelaterte
+  // menuCategories-feltet (Catering/Selskap/Bryllup-kategoriene brukt et helt annet sted i appen).
+  function addMenuCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    const category: MenuCategory = { id: `cat-${Date.now()}`, name };
+    updateData({ menuDesignCategories: [...(data.menuDesignCategories || []), category] });
+    setNewCategoryName("");
+  }
 
   // Løser lagringsbanen til en midlertidig signert URL for BÅDE den lille
   // "nåværende logo"-forhåndsvisningen i redigeringspanelet OG selve
@@ -18744,10 +18780,18 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (!form) return "";
     if (key === "title") return form.name;
     if (key === "footer") return form.footerText || "";
+    if (key === "menuPrice") return form.menuPrice || "";
     const secMatch = key.match(/^section:(.+):title$/);
     if (secMatch) return form.sections.find((s) => s.id === secMatch[1])?.title || "";
-    const secAllergenMatch = key.match(/^section:(.+):allergens$/);
-    if (secAllergenMatch) return form.sections.find((s) => s.id === secAllergenMatch[1])?.allergensText || "";
+    const itemAllergenMatch = key.match(/^item:(.+):allergens$/);
+    if (itemAllergenMatch) {
+      const itemId = itemAllergenMatch[1];
+      for (const s of form.sections) {
+        const it = s.items.find((x) => x.id === itemId);
+        if (it) return it.allergensText || "";
+      }
+      return "";
+    }
     const itemMatch = key.match(/^item:(.+):(name|description|price)$/);
     if (itemMatch) {
       const [, itemId, field] = itemMatch;
@@ -18762,12 +18806,19 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (!form) return;
     if (key === "title") { setForm({ ...form, name: value }); return; }
     if (key === "footer") { setForm({ ...form, footerText: value }); return; }
+    if (key === "menuPrice") { setForm({ ...form, menuPrice: value }); return; }
     const secMatch = key.match(/^section:(.+):title$/);
     if (secMatch) { updateSectionTitle(secMatch[1], value); return; }
-    const secAllergenMatch = key.match(/^section:(.+):allergens$/);
-    if (secAllergenMatch) {
-      const sectionId = secAllergenMatch[1];
-      setForm({ ...form, sections: form.sections.map((s) => s.id === sectionId ? { ...s, allergensText: value } : s) });
+    const itemAllergenMatch = key.match(/^item:(.+):allergens$/);
+    if (itemAllergenMatch) {
+      const itemId = itemAllergenMatch[1];
+      const section = form.sections.find((s) => s.items.some((it) => it.id === itemId));
+      if (section) {
+        setForm({
+          ...form,
+          sections: form.sections.map((s) => s.id !== section.id ? s : { ...s, items: s.items.map((it) => it.id === itemId ? { ...it, allergensText: value } : it) }),
+        });
+      }
       return;
     }
     const itemMatch = key.match(/^item:(.+):(name|description|price)$/);
@@ -18839,7 +18890,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
   }
   // Lokale kopier av recipeAllergens/productAllergens (de originale er definert i en annen
   // komponent lenger opp i filen og derfor ikke kallbare herfra) - samme rekursive
-  // oppslagslogikk, brukt til å fylle den nye seksjons-allergenlinjen automatisk ved import.
+  // oppslagslogikk, brukt til å fylle allergenlinjen automatisk PER RETT (ikke per seksjon).
   function menuRecipeAllergens(recipe: Recipe, visited: string[] = []): string[] {
     if (visited.includes(recipe.id)) return [];
     return Array.from(new Set(recipe.lines.flatMap((line) => {
@@ -18862,36 +18913,58 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       return p ? menuProductAllergens(p, [...visited, product.id]) : [];
     })));
   }
-  function resolveItemAllergens(item: MenuItem): string[] {
-    if (!item.sourceRef) return [];
-    if (item.sourceRef.type === "material") return data.materials.find((m) => m.id === item.sourceRef!.id)?.allergens || [];
-    if (item.sourceRef.type === "recipe") {
-      const r = data.recipes.find((x) => x.id === item.sourceRef!.id);
+  function resolveSourceRefAllergens(sourceRef?: { type: "product" | "material" | "recipe"; id: string }): string[] {
+    if (!sourceRef) return [];
+    if (sourceRef.type === "material") return data.materials.find((m) => m.id === sourceRef.id)?.allergens || [];
+    if (sourceRef.type === "recipe") {
+      const r = data.recipes.find((x) => x.id === sourceRef.id);
       return r ? menuRecipeAllergens(r) : [];
     }
-    const p = data.products.find((x) => x.id === item.sourceRef!.id);
+    const p = data.products.find((x) => x.id === sourceRef.id);
     return p ? menuProductAllergens(p) : [];
   }
-  function computeSectionAllergens(items: MenuItem[]): string {
-    return Array.from(new Set(items.flatMap((it) => resolveItemAllergens(it)).map(normalizeAllergen).filter(Boolean)))
+  function allergensTextFor(sourceRef?: { type: "product" | "material" | "recipe"; id: string }): string {
+    return Array.from(new Set(resolveSourceRefAllergens(sourceRef).map(normalizeAllergen).filter(Boolean)))
       .sort((a, b) => a.localeCompare(b, "no-NO"))
       .join(", ");
   }
-  // Manuell "hent på nytt"-knapp per seksjon (🔄 i UI-et) - regner ut allergensText på nytt fra
-  // CURRENT items sine sourceRef, i tilfelle brukeren har lagt til/fjernet retter i etterkant.
-  function regenerateSectionAllergens(sectionId: string) {
+  // Manuell "hent på nytt"-knapp per rett (🔄 i UI-et) - regner ut allergensText på nytt fra
+  // rettens NÅVÆRENDE sourceRef, i tilfelle den underliggende oppskriften/produktet er endret.
+  function regenerateItemAllergens(sectionId: string, itemId: string) {
     if (!form) return;
     setForm({
       ...form,
-      sections: form.sections.map((s) => s.id === sectionId ? { ...s, allergensText: computeSectionAllergens(s.items) } : s),
+      sections: form.sections.map((s) => s.id !== sectionId ? s : {
+        ...s,
+        items: s.items.map((it) => it.id === itemId ? { ...it, allergensText: allergensTextFor(it.sourceRef) } : it),
+      }),
     });
   }
+  // "Hent pris"-funksjon: kan brukes på ALLE retter (ikke bare importerte) - kobler samtidig
+  // retten til produktet (sourceRef), slik at allergener også kan hentes/oppdateres for den
+  // etterpå, selv om raden opprinnelig ble lagt til for hånd.
+  function setItemPriceFromProduct(sectionId: string, itemId: string, product: Product, basis: "customer" | "storkjokken") {
+    if (!form) return;
+    const price = basis === "customer" ? String(product.customerPrice ?? "") : String(product.storkjokkenPriceExVat ?? "");
+    const sourceRef: { type: "product"; id: string } = { type: "product", id: product.id };
+    setForm({
+      ...form,
+      sections: form.sections.map((s) => s.id !== sectionId ? s : {
+        ...s,
+        items: s.items.map((it) => it.id === itemId ? { ...it, price, sourceRef, allergensText: allergensTextFor(sourceRef) } : it),
+      }),
+    });
+    setPriceFetchOpenItemId(null);
+    setPriceFetchSearch("");
+  }
   function lineToMenuItem(l: ProductLine): MenuItem {
+    const sourceRef: { type: "product" | "material" | "recipe"; id: string } = { type: l.itemType, id: l.itemId };
     return {
       id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: lineDisplayNameForImport(l),
       price: lineDisplayPriceForImport(l),
-      sourceRef: { type: l.itemType, id: l.itemId },
+      sourceRef,
+      allergensText: allergensTextFor(sourceRef),
     };
   }
   function importProduct(product: Product, targetSectionId: string) {
@@ -18900,14 +18973,12 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
     if (!product.lines.length) {
       // Ingen linjer i det hele tatt (bør ikke forekomme normalt) - fall tilbake til å
       // importere produktet selv som én rett, samme som tidligere oppførsel.
-      const fallbackItem: MenuItem = { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name, price: String(product.customerPrice), sourceRef: { type: "product", id: product.id } };
+      const fallbackSourceRef: { type: "product"; id: string } = { type: "product", id: product.id };
+      const fallbackItem: MenuItem = { id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: product.name, price: String(product.customerPrice), sourceRef: fallbackSourceRef, allergensText: allergensTextFor(fallbackSourceRef) };
       if (targetSectionId === "__new__") {
-        setForm({ ...form, sections: [...form.sections, { id: `sec-${Date.now()}`, title: product.name, items: [fallbackItem], allergensText: computeSectionAllergens([fallbackItem]) }] });
+        setForm({ ...form, sections: [...form.sections, { id: `sec-${Date.now()}`, title: product.name, items: [fallbackItem] }] });
       } else {
-        setForm({
-          ...form,
-          sections: form.sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, fallbackItem], allergensText: computeSectionAllergens([...s.items, fallbackItem]) } : s),
-        });
+        setForm({ ...form, sections: form.sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, fallbackItem] } : s) });
       }
       setImportSearch("");
       return;
@@ -18928,12 +18999,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       let j = i;
       while (j < product.lines.length && product.lines[j].groupLabel === label) j++;
       const groupLines = product.lines.slice(i, j);
-      const groupItems = groupLines.map(lineToMenuItem);
       groupedSections.push({
         id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         title: label,
-        items: groupItems,
-        allergensText: computeSectionAllergens(groupItems),
+        items: groupLines.map(lineToMenuItem),
       });
       i = j;
     }
@@ -18943,9 +19012,9 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
       let sections = [...prev.sections, ...groupedSections];
       if (ungroupedItems.length) {
         if (targetSectionId === "__new__") {
-          sections = [...sections, { id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: product.name, items: ungroupedItems, allergensText: computeSectionAllergens(ungroupedItems) }];
+          sections = [...sections, { id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: product.name, items: ungroupedItems }];
         } else {
-          sections = sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, ...ungroupedItems], allergensText: computeSectionAllergens([...s.items, ...ungroupedItems]) } : s);
+          sections = sections.map((s) => s.id === targetSectionId ? { ...s, items: [...s.items, ...ungroupedItems] } : s);
         }
       }
       return { ...prev, sections };
@@ -19064,29 +19133,72 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
           <div className="between">
             <h2>Menyer</h2>
             <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn" onClick={() => setShowDocBank((v) => !v)}>Dokumentbank</button>
               <button className="btn" disabled={readOnly} onClick={startEditDefaults}>Standardinnstillinger</button>
               <button className="btn" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
               <button className="btn active" disabled={readOnly} onClick={startNew}>+ Fra standardmal</button>
             </div>
           </div>
           <p className="muted">Bygg trykte/printede menyer av faste byggeklosser (seksjoner og retter), med mulighet til å importere retter direkte fra produktene dine.</p>
+
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap", margin: "8px 0 16px" }}>
+            <label style={{ display: "block" }}>
+              Filtrer på kategori
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option value="all">Alle kategorier</option>
+                <option value="none">Uten kategori</option>
+                {(data.menuDesignCategories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={newCategoryName} disabled={readOnly} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="Ny kategori..." />
+              <button className="btn" disabled={readOnly} onClick={addMenuCategory}>+ Legg til kategori</button>
+            </div>
+          </div>
+
           {menuDesigns.length === 0 ? (
             <p className="muted">Ingen menyer opprettet ennå.</p>
           ) : (
-            menuDesigns.map((d) => (
-              <div key={d.id} className="editable-row">
-                <span>
-                  <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
-                </span>
-                <div>
-                  <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
-                  <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
-                  <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+            menuDesigns
+              .filter((d) => categoryFilter === "all" ? true : categoryFilter === "none" ? !d.categoryId : d.categoryId === categoryFilter)
+              .map((d) => (
+                <div key={d.id} className="editable-row">
+                  <span>
+                    <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
+                    {d.categoryId && ` · ${(data.menuDesignCategories || []).find((c) => c.id === d.categoryId)?.name || ""}`}
+                  </span>
+                  <div>
+                    <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
+                    <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
+                    <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))
           )}
         </section>
+
+        {showDocBank && (
+          <section className="card" style={{ marginTop: 16 }}>
+            <div className="between">
+              <h3>Dokumentbank</h3>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className={`btn${docBankFilter === "all" ? " active" : ""}`} onClick={() => setDocBankFilter("all")}>Alle</button>
+                <button className={`btn${docBankFilter === "upload" ? " active" : ""}`} onClick={() => setDocBankFilter("upload")}>Opplastet</button>
+                <button className={`btn${docBankFilter === "menu-editor" ? " active" : ""}`} onClick={() => setDocBankFilter("menu-editor")}>Fra menyeditoren</button>
+              </div>
+            </div>
+            {filteredDocBank.length === 0 ? (
+              <p className="muted">Ingen dokumenter i denne visningen.</p>
+            ) : (
+              filteredDocBank.map((d) => (
+                <div key={d.id} className="editable-row">
+                  <span><b>{d.name}</b> · {d.fileName}</span>
+                  <button className="link" onClick={() => openDocumentBankEntry(d)}>Åpne</button>
+                </div>
+              ))
+            )}
+          </section>
+        )}
 
         {editingDefaults && (
           <section className="card" style={{ marginTop: 16 }}>
@@ -19194,6 +19306,12 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             <summary style={{ cursor: "pointer", fontWeight: 700 }}>Menyinfo</summary>
             <div className="form-grid two" style={{ marginTop: 12 }}>
               <label>Navn på meny<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="F.eks. À la carte-meny" /></label>
+              <label>Kategori
+                <select value={form.categoryId || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, categoryId: e.target.value || undefined })}>
+                  <option value="">Ingen kategori</option>
+                  {(data.menuDesignCategories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
               <label>Antall spalter
                 <select value={form.columns} disabled={readOnly} onChange={(e) => setForm({ ...form, columns: Number(e.target.value) as 1 | 2 | 3 })}>
                   <option value={1}>1 spalte</option>
@@ -19272,6 +19390,29 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
             </div>
           </details>
 
+          <details style={{ marginTop: 12 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Menypris</summary>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block", maxWidth: 300 }}>
+                Pris vist nederst på menysiden
+                <input value={form.menuPrice || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, menuPrice: e.target.value })} placeholder="F.eks. Kr 595,- pr person" />
+              </label>
+              <div className="search-picker" style={{ maxWidth: 300, marginTop: 8 }}>
+                <input value={menuPriceFetchSearch} disabled={readOnly} onChange={(e) => setMenuPriceFetchSearch(e.target.value)} placeholder="Hent kundepris fra produkt..." />
+                {menuPriceFetchSearch && (
+                  <div className="search-dropdown inline">
+                    {data.products.filter((p) => p.name.toLowerCase().includes(menuPriceFetchSearch.toLowerCase())).slice(0, 8).map((p) => (
+                      <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => { setForm({ ...form, menuPrice: `Kr ${p.customerPrice},-` }); setMenuPriceFetchSearch(""); }}>
+                        <b>{p.name}</b>
+                        <small>Kundepris: {p.customerPrice}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </details>
+
           {form.sections.map((s) => {
             const draft = itemDraft[s.id] || { name: "", description: "", price: "" };
             return (
@@ -19291,28 +19432,49 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName }
                   <span style={{ flex: 1, fontWeight: 700 }}>{s.title || "(uten tittel)"}</span>
                   <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:title`); }}>Tittel</button>
                   <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:divider`); }}>Skillelinje</button>
-                  <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:allergens`); }}>Allergener</button>
-                  <button type="button" className="link" title="Hent allergener på nytt fra rettene i seksjonen" onClick={(e) => { e.stopPropagation(); regenerateSectionAllergens(s.id); }}>🔄</button>
                   <button className="link danger" disabled={readOnly} onClick={(e) => { e.stopPropagation(); removeSection(s.id); }}>Slett seksjon</button>
                 </summary>
 
                 <div style={{ marginTop: 8 }}>
                   {s.items.map((it) => (
-                    <div
-                      key={it.id}
-                      style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}
-                      draggable={!readOnly}
-                      onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData("text/menu-item-id", it.id); }}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => { e.stopPropagation(); e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-item-id"); if (fromId) reorderItems(s.id, fromId, it.id); }}
-                    >
-                      <span title="Dra for å flytte rett" style={{ color: "#94a3b8", cursor: readOnly ? "default" : "grab" }}>⠿</span>
-                      <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`item:${it.id}:name`)}>
-                        {it.name || "(uten navn)"}{it.price ? ` · ${it.price}` : ""}
-                      </button>
-                      <button type="button" className="link" onClick={() => setSelectedKey(`item:${it.id}:price`)}>Pris</button>
-                      <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
-                    </div>
+                    <React.Fragment key={it.id}>
+                      <div
+                        style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}
+                        draggable={!readOnly}
+                        onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData("text/menu-item-id", it.id); }}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.stopPropagation(); e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-item-id"); if (fromId) reorderItems(s.id, fromId, it.id); }}
+                      >
+                        <span title="Dra for å flytte rett" style={{ color: "#94a3b8", cursor: readOnly ? "default" : "grab" }}>⠿</span>
+                        <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`item:${it.id}:name`)}>
+                          {it.name || "(uten navn)"}{it.price ? ` · ${it.price}` : ""}
+                        </button>
+                        <button type="button" className="link" onClick={() => setSelectedKey(`item:${it.id}:price`)}>Pris</button>
+                        <button type="button" className="link" onClick={() => { setPriceFetchOpenItemId(priceFetchOpenItemId === it.id ? null : it.id); setPriceFetchSearch(""); }}>Hent pris</button>
+                        <button type="button" className="link" onClick={() => setSelectedKey(`item:${it.id}:allergens`)}>Allergener</button>
+                        <button type="button" className="link" title="Hent allergener på nytt fra kilden" onClick={() => regenerateItemAllergens(s.id, it.id)}>🔄</button>
+                        <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
+                      </div>
+                      {priceFetchOpenItemId === it.id && (
+                        <div className="search-picker" style={{ marginLeft: 30, marginTop: 4, maxWidth: 360 }}>
+                          <input value={priceFetchSearch} disabled={readOnly} onChange={(e) => setPriceFetchSearch(e.target.value)} placeholder="Søk produkt..." autoFocus />
+                          {priceFetchSearch && (
+                            <div className="search-dropdown inline">
+                              {data.products.filter((p) => p.name.toLowerCase().includes(priceFetchSearch.toLowerCase())).slice(0, 8).length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+                              {data.products.filter((p) => p.name.toLowerCase().includes(priceFetchSearch.toLowerCase())).slice(0, 8).map((p) => (
+                                <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 12px" }}>
+                                  <span style={{ fontSize: 13 }}>{p.name}</span>
+                                  <span style={{ display: "flex", gap: 4 }}>
+                                    <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 6px" }} disabled={readOnly} onClick={() => setItemPriceFromProduct(s.id, it.id, p, "customer")}>Kundepris</button>
+                                    <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 6px" }} disabled={readOnly} onClick={() => setItemPriceFromProduct(s.id, it.id, p, "storkjokken")}>Storkjøkkenpris</button>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </React.Fragment>
                   ))}
 
                   <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
