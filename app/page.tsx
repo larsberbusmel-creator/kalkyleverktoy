@@ -421,7 +421,12 @@ type MenuDesign = {
   orientation?: "portrait" | "landscape"; // sideformat - "portrait" (stående) er default når feltet er udefinert, se DEL 14
   textStyles?: Record<string, MenuTextStyle>;
   dividerStyles?: Record<string, MenuDividerStyle>;
-  textBlocks?: MenuTextBlock[]; // frie, fritt tilføyde tekstfelt - vises under seksjonene, se DEL 13
+  textBlocks?: MenuTextBlock[]; // frie, fritt tilføyde tekstfelt - vises sammen med seksjonene, se DEL 13/17
+  blockOrder?: string[]; // enhetlig rekkefølge for seksjoner OG tekstfelt sammen, som nøkler
+                         // "section:{id}" / "textblock:{id}" - se getMenuBlockOrder (DEL 17b).
+                         // Mangler feltet (eldre menyer), eller mangler en nøkkel i den (nye
+                         // seksjoner/tekstfelt), faller/utvides den automatisk med naturlig
+                         // rekkefølge: seksjoner (i sections-rekkefølge) først, deretter tekstfelt.
   createdAt: string;
   updatedAt: string;
 };
@@ -18386,11 +18391,30 @@ body{margin:0}
 .menu-item-desc{margin:2px 0 0;color:#475569}
 .menu-item-allergens{margin:2px 0 0;font-size:11px}
 .menu-price{text-align:center;font-weight:700;margin-top:12px}
-.menu-text-block{margin:8px 0 0;white-space:pre-wrap}
+.menu-text-block{margin:8px 0 0;white-space:pre-wrap;break-inside:avoid}
+.menu-page [draggable="true"]:hover{outline:1px dashed #cbd5e1;outline-offset:2px}
+.menu-add-item-row{margin-top:8px;padding:4px 8px;border:1px dashed #cbd5e1;border-radius:6px;color:#64748b;font-size:12px;font-style:italic;cursor:pointer;display:inline-block}
 .pdf-export .menu-empty-placeholder{visibility:hidden}
+.pdf-export .menu-add-item-row{display:none}
 .menu-footer{text-align:center;margin-top:16px;color:#64748b}
 @media print{button{display:none}}
 </style>`;
+}
+
+// Regner ut den EFFEKTIVE, enhetlige rekkefølgen for seksjoner og tekstfelt
+// sammen (brukes av BÅDE buildMenuHtml og redigeringsflatens dra-og-slipp, se DEL 20).
+// design.blockOrder er kilden når den finnes, men filtreres alltid for nøkler som ikke
+// lenger finnes, og alt som IKKE står i den ennå (nye seksjoner/tekstfelt, eller eldre
+// menyer uten feltet) legges til på slutten i naturlig rekkefølge - garanterer at
+// ingenting forsvinner fra visningen selv om blockOrder er tomt/utdatert/udefinert.
+function getMenuBlockOrder(design: MenuDesign): string[] {
+  const sectionKeys = design.sections.map((s) => `section:${s.id}`);
+  const textBlockKeys = (design.textBlocks || []).map((b) => `textblock:${b.id}`);
+  const allKeys = new Set([...sectionKeys, ...textBlockKeys]);
+  const fromOrder = (design.blockOrder || []).filter((k) => allKeys.has(k));
+  const seen = new Set(fromOrder);
+  const remaining = [...sectionKeys, ...textBlockKeys].filter((k) => !seen.has(k));
+  return [...fromOrder, ...remaining];
 }
 
 // Bygger INNHOLDET for én meny - brukes av BÅDE den live forhåndsvisningen
@@ -18399,7 +18423,7 @@ body{margin:0}
 // kilde til sannhet i stedet for flere parallelle implementasjoner.
 // resolvedLogoUrl er den FERDIG SIGNERTE URL-en (ikke storage-path), siden
 // denne funksjonen bygger en ren HTML-streng uten tilgang til Supabase-klienten.
-function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean }): string {
+function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean; readOnly?: boolean }): string {
   const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const scale = design.fontScale || 1;
@@ -18428,21 +18452,33 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
   // CSS multi-kolonne-flyt (column-count har ingen justify-content-
   // semantikk), så ved 2-3 spalter økes i stedet avstanden mellom
   // seksjoner/retter direkte som et praktisk, likeverdig alternativ.
-  const totalCount = design.sections.length + design.sections.reduce((sum, s) => sum + s.items.length, 0);
+  const totalCount = design.sections.length + design.sections.reduce((sum, s) => sum + s.items.length, 0) + (design.textBlocks || []).length;
   const sparse = totalCount > 0 && totalCount < 9;
   const sectionGap = sparse ? 40 : 20;
   const itemGap = sparse ? 16 : 8;
+  // Kun i redigerings-forhåndsvisningen (ALDRI i print/PDF, og ALDRI for en leser uten
+  // redigeringstilgang) gjøres seksjonstitler/retter/tekstfelt draggable="true", for
+  // dra-og-slipp-omorganisering (se handlePreviewDragStart/-Drop i MenuDesignTab, DEL 20).
+  // Ingen egen CSS-klasse her (ville kollidert med tekstfeltets eksisterende class="menu-text-block") -
+  // hover-indikasjonen styres i stedet med en ren attributt-selektor, se DEL 19.
+  const dragAttr = (opts?.editorPreview && !opts?.readOnly) ? ' draggable="true"' : "";
+  const grabStyle = opts?.editorPreview ? ";cursor:grab" : "";
 
-  const sectionsHtml = design.sections.map((s) => {
+  const sectionsById: Record<string, MenuSection> = {};
+  design.sections.forEach((s) => { sectionsById[s.id] = s; });
+  const textBlocksById: Record<string, MenuTextBlock> = {};
+  (design.textBlocks || []).forEach((b) => { textBlocksById[b.id] = b; });
+
+  function renderSection(s: MenuSection): string {
     const divider = dividerStyleFor(s.id);
     return `
     <div class="menu-section" style="margin-bottom:${sectionGap}px">
-      <h2 data-menu-key="section:${s.id}:title" style="${overriddenStyle(`section:${s.id}:title`, headingFont, MENU_PAGE.fontPx.section)}">${escapeHtml(s.title)}</h2>
+      <h2${dragAttr} data-menu-key="section:${s.id}:title" style="${overriddenStyle(`section:${s.id}:title`, headingFont, MENU_PAGE.fontPx.section)}${grabStyle}">${escapeHtml(s.title)}</h2>
       ${divider.enabled ? `<div class="menu-divider" data-menu-key="section:${s.id}:divider" style="height:2px;background:${divider.color || "#111827"}"></div>` : ""}
       ${s.items.map((it) => `
         <div class="menu-item" style="margin-bottom:${itemGap}px">
           <div class="menu-item-row">
-            <b data-menu-key="item:${it.id}:name" style="${overriddenStyle(`item:${it.id}:name`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(it.name)}</b>
+            <b${dragAttr} data-menu-key="item:${it.id}:name" style="${overriddenStyle(`item:${it.id}:name`, bodyFont, MENU_PAGE.fontPx.body)}${grabStyle}">${escapeHtml(it.name)}</b>
             ${it.price
               ? `<span class="menu-item-price" data-menu-key="item:${it.id}:price" style="${overriddenStyle(`item:${it.id}:price`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(it.price)}</span>`
               : opts?.editorPreview
@@ -18456,13 +18492,35 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
               : ""}
         </div>
       `).join("")}
+      ${(opts?.editorPreview && !opts?.readOnly) ? `<div class="menu-add-item-row" data-menu-key="section:${s.id}:additem">+ Legg til rett</div>` : ""}
     </div>
   `;
+  }
+
+  function renderTextBlock(b: MenuTextBlock): string {
+    if (!b.text.trim()) {
+      return opts?.editorPreview
+        ? `<p class="menu-text-block menu-empty-placeholder"${dragAttr} data-menu-key="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, bodyFont, MENU_PAGE.fontPx.body)};color:#94a3b8;font-style:italic;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px;display:inline-block;cursor:grab">+ tekstfelt</p>`
+        : "";
+    }
+    return `<p class="menu-text-block"${dragAttr} data-menu-key="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, bodyFont, MENU_PAGE.fontPx.body)}${grabStyle}">${escapeHtml(b.text)}</p>`;
+  }
+
+  const blocksHtml = getMenuBlockOrder(design).map((key) => {
+    if (key.startsWith("section:")) {
+      const s = sectionsById[key.slice("section:".length)];
+      return s ? renderSection(s) : "";
+    }
+    if (key.startsWith("textblock:")) {
+      const b = textBlocksById[key.slice("textblock:".length)];
+      return b ? renderTextBlock(b) : "";
+    }
+    return "";
   }).join("");
 
   const columnsBlock = design.columns === 1
-    ? `<div class="menu-columns" style="flex:1;display:flex;flex-direction:column;justify-content:${sparse ? "space-evenly" : "flex-start"}">${sectionsHtml}</div>`
-    : `<div class="menu-columns" style="column-count:${design.columns}">${sectionsHtml}</div>`;
+    ? `<div class="menu-columns" style="flex:1;display:flex;flex-direction:column;justify-content:${sparse ? "space-evenly" : "flex-start"}">${blocksHtml}</div>`
+    : `<div class="menu-columns" style="column-count:${design.columns}">${blocksHtml}</div>`;
 
   return `
     <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
@@ -18470,7 +18528,6 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
       <div class="menu-main">
         <div class="menu-title" data-menu-key="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
         ${columnsBlock}
-        ${(design.textBlocks || []).map((b) => `<p class="menu-text-block" data-menu-key="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, bodyFont, MENU_PAGE.fontPx.body)}">${escapeHtml(b.text)}</p>`).join("")}
       </div>
       ${design.menuPrice
         ? `<div class="menu-price" data-menu-key="menuPrice" style="${overriddenStyle("menuPrice", bodyFont, MENU_PAGE.fontPx.title, "#111827")}">${escapeHtml(design.menuPrice)}</div>`
@@ -18571,7 +18628,7 @@ function MenuFontPicker({ value, onPick, readOnly }: { value?: string; onPick: (
 // og lar brukeren redigere selve teksten (kontrollert felt, IKKE in-place i previewen - se
 // designbeslutningen i toppen av denne runden) samt font/størrelse/farge, eller skillelinjens
 // synlighet/farge.
-function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly }: {
+function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice }: {
   form: MenuDesign;
   selectedKey: string;
   onClose: () => void;
@@ -18586,7 +18643,46 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   pickColor: (key: string, color: string) => void;
   recentColors: string[];
   readOnly: boolean;
+  products: Product[];
+  itemDraft: Record<string, { name: string; description: string; price: string }>;
+  setItemDraft: (next: Record<string, { name: string; description: string; price: string }>) => void;
+  onAddItem: (sectionId: string) => void;
+  onDeleteSection: (sectionId: string) => void;
+  onDeleteItem: (sectionId: string, itemId: string) => void;
+  onDeleteTextBlock: (id: string) => void;
+  onRegenerateAllergens: (sectionId: string, itemId: string) => void;
+  priceFetchSearch: string;
+  setPriceFetchSearch: (v: string) => void;
+  onFetchItemPrice: (sectionId: string, itemId: string, product: Product, basis: "customer" | "storkjokken") => void;
+  menuPriceFetchSearch: string;
+  setMenuPriceFetchSearch: (v: string) => void;
+  onFetchMenuPrice: (product: Product) => void;
 }) {
+  // "+ Legg til rett" - klikkbar pseudo-rad nederst i hver seksjon i forhåndsvisningen (finnes
+  // ikke som ekte MenuItem, kun i editorPreview-HTML-en fra buildMenuHtml, se DEL 18).
+  const addItemMatch = selectedKey.match(/^section:(.+):additem$/);
+  if (addItemMatch) {
+    const sectionId = addItemMatch[1];
+    const draft = itemDraft[sectionId] || { name: "", description: "", price: "" };
+    return (
+      <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
+        <div className="between">
+          <b>Legg til rett</b>
+          <button className="link" onClick={onClose}>Lukk</button>
+        </div>
+        <label style={{ display: "block", marginTop: 8 }}>
+          Navn
+          <input disabled={readOnly} value={draft.name} onChange={(e) => setItemDraft({ ...itemDraft, [sectionId]: { ...draft, name: e.target.value } })} style={{ width: "100%" }} />
+        </label>
+        <label style={{ display: "block", marginTop: 8 }}>
+          Pris (valgfritt)
+          <input disabled={readOnly} value={draft.price} onChange={(e) => setItemDraft({ ...itemDraft, [sectionId]: { ...draft, price: e.target.value } })} style={{ width: "100%" }} />
+        </label>
+        <button className="btn active" style={{ marginTop: 12 }} disabled={readOnly} onClick={() => onAddItem(sectionId)}>+ Legg til rett</button>
+      </div>
+    );
+  }
+
   if (isDividerKey(selectedKey)) {
     const sectionId = dividerSectionId(selectedKey);
     const divider = getDividerOverride(sectionId);
@@ -18608,8 +18704,18 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
       </div>
     );
   }
+
   const style = getTextStyleOverride(selectedKey);
   const isMultiline = selectedKey.endsWith(":description") || selectedKey.endsWith(":allergens") || selectedKey.startsWith("textblock:");
+  const sectionTitleMatch = selectedKey.match(/^section:(.+):title$/);
+  const itemNameMatch = selectedKey.match(/^item:(.+):name$/);
+  const itemPriceMatch = selectedKey.match(/^item:(.+):price$/);
+  const itemAllergensMatch = selectedKey.match(/^item:(.+):allergens$/);
+  const textBlockMatch = selectedKey.match(/^textblock:(.+)$/);
+  const sectionForItem = (itemId: string) => form.sections.find((s) => s.items.some((it) => it.id === itemId));
+  const filteredFetchProducts = priceFetchSearch ? products.filter((p) => p.name.toLowerCase().includes(priceFetchSearch.toLowerCase())).slice(0, 8) : [];
+  const filteredMenuPriceProducts = menuPriceFetchSearch ? products.filter((p) => p.name.toLowerCase().includes(menuPriceFetchSearch.toLowerCase())).slice(0, 8) : [];
+
   return (
     <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
       <div className="between">
@@ -18621,6 +18727,51 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
       ) : (
         <input disabled={readOnly} value={menuKeyText(selectedKey)} onChange={(e) => setMenuKeyText(selectedKey, e.target.value)} style={{ width: "100%", marginTop: 8 }} />
       )}
+      {selectedKey === "menuPrice" && (
+        <div className="search-picker" style={{ marginTop: 8 }}>
+          <input disabled={readOnly} value={menuPriceFetchSearch} onChange={(e) => setMenuPriceFetchSearch(e.target.value)} placeholder="Hent kundepris fra produkt..." />
+          {menuPriceFetchSearch && (
+            <div className="search-dropdown inline">
+              {filteredMenuPriceProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+              {filteredMenuPriceProducts.map((p) => (
+                <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => onFetchMenuPrice(p)}>
+                  <b>{p.name}</b>
+                  <small>Kundepris: {p.customerPrice}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {itemPriceMatch && (
+        <div className="search-picker" style={{ marginTop: 8 }}>
+          <input disabled={readOnly} value={priceFetchSearch} onChange={(e) => setPriceFetchSearch(e.target.value)} placeholder="Hent pris fra produkt..." />
+          {priceFetchSearch && (
+            <div className="search-dropdown inline">
+              {filteredFetchProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+              {filteredFetchProducts.map((p) => {
+                const section = sectionForItem(itemPriceMatch[1]);
+                if (!section) return null;
+                return (
+                  <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 12px" }}>
+                    <span style={{ fontSize: 13 }}>{p.name}</span>
+                    <span style={{ display: "flex", gap: 4 }}>
+                      <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 6px" }} disabled={readOnly} onClick={() => onFetchItemPrice(section.id, itemPriceMatch[1], p, "customer")}>Kundepris</button>
+                      <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 6px" }} disabled={readOnly} onClick={() => onFetchItemPrice(section.id, itemPriceMatch[1], p, "storkjokken")}>Storkjøkkenpris</button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      {itemAllergensMatch && (() => {
+        const section = sectionForItem(itemAllergensMatch[1]);
+        return section ? (
+          <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => onRegenerateAllergens(section.id, itemAllergensMatch[1])}>🔄 Hent allergener på nytt fra kilde</button>
+        ) : null;
+      })()}
       <div style={{ marginTop: 12 }}>
         <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Font</div>
         <MenuFontPicker value={style.fontKey} readOnly={readOnly} onPick={(fontKey) => patchTextStyle(selectedKey, { fontKey })} />
@@ -18649,6 +18800,18 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
           ))}
         </div>
       </div>
+      {sectionTitleMatch && (
+        <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteSection(sectionTitleMatch[1]); onClose(); }}>Slett seksjon</button>
+      )}
+      {itemNameMatch && (() => {
+        const section = sectionForItem(itemNameMatch[1]);
+        return section ? (
+          <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteItem(section.id, itemNameMatch[1]); onClose(); }}>Slett denne retten</button>
+        ) : null;
+      })()}
+      {textBlockMatch && (
+        <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteTextBlock(textBlockMatch[1]); onClose(); }}>Slett tekstfelt</button>
+      )}
     </div>
   );
 }
@@ -18691,6 +18854,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [managingTemplates, setManagingTemplates] = useState(false);
   const [templateForm, setTemplateForm] = useState<MenuTemplate | null>(null);
+  // DEL 20/22: venstre redigeringspanel er fjernet - "Innstillinger"/"Logo"/"Importer produkt"
+  // åpnes nå som flytende bokser (samme visuelle stil som MenuPropertyPanel) fra en kompakt
+  // verktøylinje over selve forhåndsvisningen, i stedet for alltid-synlige <details>-bokser.
+  const [activeToolPanel, setActiveToolPanel] = useState<"settings" | "logo" | "import" | null>(null);
 
   // Kategorier for menyer - enkel navngitt liste, delt per sted i databasen (samme mønster som
   // menuRecentColors), opprettes direkte i "Menyer"-listevisningen. Kalt menuDesignCategories i
@@ -18919,10 +19086,11 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   }
 
   function addSection() {
-    if (!form || !newSectionTitle.trim()) return;
-    const section: MenuSection = { id: `sec-${Date.now()}`, title: newSectionTitle.trim(), items: [] };
-    setForm({ ...form, sections: [...form.sections, section] });
-    setNewSectionTitle("");
+    if (!form) return;
+    const section: MenuSection = { id: `sec-${Date.now()}`, title: "Ny seksjon", items: [] };
+    setForm({ ...form, sections: [...form.sections, section], blockOrder: [...getMenuBlockOrder(form), `section:${section.id}`] });
+    setActiveToolPanel(null);
+    setSelectedKey(`section:${section.id}:title`);
   }
   function removeSection(sectionId: string) {
     if (!form) return;
@@ -18931,11 +19099,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   }
   function addTextBlock() {
     if (!form) return;
-    const text = newTextBlockDraft.trim();
-    if (!text) return;
-    const block: MenuTextBlock = { id: `txt-${Date.now()}`, text };
-    setForm({ ...form, textBlocks: [...(form.textBlocks || []), block] });
-    setNewTextBlockDraft("");
+    const block: MenuTextBlock = { id: `txt-${Date.now()}`, text: "" };
+    setForm({ ...form, textBlocks: [...(form.textBlocks || []), block], blockOrder: [...getMenuBlockOrder(form), `textblock:${block.id}`] });
+    setActiveToolPanel(null);
+    setSelectedKey(`textblock:${block.id}`);
   }
   function removeTextBlock(id: string) {
     if (!form) return;
@@ -19125,7 +19292,56 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   function handlePreviewClick(e: React.MouseEvent<HTMLDivElement>) {
     const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
     if (!target) { setSelectedKey(null); return; }
+    setActiveToolPanel(null);
     setSelectedKey(target.getAttribute("data-menu-key"));
+  }
+
+  // DEL 20: dra-og-slipp for seksjoner/tekstfelt (om hverandre, via getMenuBlockOrder) OG for
+  // retter innad i samme seksjon - delegert på hele forhåndsvisnings-wrapperen på samme måte
+  // som handlePreviewClick, siden elementene ligger i en dangerouslySetInnerHTML-streng og ikke
+  // kan ha egne React-hendelser. buildMenuHtml gjør seksjonstitler/retter/tekstfelt
+  // draggable="true" KUN når editorPreview er satt og readOnly ikke er det (se dragAttr, DEL 18).
+  function handlePreviewDragStart(e: React.DragEvent<HTMLDivElement>) {
+    const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
+    const key = target?.getAttribute("data-menu-key");
+    if (!key) return;
+    e.dataTransfer.setData("text/menu-drag-key", key);
+  }
+  function handlePreviewDragOver(e: React.DragEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest("[data-menu-key]")) e.preventDefault();
+  }
+  function reorderBlocks(fromKey: string, toKey: string) {
+    if (!form || fromKey === toKey) return;
+    const list = getMenuBlockOrder(form);
+    const fromIdx = list.indexOf(fromKey);
+    const toIdx = list.indexOf(toKey);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const next = [...list];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setForm({ ...form, blockOrder: next });
+  }
+  function handlePreviewDrop(e: React.DragEvent<HTMLDivElement>) {
+    const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
+    const toKey = target?.getAttribute("data-menu-key");
+    const fromKey = e.dataTransfer.getData("text/menu-drag-key");
+    if (!toKey || !fromKey || toKey === fromKey) return;
+    e.preventDefault();
+    const blockKeyOf = (key: string) => {
+      if (key.startsWith("textblock:")) return key;
+      const m = key.match(/^section:(.+):title$/);
+      return m ? `section:${m[1]}` : null;
+    };
+    const fromBlock = blockKeyOf(fromKey);
+    const toBlock = blockKeyOf(toKey);
+    if (fromBlock && toBlock) { reorderBlocks(fromBlock, toBlock); return; }
+    const itemMatch = (key: string) => key.match(/^item:(.+):name$/);
+    const fromItem = itemMatch(fromKey);
+    const toItem = itemMatch(toKey);
+    if (fromItem && toItem && form) {
+      const section = form.sections.find((s) => s.items.some((it) => it.id === toItem[1]) && s.items.some((it) => it.id === fromItem[1]));
+      if (section) reorderItems(section.id, fromItem[1], toItem[1]);
+    }
   }
 
   // Importer produkt: ALLE linjene på produktet (uansett itemType - product/recipe/material)
@@ -19652,227 +19868,123 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
         </div>
       </div>
 
-      <div className="grid two" style={{ marginTop: 16, alignItems: "start", gridTemplateColumns: "1.35fr 1fr", gap: 24 }}>
+      <div style={{ marginTop: 16 }}>
         <div className="card">
-          <details open>
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Menyinfo</summary>
-            <div className="form-grid two" style={{ marginTop: 12 }}>
-              <label>Navn på meny<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="F.eks. À la carte-meny" /></label>
-              <label>Kategori
-                <select value={form.categoryId || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, categoryId: e.target.value || undefined })}>
-                  <option value="">Ingen kategori</option>
-                  {(data.menuDesignCategories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </label>
-              <label>Antall spalter
-                <select value={form.columns} disabled={readOnly} onChange={(e) => setForm({ ...form, columns: Number(e.target.value) as 1 | 2 | 3 })}>
-                  <option value={1}>1 spalte</option>
-                  <option value={2}>2 spalter</option>
-                  <option value={3}>3 spalter</option>
-                </select>
-              </label>
-              <label>Sideformat
-                <select value={form.orientation || "portrait"} disabled={readOnly} onChange={(e) => setForm({ ...form, orientation: e.target.value as "portrait" | "landscape" })}>
-                  <option value="portrait">Stående</option>
-                  <option value="landscape">Liggende</option>
-                </select>
-              </label>
-              <label>Tema
-                <select value={form.theme} disabled={readOnly} onChange={(e) => setForm({ ...form, theme: e.target.value as "harbour" | "standard" })}>
-                  <option value="harbour">Harbour (merkevare-fonter)</option>
-                  <option value="standard">Nøytralt (systemfont)</option>
-                </select>
-              </label>
-              <label>Fottekst<input value={form.footerText || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, footerText: e.target.value })} /></label>
-              <label>Tekststørrelse
-                <select value={form.fontScale || 1} disabled={readOnly} onChange={(e) => setForm({ ...form, fontScale: Number(e.target.value) })}>
-                  <option value={0.85}>Liten</option>
-                  <option value={1}>Normal</option>
-                  <option value={1.2}>Stor</option>
-                </select>
-              </label>
-              <label>Logostørrelse
-                <select value={form.logoSize || "normal"} disabled={readOnly} onChange={(e) => setForm({ ...form, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
-                  <option value="liten">Liten</option>
-                  <option value="normal">Normal</option>
-                  <option value="stor">Stor</option>
-                </select>
-              </label>
-            </div>
-          </details>
+          <h3>Forhåndsvisning</h3>
+          <p className="muted" style={{ fontSize: 12 }}>Viser faktiske A4-proporsjoner og marger - identisk med print/PDF. Klikk på en tekst i forhåndsvisningen for å redigere den (innhold, font, størrelse, farge, justering, sletting) - og dra en seksjonstittel/rett/tekstfelt (markøren blir en hånd) for å flytte den. Nytt innhold legges til med knappene under. Navn på menyen redigeres direkte ved å klikke på tittelen i forhåndsvisningen.</p>
 
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Logo</summary>
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
-              {form.logoUrl && (
-                <SiteLogo path={form.logoUrl} fallbackSrc="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" alt="Meny-logo" style={{ height: 48, width: "auto", objectFit: "contain", border: "1px solid #e2e8f0", borderRadius: 8, padding: 4 }} />
-              )}
-              <input type="file" accept="image/*" disabled={readOnly || logoUploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadMenuLogo(file); e.target.value = ""; }} />
-              {logoUploading && <span className="muted">Laster opp...</span>}
-              {form.logoUrl && <button className="link danger" disabled={readOnly} onClick={removeMenuLogo}>Fjern logo</button>}
-            </div>
-          </details>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
+            <button className="btn" disabled={readOnly} onClick={addSection}>+ Ny seksjon</button>
+            <button className="btn" disabled={readOnly} onClick={addTextBlock}>+ Tekstfelt</button>
+            <button className={`btn${activeToolPanel === "import" ? " active" : ""}`} disabled={readOnly} onClick={() => { setSelectedKey(null); setActiveToolPanel(activeToolPanel === "import" ? null : "import"); }}>Importer produkt</button>
+            <button className={`btn${activeToolPanel === "logo" ? " active" : ""}`} onClick={() => { setSelectedKey(null); setActiveToolPanel(activeToolPanel === "logo" ? null : "logo"); }}>Logo</button>
+            <button className={`btn${activeToolPanel === "settings" ? " active" : ""}`} onClick={() => { setSelectedKey(null); setActiveToolPanel(activeToolPanel === "settings" ? null : "settings"); }}>Innstillinger</button>
+          </div>
 
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Importer produkter</summary>
-            <div className="search-picker" style={{ maxWidth: 420, marginTop: 12 }}>
-              <input value={importSearch} disabled={readOnly} onChange={(e) => setImportSearch(e.target.value)} placeholder="Søk produkt..." />
-              {importSearch && (
-                <div className="search-dropdown inline">
-                  {filteredImportProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
-                  {filteredImportProducts.map((p) => (
-                    <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => importProduct(p, importTargetSectionId || "__new__")}>
-                      <b>{p.name}</b>
-                      <small>{p.productNumber}</small>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {form.sections.length > 0 && (
-              <label style={{ marginTop: 8, display: "block", maxWidth: 420 }}>
-                Importer til
-                <select value={importTargetSectionId} disabled={readOnly} onChange={(e) => setImportTargetSectionId(e.target.value)}>
-                  <option value="__new__">Ny seksjon (fra produktnavn)</option>
-                  {form.sections.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-                </select>
-              </label>
-            )}
-          </details>
-
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Ny seksjon</summary>
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <input value={newSectionTitle} disabled={readOnly} onChange={(e) => setNewSectionTitle(e.target.value)} placeholder="Tittel på ny seksjon" style={{ flex: 1 }} />
-              <button className="btn" disabled={readOnly} onClick={addSection}>+ Legg til seksjon</button>
-            </div>
-          </details>
-
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Menypris</summary>
-            <div style={{ marginTop: 12 }}>
-              <label style={{ display: "block", maxWidth: 300 }}>
-                Pris vist nederst på menysiden
-                <input value={form.menuPrice || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, menuPrice: e.target.value })} placeholder="F.eks. Kr 595,- pr person" />
-              </label>
-              <div className="search-picker" style={{ maxWidth: 300, marginTop: 8 }}>
-                <input value={menuPriceFetchSearch} disabled={readOnly} onChange={(e) => setMenuPriceFetchSearch(e.target.value)} placeholder="Hent kundepris fra produkt..." />
-                {menuPriceFetchSearch && (
+          {activeToolPanel === "import" && (
+            <div className="soft-box" style={{ marginBottom: 12 }}>
+              <div className="between">
+                <b>Importer produkt</b>
+                <button className="link" onClick={() => setActiveToolPanel(null)}>Lukk</button>
+              </div>
+              <div className="search-picker" style={{ maxWidth: 420, marginTop: 12 }}>
+                <input value={importSearch} disabled={readOnly} onChange={(e) => setImportSearch(e.target.value)} placeholder="Søk produkt..." autoFocus />
+                {importSearch && (
                   <div className="search-dropdown inline">
-                    {data.products.filter((p) => p.name.toLowerCase().includes(menuPriceFetchSearch.toLowerCase())).slice(0, 8).map((p) => (
-                      <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => { setForm({ ...form, menuPrice: `Kr ${p.customerPrice},-` }); setMenuPriceFetchSearch(""); }}>
+                    {filteredImportProducts.length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
+                    {filteredImportProducts.map((p) => (
+                      <button key={p.id} type="button" className="search-result" disabled={readOnly} onClick={() => importProduct(p, importTargetSectionId || "__new__")}>
                         <b>{p.name}</b>
-                        <small>Kundepris: {p.customerPrice}</small>
+                        <small>{p.productNumber}</small>
                       </button>
                     ))}
                   </div>
                 )}
               </div>
+              {form.sections.length > 0 && (
+                <label style={{ marginTop: 8, display: "block", maxWidth: 420 }}>
+                  Importer til
+                  <select value={importTargetSectionId} disabled={readOnly} onChange={(e) => setImportTargetSectionId(e.target.value)}>
+                    <option value="__new__">Ny seksjon (fra produktnavn)</option>
+                    {form.sections.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
-          </details>
+          )}
 
-          <details style={{ marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>Tekstfelt</summary>
-            <div style={{ marginTop: 12 }}>
-              {(form.textBlocks || []).map((b) => (
-                <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                  <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`textblock:${b.id}`)}>
-                    {b.text.trim() ? (b.text.length > 40 ? `${b.text.slice(0, 40)}...` : b.text) : "(tomt tekstfelt)"}
-                  </button>
-                  <button className="link danger" disabled={readOnly} onClick={() => removeTextBlock(b.id)}>Slett</button>
-                </div>
-              ))}
-              <div style={{ display: "flex", gap: 8 }}>
-                <input value={newTextBlockDraft} disabled={readOnly} onChange={(e) => setNewTextBlockDraft(e.target.value)} placeholder="Tekst for nytt felt..." style={{ flex: 1 }} />
-                <button className="btn" disabled={readOnly} onClick={addTextBlock}>+ Legg til tekstfelt</button>
+          {activeToolPanel === "logo" && (
+            <div className="soft-box" style={{ marginBottom: 12 }}>
+              <div className="between">
+                <b>Logo</b>
+                <button className="link" onClick={() => setActiveToolPanel(null)}>Lukk</button>
               </div>
-              <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>Frie tekstfelt vises under seksjonene på menysiden, i den rekkefølgen de er lagt til. Klikk på et felt over (eller på selve teksten i forhåndsvisningen når den er fylt ut) for å redigere innhold, font, størrelse, farge og justering.</p>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+                {form.logoUrl && (
+                  <SiteLogo path={form.logoUrl} fallbackSrc="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7" alt="Meny-logo" style={{ height: 48, width: "auto", objectFit: "contain", border: "1px solid #e2e8f0", borderRadius: 8, padding: 4 }} />
+                )}
+                <input type="file" accept="image/*" disabled={readOnly || logoUploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadMenuLogo(file); e.target.value = ""; }} />
+                {logoUploading && <span className="muted">Laster opp...</span>}
+                {form.logoUrl && <button className="link danger" disabled={readOnly} onClick={removeMenuLogo}>Fjern logo</button>}
+              </div>
             </div>
-          </details>
+          )}
 
-          {form.sections.map((s) => {
-            const draft = itemDraft[s.id] || { name: "", description: "", price: "" };
-            return (
-              <details
-                key={s.id}
-                className="soft-box"
-                style={{ marginTop: 12, maxWidth: "100%", boxSizing: "border-box", overflowX: "hidden" }}
-              >
-                <summary
-                  style={{ display: "flex", gap: 8, alignItems: "center", cursor: readOnly ? "default" : "grab", listStyle: "none" }}
-                  draggable={!readOnly}
-                  onDragStart={(e) => e.dataTransfer.setData("text/menu-section-id", s.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => { e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-section-id"); if (fromId) reorderSections(fromId, s.id); }}
-                >
-                  <span title="Dra for å flytte seksjon" style={{ color: "#94a3b8" }}>⠿</span>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{s.title || "(uten tittel)"}</span>
-                  <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:title`); }}>Tittel</button>
-                  <button type="button" className="link" onClick={(e) => { e.stopPropagation(); setSelectedKey(`section:${s.id}:divider`); }}>Skillelinje</button>
-                  <button className="link danger" disabled={readOnly} onClick={(e) => { e.stopPropagation(); removeSection(s.id); }}>Slett seksjon</button>
-                </summary>
-
-                <div style={{ marginTop: 8 }}>
-                  {s.items.map((it) => (
-                    <React.Fragment key={it.id}>
-                      <div
-                        style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}
-                        draggable={!readOnly}
-                        onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData("text/menu-item-id", it.id); }}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => { e.stopPropagation(); e.preventDefault(); const fromId = e.dataTransfer.getData("text/menu-item-id"); if (fromId) reorderItems(s.id, fromId, it.id); }}
-                      >
-                        <span title="Dra for å flytte rett" style={{ color: "#94a3b8", cursor: readOnly ? "default" : "grab" }}>⠿</span>
-                        <button type="button" className="link" style={{ flex: 1, textAlign: "left" }} onClick={() => setSelectedKey(`item:${it.id}:name`)}>
-                          {it.name || "(uten navn)"}{it.price ? ` · ${it.price}` : ""}
-                        </button>
-                        <button type="button" className="link" onClick={() => setSelectedKey(`item:${it.id}:price`)}>Pris</button>
-                        <button type="button" className="link" onClick={() => { setPriceFetchOpenItemId(priceFetchOpenItemId === it.id ? null : it.id); setPriceFetchSearch(""); }}>Hent pris</button>
-                        <button type="button" className="link" onClick={() => setSelectedKey(`item:${it.id}:allergens`)}>Allergener</button>
-                        <button type="button" className="link" title="Hent allergener på nytt fra kilden" onClick={() => regenerateItemAllergens(s.id, it.id)}>🔄</button>
-                        <button className="link danger" disabled={readOnly} onClick={() => removeItem(s.id, it.id)}>Slett</button>
-                      </div>
-                      {priceFetchOpenItemId === it.id && (
-                        <div className="search-picker" style={{ marginLeft: 30, marginTop: 4, maxWidth: 360 }}>
-                          <input value={priceFetchSearch} disabled={readOnly} onChange={(e) => setPriceFetchSearch(e.target.value)} placeholder="Søk produkt..." autoFocus />
-                          {priceFetchSearch && (
-                            <div className="search-dropdown inline">
-                              {data.products.filter((p) => p.name.toLowerCase().includes(priceFetchSearch.toLowerCase())).slice(0, 8).length === 0 && <div style={{ padding: "10px 12px", color: "#64748b", fontSize: 13 }}>Ingen treff</div>}
-                              {data.products.filter((p) => p.name.toLowerCase().includes(priceFetchSearch.toLowerCase())).slice(0, 8).map((p) => (
-                                <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 12px" }}>
-                                  <span style={{ fontSize: 13 }}>{p.name}</span>
-                                  <span style={{ display: "flex", gap: 4 }}>
-                                    <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 6px" }} disabled={readOnly} onClick={() => setItemPriceFromProduct(s.id, it.id, p, "customer")}>Kundepris</button>
-                                    <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 6px" }} disabled={readOnly} onClick={() => setItemPriceFromProduct(s.id, it.id, p, "storkjokken")}>Storkjøkkenpris</button>
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </React.Fragment>
-                  ))}
-
-                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                    <input value={draft.name} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, name: e.target.value } })} placeholder="+ Legg til rett" style={{ flex: "1 1 110px", minWidth: 100 }} />
-                    <input value={draft.price} disabled={readOnly} onChange={(e) => setItemDraft({ ...itemDraft, [s.id]: { ...draft, price: e.target.value } })} placeholder="Pris (valgfritt)" style={{ flex: "1 1 70px", minWidth: 70 }} />
-                    <button className="btn" disabled={readOnly} onClick={() => addItem(s.id)}>+ Legg til rett</button>
-                  </div>
-                </div>
-              </details>
-            );
-          })}
-        </div>
-
-        <div className="card">
-          <h3>Forhåndsvisning</h3>
-          <p className="muted" style={{ fontSize: 12 }}>Viser faktiske A4-proporsjoner og marger - identisk med print/PDF. Klikk på en tekst for å redigere den.</p>
+          {activeToolPanel === "settings" && (
+            <div className="soft-box" style={{ marginBottom: 12 }}>
+              <div className="between">
+                <b>Innstillinger</b>
+                <button className="link" onClick={() => setActiveToolPanel(null)}>Lukk</button>
+              </div>
+              <div className="form-grid two" style={{ marginTop: 12 }}>
+                <label>Kategori
+                  <select value={form.categoryId || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, categoryId: e.target.value || undefined })}>
+                    <option value="">Ingen kategori</option>
+                    {(data.menuDesignCategories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+                <label>Antall spalter
+                  <select value={form.columns} disabled={readOnly} onChange={(e) => setForm({ ...form, columns: Number(e.target.value) as 1 | 2 | 3 })}>
+                    <option value={1}>1 spalte</option>
+                    <option value={2}>2 spalter</option>
+                    <option value={3}>3 spalter</option>
+                  </select>
+                </label>
+                <label>Sideformat
+                  <select value={form.orientation || "portrait"} disabled={readOnly} onChange={(e) => setForm({ ...form, orientation: e.target.value as "portrait" | "landscape" })}>
+                    <option value="portrait">Stående</option>
+                    <option value="landscape">Liggende</option>
+                  </select>
+                </label>
+                <label>Tema
+                  <select value={form.theme} disabled={readOnly} onChange={(e) => setForm({ ...form, theme: e.target.value as "harbour" | "standard" })}>
+                    <option value="harbour">Harbour (merkevare-fonter)</option>
+                    <option value="standard">Nøytralt (systemfont)</option>
+                  </select>
+                </label>
+                <label>Fottekst<input value={form.footerText || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, footerText: e.target.value })} /></label>
+                <label>Tekststørrelse
+                  <select value={form.fontScale || 1} disabled={readOnly} onChange={(e) => setForm({ ...form, fontScale: Number(e.target.value) })}>
+                    <option value={0.85}>Liten</option>
+                    <option value={1}>Normal</option>
+                    <option value={1.2}>Stor</option>
+                  </select>
+                </label>
+                <label>Logostørrelse
+                  <select value={form.logoSize || "normal"} disabled={readOnly} onChange={(e) => setForm({ ...form, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
+                    <option value="liten">Liten</option>
+                    <option value="normal">Normal</option>
+                    <option value="stor">Stor</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
           <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
-            <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick}>
+            <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick} onDragStart={handlePreviewDragStart} onDragOver={handlePreviewDragOver} onDrop={handlePreviewDrop}>
               <div
                 ref={previewRef}
-                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true }) }}
+                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly }) }}
               />
             </div>
           </div>
@@ -19893,6 +20005,20 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 pickColor={pickColor}
                 recentColors={data.menuRecentColors || []}
                 readOnly={readOnly}
+                products={data.products}
+                itemDraft={itemDraft}
+                setItemDraft={setItemDraft}
+                onAddItem={addItem}
+                onDeleteSection={removeSection}
+                onDeleteItem={removeItem}
+                onDeleteTextBlock={removeTextBlock}
+                onRegenerateAllergens={regenerateItemAllergens}
+                priceFetchSearch={priceFetchSearch}
+                setPriceFetchSearch={setPriceFetchSearch}
+                onFetchItemPrice={setItemPriceFromProduct}
+                menuPriceFetchSearch={menuPriceFetchSearch}
+                setMenuPriceFetchSearch={setMenuPriceFetchSearch}
+                onFetchMenuPrice={(p) => { setForm({ ...form, menuPrice: `Kr ${p.customerPrice},-` }); setMenuPriceFetchSearch(""); }}
               />
             </div>
           )}
