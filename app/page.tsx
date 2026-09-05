@@ -20591,6 +20591,27 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     );
   }
 
+  // Dokument-kort i SAMME rutenett-stil som renderMenuCard over - uten miniatyrbilde (ingen
+  // PDF-forhåndsvisning generert for disse i dag, kun et enkelt dokument-ikon i stedet) - slik at
+  // forsiden i Menyer fremstår som ÉN samlet dokumentbank (menyer øverst + opplastede/eksporterte
+  // dokumenter i egne grupper under, se DEL 3), i stedet for to visuelt separate visninger.
+  function renderDocumentBankCard(d: DocumentBankEntry) {
+    return (
+      <div key={d.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff" }}>
+        <div style={{ aspectRatio: "210/297", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+          <span className="muted" style={{ fontSize: 12, padding: 8, textAlign: "center" }}>📄 {d.fileName}</span>
+        </div>
+        <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+          <b style={{ fontSize: 13 }}>{d.name}</b>
+          <span className="muted" style={{ fontSize: 12 }}>Lastet opp av: {d.uploadedBy}</span>
+          <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+            <button className="link" onClick={() => openDocumentBankEntry(d)}>Åpne</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!form) {
     return (
       <>
@@ -20598,7 +20619,6 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
           <div className="between">
             <h2>Menyer</h2>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" onClick={() => setShowDocBank((v) => !v)}>Dokumentbank</button>
               <button className="btn" disabled={readOnly} onClick={startEditDefaults}>Standardinnstillinger</button>
               <button className="btn" disabled={readOnly} onClick={() => setTemplatePickerOpen((v) => !v)}>Maler</button>
               <button className="btn" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
@@ -20715,28 +20735,36 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
           )}
         </section>
 
-        {showDocBank && (
-          <section className="card" style={{ marginTop: 16 }}>
-            <div className="between">
-              <h3>Dokumentbank</h3>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className={`btn${docBankFilter === "all" ? " active" : ""}`} onClick={() => setDocBankFilter("all")}>Alle</button>
-                <button className={`btn${docBankFilter === "upload" ? " active" : ""}`} onClick={() => setDocBankFilter("upload")}>Opplastet</button>
-                <button className={`btn${docBankFilter === "menu-editor" ? " active" : ""}`} onClick={() => setDocBankFilter("menu-editor")}>Fra menyeditoren</button>
-              </div>
-            </div>
-            {filteredDocBank.length === 0 ? (
-              <p className="muted">Ingen dokumenter i denne visningen.</p>
-            ) : (
-              filteredDocBank.map((d) => (
-                <div key={d.id} className="editable-row">
-                  <span><b>{d.name}</b> · {d.fileName}</span>
-                  <button className="link" onClick={() => openDocumentBankEntry(d)}>Åpne</button>
-                </div>
-              ))
-            )}
-          </section>
-        )}
+        <section className="card" style={{ marginTop: 16 }}>
+          <h2>Dokumentbank</h2>
+          {(() => {
+            const uploadedDocs = (data.documentBank || []).filter((d) => (d.source || "upload") === "upload");
+            const menuEditorDocs = (data.documentBank || []).filter((d) => d.source === "menu-editor");
+            if (uploadedDocs.length === 0 && menuEditorDocs.length === 0) {
+              return <p className="muted">Ingen dokumenter ennå.</p>;
+            }
+            return (
+              <>
+                {uploadedDocs.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <h3 style={{ fontSize: 14, color: "#64748b", margin: "0 0 6px" }}>Opplastet</h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 16 }}>
+                      {uploadedDocs.map(renderDocumentBankCard)}
+                    </div>
+                  </div>
+                )}
+                {menuEditorDocs.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <h3 style={{ fontSize: 14, color: "#64748b", margin: "0 0 6px" }}>Fra menyeditoren</h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 16 }}>
+                      {menuEditorDocs.map(renderDocumentBankCard)}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </section>
 
         {editingDefaults && (
           <section className="card" style={{ marginTop: 16 }}>
