@@ -135,6 +135,7 @@ export async function GET() {
   const orders = (row?.data?.orders || []).filter((o: any) => !o.deletedAt);
   const products = row?.data?.products || [];
   const rentalOffers = row?.data?.rentalOffers || [];
+  const eventCalculations = row?.data?.eventCalculations || [];
   const packingListTemplates = row?.data?.packingListTemplates || [];
   const coverItems = row?.data?.coverItems || [];
   const rentalAddons = row?.data?.rentalAddons || [];
@@ -305,7 +306,86 @@ export async function GET() {
     .filter(Boolean)
     .join("\r\n");
 
-  const events = [orderEvents, teardownEvents, packingEvents].filter(Boolean).join("\r\n");
+  // Pakking-hendelser for VANLIGE ORDRE (o.packingListEnabled) - samme prinsipp som packingEvents
+  // over (for rentalOffers), men enklere: en ordre har ingen avkrysningsstatus lagret
+  // (packingListChecked finnes ikke på Order), kun valgte maler + frie tekstpunkter (rene
+  // strenger) - se packingListTemplatesHtml() i page.tsx, den kanoniske print-versjonen.
+  const orderPackingEvents = orders
+    .map((o: any) => {
+      if (!o.packingListEnabled || !o.date) return "";
+      const selectedTemplates = packingListTemplates.filter((t: any) => (o.selectedPackingListTemplateIds || []).includes(t.id));
+      const templateLines = selectedTemplates.flatMap((t: any) => (t.items || []).map((item: any) => item.label));
+      const extraItems = (o.extraPackingListItems || []).filter(Boolean);
+      const allLines = [...templateLines, ...extraItems];
+      if (!allLines.length) return "";
+
+      const dtstart = `DTSTART;VALUE=DATE:${toIcalDate(o.date, "")}`;
+      const dtend = `DTEND;VALUE=DATE:${toIcalDate(o.date, "")}`;
+      const customerName = o.customerType === "bedrift" ? o.companyName || o.customer : o.customer;
+      const summary = escapeIcal(`📦 Pakking, ${customerName}`);
+      const description = buildDescription([allLines]);
+
+      const lines = [
+        "BEGIN:VEVENT",
+        `UID:misemetrics-packing-order-${o.id}@berbusmel.no`,
+        `DTSTAMP:${now}`,
+        dtstart,
+        dtend,
+        `SUMMARY:${summary}`,
+        `DESCRIPTION:${description}`,
+        "END:VEVENT",
+      ]
+        .filter(Boolean)
+        .map(foldLine)
+        .join("\r\n");
+
+      return lines;
+    })
+    .filter(Boolean)
+    .join("\r\n");
+
+  // Pakking-hendelser for SELSKAPSMENY/EVENTKALKYLE (EventCalculation) - egen bygger siden
+  // strukturen skiller seg fra begge de andre: EventCalculation har KUN mal-systemet + frie
+  // punkter som ekte PackingListItem-objekter (id+label, IKKE rene strenger som på Order/
+  // RentalOffer), men HAR avkrysningsstatus (packingListChecked, som Rental - i motsetning til
+  // Order) - se eventPackingChecklistRows() i page.tsx, den kanoniske versjonen denne speiler.
+  const eventPackingEvents = eventCalculations
+    .map((ev: any) => {
+      if (!ev.date) return "";
+      const rows: { id: string; label: string }[] = [];
+      packingListTemplates
+        .filter((t: any) => (ev.selectedPackingListTemplateIds || []).includes(t.id))
+        .forEach((t: any) => (t.items || []).forEach((item: any) => rows.push({ id: `template:${item.id}`, label: item.label })));
+      (ev.extraPackingListItems || []).forEach((item: any) => rows.push({ id: `extra:${item.id}`, label: item.label }));
+      if (!rows.length) return "";
+
+      const dtstart = `DTSTART;VALUE=DATE:${toIcalDate(ev.date, "")}`;
+      const dtend = `DTEND;VALUE=DATE:${toIcalDate(ev.date, "")}`;
+      const summary = escapeIcal(`📦 Pakking, ${ev.eventName}`);
+      const checkedMap = ev.packingListChecked || {};
+      const checklistLines = rows.map((r) => (checkedMap[r.id] ? "☑ " : "☐ ") + r.label);
+      const description = buildDescription([checklistLines]);
+
+      const lines = [
+        "BEGIN:VEVENT",
+        `UID:misemetrics-packing-event-${ev.id}@berbusmel.no`,
+        `DTSTAMP:${now}`,
+        dtstart,
+        dtend,
+        `SUMMARY:${summary}`,
+        `DESCRIPTION:${description}`,
+        "END:VEVENT",
+      ]
+        .filter(Boolean)
+        .map(foldLine)
+        .join("\r\n");
+
+      return lines;
+    })
+    .filter(Boolean)
+    .join("\r\n");
+
+  const events = [orderEvents, teardownEvents, packingEvents, orderPackingEvents, eventPackingEvents].filter(Boolean).join("\r\n");
 
   const ical = [
     "BEGIN:VCALENDAR",
