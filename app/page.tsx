@@ -422,11 +422,15 @@ type MenuDesign = {
   textStyles?: Record<string, MenuTextStyle>;
   dividerStyles?: Record<string, MenuDividerStyle>;
   textBlocks?: MenuTextBlock[]; // frie, fritt tilføyde tekstfelt - vises sammen med seksjonene, se DEL 13/17
-  blockOrder?: string[]; // enhetlig rekkefølge for seksjoner OG tekstfelt sammen, som nøkler
-                         // "section:{id}" / "textblock:{id}" - se getMenuBlockOrder (DEL 17b).
-                         // Mangler feltet (eldre menyer), eller mangler en nøkkel i den (nye
-                         // seksjoner/tekstfelt), faller/utvides den automatisk med naturlig
-                         // rekkefølge: seksjoner (i sections-rekkefølge) først, deretter tekstfelt.
+  blockOrder?: string[]; // enhetlig rekkefølge for TITTEL, seksjoner OG tekstfelt sammen, som
+                         // nøkler "title" / "section:{id}" / "textblock:{id}" - se
+                         // getMenuBlockOrder (DEL 17b/26). Mangler feltet (eldre menyer), eller
+                         // mangler en nøkkel i den (nye seksjoner/tekstfelt/tittel), faller/utvides
+                         // den automatisk med naturlig rekkefølge - tittelen havner ØVERST som
+                         // standard når den ikke er eksplisitt plassert av brukeren ennå.
+  hideTitle?: boolean; // skjuler tittel-blokken PÅ SELVE MENYSIDEN når true - design.name (det
+                       // interne navnet på menyen) beholdes uansett og brukes fortsatt i
+                       // listevisningen, print-vinduets <title> og Dokumentbank-filnavn.
   createdAt: string;
   updatedAt: string;
 };
@@ -18410,11 +18414,17 @@ body{margin:0}
 function getMenuBlockOrder(design: MenuDesign): string[] {
   const sectionKeys = design.sections.map((s) => `section:${s.id}`);
   const textBlockKeys = (design.textBlocks || []).map((b) => `textblock:${b.id}`);
-  const allKeys = new Set([...sectionKeys, ...textBlockKeys]);
+  const titleKeys = design.hideTitle ? [] : ["title"];
+  const allKeys = new Set([...titleKeys, ...sectionKeys, ...textBlockKeys]);
   const fromOrder = (design.blockOrder || []).filter((k) => allKeys.has(k));
   const seen = new Set(fromOrder);
   const remaining = [...sectionKeys, ...textBlockKeys].filter((k) => !seen.has(k));
-  return [...fromOrder, ...remaining];
+  // Tittelen skal ligge ØVERST som standard når den ikke allerede er eksplisitt plassert av
+  // brukeren i blockOrder - IKKE bakerst sammen med "remaining" (som ville flyttet den til bunnen
+  // for enhver meny som allerede har annet innhold i blockOrder fra før denne fiksen).
+  const withoutTitle = [...fromOrder, ...remaining];
+  if (design.hideTitle) return withoutTitle;
+  return seen.has("title") ? withoutTitle : ["title", ...withoutTitle];
 }
 
 // Bygger INNHOLDET for én meny - brukes av BÅDE den live forhåndsvisningen
@@ -18507,6 +18517,9 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
   }
 
   const blocksHtml = getMenuBlockOrder(design).map((key) => {
+    if (key === "title") {
+      return `<div class="menu-title"${dragAttr} data-menu-key="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>`;
+    }
     if (key.startsWith("section:")) {
       const s = sectionsById[key.slice("section:".length)];
       return s ? renderSection(s) : "";
@@ -18526,7 +18539,6 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
     <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
       ${resolvedLogoUrl ? `<img class="menu-logo" style="max-height:${logoSize.maxHeightMm}mm;max-width:${logoSize.maxWidthPct}%" src="${resolvedLogoUrl}" alt="Logo" />` : ""}
       <div class="menu-main">
-        <div class="menu-title" data-menu-key="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>
         ${columnsBlock}
       </div>
       ${design.menuPrice
@@ -18628,7 +18640,7 @@ function MenuFontPicker({ value, onPick, readOnly }: { value?: string; onPick: (
 // og lar brukeren redigere selve teksten (kontrollert felt, IKKE in-place i previewen - se
 // designbeslutningen i toppen av denne runden) samt font/størrelse/farge, eller skillelinjens
 // synlighet/farge.
-function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice }: {
+function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice }: {
   form: MenuDesign;
   selectedKey: string;
   onClose: () => void;
@@ -18657,6 +18669,8 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   menuPriceFetchSearch: string;
   setMenuPriceFetchSearch: (v: string) => void;
   onFetchMenuPrice: (product: Product) => void;
+  onHideTitle: () => void;
+  onRemoveMenuPrice: () => void;
 }) {
   // "+ Legg til rett" - klikkbar pseudo-rad nederst i hver seksjon i forhåndsvisningen (finnes
   // ikke som ekte MenuItem, kun i editorPreview-HTML-en fra buildMenuHtml, se DEL 18).
@@ -18811,6 +18825,12 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
       })()}
       {textBlockMatch && (
         <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteTextBlock(textBlockMatch[1]); onClose(); }}>Slett tekstfelt</button>
+      )}
+      {selectedKey === "title" && (
+        <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onHideTitle(); onClose(); }}>Fjern menynavn fra siden</button>
+      )}
+      {selectedKey === "menuPrice" && (
+        <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onRemoveMenuPrice(); onClose(); }}>Fjern menypris</button>
       )}
     </div>
   );
@@ -19108,6 +19128,14 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     if (!form) return;
     setForm({ ...form, textBlocks: (form.textBlocks || []).filter((b) => b.id !== id) });
   }
+  function hideTitleFromPage() {
+    if (!form) return;
+    setForm({ ...form, hideTitle: true });
+  }
+  function removeMenuPrice() {
+    if (!form) return;
+    setForm({ ...form, menuPrice: "" });
+  }
   function moveSection(sectionId: string, dir: -1 | 1) {
     if (!form) return;
     const list = [...form.sections];
@@ -19308,7 +19336,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     e.dataTransfer.setData("text/menu-drag-key", key);
   }
   function handlePreviewDragOver(e: React.DragEvent<HTMLDivElement>) {
-    if ((e.target as HTMLElement).closest("[data-menu-key]")) e.preventDefault();
+    e.preventDefault();
   }
   function reorderBlocks(fromKey: string, toKey: string) {
     if (!form || fromKey === toKey) return;
@@ -19322,11 +19350,11 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     setForm({ ...form, blockOrder: next });
   }
   function handlePreviewDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
     const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
     const toKey = target?.getAttribute("data-menu-key");
     const fromKey = e.dataTransfer.getData("text/menu-drag-key");
     if (!toKey || !fromKey || toKey === fromKey) return;
-    e.preventDefault();
     const blockKeyOf = (key: string) => {
       if (key.startsWith("textblock:")) return key;
       const m = key.match(/^section:(.+):title$/);
@@ -19937,6 +19965,13 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 <button className="link" onClick={() => setActiveToolPanel(null)}>Lukk</button>
               </div>
               <div className="form-grid two" style={{ marginTop: 12 }}>
+                <label>Navn på meny
+                  <input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 22 }}>
+                  <input type="checkbox" disabled={readOnly} checked={!form.hideTitle} onChange={(e) => setForm({ ...form, hideTitle: !e.target.checked })} />
+                  Vis menynavn på selve menysiden
+                </label>
                 <label>Kategori
                   <select value={form.categoryId || ""} disabled={readOnly} onChange={(e) => setForm({ ...form, categoryId: e.target.value || undefined })}>
                     <option value="">Ingen kategori</option>
@@ -20019,6 +20054,8 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 menuPriceFetchSearch={menuPriceFetchSearch}
                 setMenuPriceFetchSearch={setMenuPriceFetchSearch}
                 onFetchMenuPrice={(p) => { setForm({ ...form, menuPrice: `Kr ${p.customerPrice},-` }); setMenuPriceFetchSearch(""); }}
+                onHideTitle={hideTitleFromPage}
+                onRemoveMenuPrice={removeMenuPrice}
               />
             </div>
           )}
