@@ -426,6 +426,16 @@ type PosterElement = {
   color?: string;
   sizePx?: number;
 };
+// Et bilde satt inn i den VANLIGE (tekstbaserte) menyeditoren - i motsetning til PosterElement
+// (som har fri XY-plassering på en "poster"-meny) deltar dette i samme lineære blokk-rekkefølge
+// som seksjoner/tekstfelt (se getMenuBlockOrder/blockOrder), og kan dras til å ligge før/mellom/
+// etter dem akkurat som et tekstfelt.
+type MenuImageBlock = {
+  id: string;
+  imageUrl: string; // storage path i "documents"-bucketen
+  widthPct?: number; // bredde i prosent av spaltebredden, default 60
+  align?: "left" | "center" | "right"; // default "center"
+};
 type MenuDesign = {
   id: string;
   name: string;
@@ -461,6 +471,11 @@ type MenuDesign = {
                          // generateMenuThumbnail) - løses til signert URL i rutenett-listevisningen.
   posterElements?: PosterElement[]; // fritt plasserte bilde-/tekstelementer for "poster"-typen.
   posterBackgroundColor?: string; // bakgrunnsfarge for lerretet (poster-typen), default hvit.
+  imageBlocks?: MenuImageBlock[]; // bilder satt inn i den VANLIGE tekstmeny-editoren, se
+                                  // MenuImageBlock - deltar i blockOrder sammen med seksjoner/
+                                  // tekstfelt. IKKE det samme som posterElements (poster-typen).
+  createdBy?: string; // brukerens e-post da menyen ble opprettet - "Ukjent" for menyer opprettet
+                      // før dette feltet fantes. Vist i rutenett-listevisningen (se renderMenuCard).
   createdAt: string;
   updatedAt: string;
 };
@@ -18444,11 +18459,12 @@ body{margin:0}
 function getMenuBlockOrder(design: MenuDesign): string[] {
   const sectionKeys = design.sections.map((s) => `section:${s.id}`);
   const textBlockKeys = (design.textBlocks || []).map((b) => `textblock:${b.id}`);
+  const imageBlockKeys = (design.imageBlocks || []).map((b) => `imageblock:${b.id}`);
   const titleKeys = design.hideTitle ? [] : ["title"];
-  const allKeys = new Set([...titleKeys, ...sectionKeys, ...textBlockKeys]);
+  const allKeys = new Set([...titleKeys, ...sectionKeys, ...textBlockKeys, ...imageBlockKeys]);
   const fromOrder = (design.blockOrder || []).filter((k) => allKeys.has(k));
   const seen = new Set(fromOrder);
-  const remaining = [...sectionKeys, ...textBlockKeys].filter((k) => !seen.has(k));
+  const remaining = [...sectionKeys, ...textBlockKeys, ...imageBlockKeys].filter((k) => !seen.has(k));
   // Tittelen skal ligge ØVERST som standard når den ikke allerede er eksplisitt plassert av
   // brukeren i blockOrder - IKKE bakerst sammen med "remaining" (som ville flyttet den til bunnen
   // for enhver meny som allerede har annet innhold i blockOrder fra før denne fiksen).
@@ -18463,7 +18479,7 @@ function getMenuBlockOrder(design: MenuDesign): string[] {
 // kilde til sannhet i stedet for flere parallelle implementasjoner.
 // resolvedLogoUrl er den FERDIG SIGNERTE URL-en (ikke storage-path), siden
 // denne funksjonen bygger en ren HTML-streng uten tilgang til Supabase-klienten.
-function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean; readOnly?: boolean }): string {
+function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean; readOnly?: boolean; resolvedImageUrls?: Record<string, string> }): string {
   const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const scale = design.fontScale || 1;
@@ -18508,6 +18524,21 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
   design.sections.forEach((s) => { sectionsById[s.id] = s; });
   const textBlocksById: Record<string, MenuTextBlock> = {};
   (design.textBlocks || []).forEach((b) => { textBlocksById[b.id] = b; });
+  const imageBlocksById: Record<string, MenuImageBlock> = {};
+  (design.imageBlocks || []).forEach((b) => { imageBlocksById[b.id] = b; });
+  const resolvedImageUrls = opts?.resolvedImageUrls || {};
+
+  function renderImageBlock(b: MenuImageBlock): string {
+    const src = resolvedImageUrls[b.id];
+    const align = b.align || "center";
+    const marginCss = align === "left" ? "0 auto 0 0" : align === "right" ? "0 0 0 auto" : "0 auto";
+    if (!src) {
+      return opts?.editorPreview
+        ? `<div class="menu-empty-placeholder"${dragAttr} data-menu-key="imageblock:${b.id}" style="width:${b.widthPct || 60}%;margin:${marginCss};aspect-ratio:4/3;background:#f1f5f9;border:1px dashed #cbd5e1;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-style:italic;font-size:12px;cursor:grab">Bilde mangler</div>`
+        : "";
+    }
+    return `<img class="menu-image-block"${dragAttr} data-menu-key="imageblock:${b.id}" src="${src}" style="width:${b.widthPct || 60}%;display:block;margin:${marginCss};${grabStyle}" alt="" />`;
+  }
 
   function renderSection(s: MenuSection): string {
     const divider = dividerStyleFor(s.id);
@@ -18532,7 +18563,6 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
               : ""}
         </div>
       `).join("")}
-      ${(opts?.editorPreview && !opts?.readOnly) ? `<div class="menu-add-item-row" data-menu-key="section:${s.id}:additem">+ Legg til rett</div>` : ""}
     </div>
   `;
   }
@@ -18557,6 +18587,10 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
     if (key.startsWith("textblock:")) {
       const b = textBlocksById[key.slice("textblock:".length)];
       return b ? renderTextBlock(b) : "";
+    }
+    if (key.startsWith("imageblock:")) {
+      const b = imageBlocksById[key.slice("imageblock:".length)];
+      return b ? renderImageBlock(b) : "";
     }
     return "";
   }).join("");
@@ -18626,7 +18660,12 @@ async function printMenuDesign(design: MenuDesign) {
     const { data } = await supabase.storage.from("documents").createSignedUrl(design.logoUrl, 60 * 60);
     logoUrl = data?.signedUrl;
   }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag(design.orientation)}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl)}</body></html>`);
+  const resolvedImageUrls: Record<string, string> = {};
+  for (const b of design.imageBlocks || []) {
+    const { data } = await supabase.storage.from("documents").createSignedUrl(b.imageUrl, 60 * 60);
+    if (data?.signedUrl) resolvedImageUrls[b.id] = data.signedUrl;
+  }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag(design.orientation)}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl, { resolvedImageUrls })}</body></html>`);
   w.document.close(); w.focus();
 }
 
@@ -18704,7 +18743,7 @@ function MenuFontPicker({ value, onPick, readOnly }: { value?: string; onPick: (
 // og lar brukeren redigere selve teksten (kontrollert felt, IKKE in-place i previewen - se
 // designbeslutningen i toppen av denne runden) samt font/størrelse/farge, eller skillelinjens
 // synlighet/farge.
-function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice }: {
+function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice, onPatchImageBlock, onDeleteImageBlock }: {
   form: MenuDesign;
   selectedKey: string;
   onClose: () => void;
@@ -18735,6 +18774,8 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   onFetchMenuPrice: (product: Product) => void;
   onHideTitle: () => void;
   onRemoveMenuPrice: () => void;
+  onPatchImageBlock: (id: string, patch: Partial<MenuImageBlock>) => void;
+  onDeleteImageBlock: (id: string) => void;
 }) {
   // "+ Legg til rett" - klikkbar pseudo-rad nederst i hver seksjon i forhåndsvisningen (finnes
   // ikke som ekte MenuItem, kun i editorPreview-HTML-en fra buildMenuHtml, se DEL 18).
@@ -18757,6 +18798,38 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
           <input disabled={readOnly} value={draft.price} onChange={(e) => setItemDraft({ ...itemDraft, [sectionId]: { ...draft, price: e.target.value } })} style={{ width: "100%" }} />
         </label>
         <button className="btn active" style={{ marginTop: 12 }} disabled={readOnly} onClick={() => onAddItem(sectionId)}>+ Legg til rett</button>
+      </div>
+    );
+  }
+
+  // Bilde satt inn i den vanlige tekstmeny-editoren (MenuImageBlock, se addImageBlock) - egen,
+  // forenklet boks (ingen font/farge, kun bredde/justering/slett) siden det ikke er tekst å
+  // redigere.
+  const imageBlockMatch = selectedKey.match(/^imageblock:(.+)$/);
+  if (imageBlockMatch) {
+    const block = (form.imageBlocks || []).find((b) => b.id === imageBlockMatch[1]);
+    if (!block) return null;
+    return (
+      <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
+        <div className="between">
+          <b>Bilde</b>
+          <button className="link" onClick={onClose}>Lukk</button>
+        </div>
+        <label style={{ display: "block", marginTop: 8 }}>
+          Bredde (% av spaltebredden)
+          <input type="number" min={10} max={100} disabled={readOnly} value={block.widthPct || 60} onChange={(e) => onPatchImageBlock(block.id, { widthPct: Number(e.target.value) })} style={{ width: 100 }} />
+        </label>
+        <div style={{ marginTop: 12 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Justering</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {(["left", "center", "right"] as const).map((a) => (
+              <button key={a} type="button" className={`btn${(block.align || "center") === a ? " active" : ""}`} disabled={readOnly} onClick={() => onPatchImageBlock(block.id, { align: a })}>
+                {a === "left" ? "Venstre" : a === "center" ? "Midt" : "Høyre"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteImageBlock(block.id); onClose(); }}>Slett bilde</button>
       </div>
     );
   }
@@ -19141,6 +19214,9 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const [resolvedLogoUrl, setResolvedLogoUrl] = useState<string | undefined>(undefined);
+  // Løser storage-path -> signert URL for hvert bilde satt inn i selve tekstmeny-editoren (se
+  // MenuImageBlock/addImageBlock) - samme mønster som resolvedLogoUrl under.
+  const [resolvedImageBlockUrls, setResolvedImageBlockUrls] = useState<Record<string, string>>({});
   const previewRef = useRef<HTMLDivElement | null>(null);
   // DEL 35: holder alltid siste menuDesigns-array tilgjengelig for den ASYNKRONE
   // miniatyrbilde-oppdateringen i generateMenuThumbnail under.
@@ -19165,7 +19241,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   // DEL 20/22: venstre redigeringspanel er fjernet - "Innstillinger"/"Logo"/"Importer produkt"
   // åpnes nå som flytende bokser (samme visuelle stil som MenuPropertyPanel) fra en kompakt
   // verktøylinje over selve forhåndsvisningen, i stedet for alltid-synlige <details>-bokser.
-  const [activeToolPanel, setActiveToolPanel] = useState<"settings" | "logo" | "import" | null>(null);
+  const [activeToolPanel, setActiveToolPanel] = useState<"settings" | "logo" | "import" | "addItem" | null>(null);
 
   // DEL 34: enkel, ikke-lagret angre-funksjon for selve menyredigeringen ("form"). Fanger opp
   // ENHVER endring av form - uansett hvilken av de mange små funksjonene som gjorde den - ved å
@@ -19237,6 +19313,19 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     });
     return () => { cancelled = true; };
   }, [form?.logoUrl]);
+
+  // Løser signerte URL-er for ALLE bildeblokker i den vanlige tekstmeny-editoren (se
+  // MenuImageBlock) - samme signert-URL-mønster som logoen over, men for flere bilder samtidig.
+  useEffect(() => {
+    let cancelled = false;
+    const blocks = form?.imageBlocks || [];
+    if (blocks.length === 0) { setResolvedImageBlockUrls({}); return; }
+    Promise.all(blocks.map(async (b) => {
+      const { data } = await supabase.storage.from("documents").createSignedUrl(b.imageUrl, 60 * 60);
+      return [b.id, data?.signedUrl || ""] as const;
+    })).then((pairs) => { if (!cancelled) setResolvedImageBlockUrls(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [(form?.imageBlocks || []).map((b) => `${b.id}:${b.imageUrl}`).join(",")]);
 
   useEffect(() => {
     setResolvedDefaultsLogoUrl(undefined);
@@ -19348,6 +19437,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
       logoUrl: d?.logoUrl,
       logoSize: d?.logoSize || "normal",
       fontScale: d?.fontScale || 1,
+      createdBy: userEmail,
       createdAt: now,
       updatedAt: now,
     };
@@ -19369,6 +19459,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
       footerText: "",
       fontScale: 1,
       logoSize: "normal",
+      createdBy: userEmail,
       createdAt: now,
       updatedAt: now,
     });
@@ -19394,6 +19485,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
       footerText: "",
       fontScale: 1,
       logoSize: "normal",
+      createdBy: userEmail,
       createdAt: now,
       updatedAt: now,
     });
@@ -19414,10 +19506,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   // DEL 35: genererer/oppdaterer et lite forhåndsvisningsbilde av menyen ved hver lagring, til bruk
   // i rutenett-listevisningen (se DEL 36/37). Rent kosmetisk - feiler det (nettverk, html2canvas),
   // er menyen uansett allerede lagret, så feilen ignoreres stille.
-  function generateMenuThumbnail(designId: string) {
+  function generateMenuThumbnail(designId: string): Promise<void> {
     const node = previewRef.current;
-    if (!node) return;
-    (async () => {
+    if (!node) return Promise.resolve();
+    return (async () => {
       try {
         const html2canvasMod = await import("html2canvas");
         const html2canvas = html2canvasMod.default;
@@ -19450,8 +19542,11 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     const exists = menuDesigns.some((m) => m.id === toSave.id);
     const next = exists ? menuDesigns.map((m) => m.id === toSave.id ? toSave : m) : [...menuDesigns, toSave];
     updateData({ menuDesigns: next });
-    generateMenuThumbnail(toSave.id);
-    cancelEdit();
+    // VIKTIG: cancelEdit() (som fjerner forhåndsvisningen fra DOM-en) MÅ vente til
+    // miniatyrbilde-fangsten er ferdig - ellers rekker previewRef.current å bli tom/frakoblet FØR
+    // html2canvas får lest den, og miniatyrbildet uteblir stille. Dette var trolig årsaken til at
+    // miniatyrbilder ikke dukket opp etter forrige runde.
+    generateMenuThumbnail(toSave.id).finally(() => cancelEdit());
     return true;
   }
   function duplicateDesign(d: MenuDesign) {
@@ -19461,6 +19556,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
       id: `menu-${Date.now()}`,
       name: `${d.name} kopi`,
       sections: d.sections.map((s) => ({ ...s, id: `sec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, items: s.items.map((it) => ({ ...it, id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` })) })),
+      createdBy: userEmail,
       createdAt: now,
       updatedAt: now,
     };
@@ -19494,6 +19590,27 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   function removeTextBlock(id: string) {
     if (!form) return;
     setForm({ ...form, textBlocks: (form.textBlocks || []).filter((b) => b.id !== id) });
+  }
+  // Bilder i den VANLIGE tekstmeny-editoren (se MenuImageBlock) - i motsetning til bilder i
+  // bilde-plakat-editoren (PosterElement) deltar disse i den lineære blockOrder-rekkefølgen
+  // sammen med seksjoner/tekstfelt, samme mønster som addTextBlock/removeTextBlock over.
+  async function addImageBlock(file: File) {
+    if (!form) return;
+    const path = `menuimg-${Date.now()}-${file.name}`;
+    const { error } = await supabase.storage.from("documents").upload(path, file);
+    if (error) { alert(`Opplasting feilet: ${error.message}`); return; }
+    const block: MenuImageBlock = { id: `img-${Date.now()}`, imageUrl: path, widthPct: 60, align: "center" };
+    setForm({ ...form, imageBlocks: [...(form.imageBlocks || []), block], blockOrder: [...getMenuBlockOrder(form), `imageblock:${block.id}`] });
+    setActiveToolPanel(null);
+    setSelectedKey(`imageblock:${block.id}`);
+  }
+  function patchImageBlock(id: string, patch: Partial<MenuImageBlock>) {
+    if (!form) return;
+    setForm({ ...form, imageBlocks: (form.imageBlocks || []).map((b) => b.id === id ? { ...b, ...patch } : b) });
+  }
+  function removeImageBlock(id: string) {
+    if (!form) return;
+    setForm({ ...form, imageBlocks: (form.imageBlocks || []).filter((b) => b.id !== id) });
   }
   function hideTitleFromPage() {
     if (!form) return;
@@ -19740,7 +19857,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     // den seksjonen som helhet. Dette er også det som gjør at et tekstfelt nå kan plasseres mellom
     // to seksjoner selv om man slipper det midt oppi en av dem, ikke bare nøyaktig på tittelen.
     const blockKeyOf = (key: string) => {
-      if (key.startsWith("textblock:")) return key;
+      if (key.startsWith("textblock:") || key.startsWith("imageblock:")) return key;
       const titleMatch = key.match(/^section:(.+):title$/);
       if (titleMatch) return `section:${titleMatch[1]}`;
       const addItemMatch = key.match(/^section:(.+):additem$/);
@@ -20043,7 +20160,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
         <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 4 }}>
           <b style={{ fontSize: 13 }}>{d.name}</b>
           <span className="muted" style={{ fontSize: 12 }}>
-            {d.type === "poster" ? "Bilde-plakat" : `${d.columns} spalte${d.columns > 1 ? "r" : ""} · ${d.theme === "harbour" ? "Harbour" : "Nøytral"} · ${d.sections.length} seksjon${d.sections.length !== 1 ? "er" : ""}`}
+            Opprettet av: {d.createdBy || "Ukjent (før sporing ble innført)"}
             {d.categoryId && ` · ${(data.menuDesignCategories || []).find((c) => c.id === d.categoryId)?.name || ""}`}
           </span>
           <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
@@ -20337,10 +20454,32 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
             <button className="btn" disabled={readOnly} onClick={addSection}>+ Ny seksjon</button>
             <button className="btn" disabled={readOnly} onClick={addTextBlock}>+ Tekstfelt</button>
+            <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: readOnly ? "default" : "pointer" }}>
+              + Bilde
+              <input type="file" accept="image/*" disabled={readOnly} style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (file) addImageBlock(file); e.target.value = ""; }} />
+            </label>
+            <button className="btn" disabled={readOnly || form.sections.length === 0} onClick={() => {
+              if (form.sections.length === 1) { setSelectedKey(`section:${form.sections[0].id}:additem`); setActiveToolPanel(null); }
+              else { setSelectedKey(null); setActiveToolPanel(activeToolPanel === "addItem" ? null : "addItem"); }
+            }}>+ Legg til rett</button>
             <button className={`btn${activeToolPanel === "import" ? " active" : ""}`} disabled={readOnly} onClick={() => { setSelectedKey(null); setActiveToolPanel(activeToolPanel === "import" ? null : "import"); }}>Importer produkt</button>
             <button className={`btn${activeToolPanel === "logo" ? " active" : ""}`} onClick={() => { setSelectedKey(null); setActiveToolPanel(activeToolPanel === "logo" ? null : "logo"); }}>Logo</button>
             <button className={`btn${activeToolPanel === "settings" ? " active" : ""}`} onClick={() => { setSelectedKey(null); setActiveToolPanel(activeToolPanel === "settings" ? null : "settings"); }}>Innstillinger</button>
           </div>
+
+          {activeToolPanel === "addItem" && (
+            <div className="soft-box" style={{ marginBottom: 12 }}>
+              <div className="between">
+                <b>Legg til rett - velg seksjon</b>
+                <button className="link" onClick={() => setActiveToolPanel(null)}>Lukk</button>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                {form.sections.map((s) => (
+                  <button key={s.id} type="button" className="btn" onClick={() => { setActiveToolPanel(null); setSelectedKey(`section:${s.id}:additem`); }}>{s.title || "(uten tittel)"}</button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {activeToolPanel === "import" && (
             <div className="soft-box" style={{ marginBottom: 12 }}>
@@ -20452,7 +20591,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
             <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick} onDragStart={handlePreviewDragStart} onDragOver={handlePreviewDragOver} onDrop={handlePreviewDrop}>
               <div
                 ref={previewRef}
-                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly }) }}
+                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly, resolvedImageUrls: resolvedImageBlockUrls }) }}
               />
             </div>
           </div>
@@ -20489,6 +20628,8 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 onFetchMenuPrice={(p) => { setForm({ ...form, menuPrice: `Kr ${p.customerPrice},-` }); setMenuPriceFetchSearch(""); }}
                 onHideTitle={hideTitleFromPage}
                 onRemoveMenuPrice={removeMenuPrice}
+                onPatchImageBlock={patchImageBlock}
+                onDeleteImageBlock={removeImageBlock}
               />
             </div>
           )}
