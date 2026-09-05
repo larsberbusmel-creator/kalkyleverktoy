@@ -467,6 +467,11 @@ type MenuDesign = {
                          // mangler en nøkkel i den (nye seksjoner/tekstfelt/tittel), faller/utvides
                          // den automatisk med naturlig rekkefølge - tittelen havner ØVERST som
                          // standard når den ikke er eksplisitt plassert av brukeren ennå.
+  columnAssignments?: Record<string, number>; // manuell spalte-låsing for 2-3 spalter: nøkkel er
+                              // samme blockOrder-nøkkel som over ("section:{id}" / "textblock:{id}" /
+                              // "imageblock:{id}", IKKE frie bilder), verdi er 0-basert spalteindeks.
+                              // Mangler en nøkkel her (standard), fordeles elementet automatisk etter
+                              // vekt - se blockWeight/columnsBlock i buildMenuHtml (DEL 2).
   hideTitle?: boolean; // skjuler tittel-blokken PÅ SELVE MENYSIDEN når true - design.name (det
                        // interne navnet på menyen) beholdes uansett og brukes fortsatt i
                        // listevisningen, print-vinduets <title> og Dokumentbank-filnavn.
@@ -18644,7 +18649,8 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
     return `<p class="${cls}"${dragAttr} data-menu-key="textblock:${b.id}" data-menu-block="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, fallbackFamily, fallbackPx)}${grabStyle}">${escapeHtml(b.text)}</p>`;
   }
 
-  const blocksHtml = getMenuBlockOrder(design).map((key) => {
+  const menuBlockOrder = getMenuBlockOrder(design);
+  function renderBlock(key: string): string {
     if (key === "title") {
       return `<div class="menu-title"${dragAttr} data-menu-key="title" data-menu-block="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>`;
     }
@@ -18661,11 +18667,50 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
       return b ? renderImageBlock(b) : "";
     }
     return "";
-  }).join("");
+  }
+  const blocksHtml = menuBlockOrder.map(renderBlock).join("");
 
-  const columnsBlock = design.columns === 1
-    ? `<div class="menu-columns" style="flex:1;display:flex;flex-direction:column;justify-content:${sparse ? "space-evenly" : "flex-start"}">${blocksHtml}</div>`
-    : `<div class="menu-columns" style="column-count:${design.columns}">${blocksHtml}</div>`;
+  // Grov "vekt" per blokk (samme prinsipp som totalCount/sparse over) - brukes KUN til å fordele
+  // seksjoner/tekstfelt/bilder jevnt mellom spaltene under, ikke til selve utseendet/stilen.
+  function blockWeight(key: string): number {
+    if (key.startsWith("section:")) {
+      const s = sectionsById[key.slice("section:".length)];
+      return s ? 2 + s.items.length : 1;
+    }
+    if (key.startsWith("textblock:")) {
+      const b = textBlocksById[key.slice("textblock:".length)];
+      return b?.kind === "heading" ? 2 : 1;
+    }
+    if (key.startsWith("imageblock:")) return 3;
+    return 1; // "title"
+  }
+
+  // For 2-3 spalter: erstatter CSS column-count (som balanserer spaltene etter faktisk rendret
+  // høyde, og dermed IGNORERER rekkefølgen brukeren har satt via dra-og-slipp) med en app-styrt
+  // fordeling. Standard: hver blokk går til spalten med lavest vekt SÅ LANGT (behandlet i
+  // blockOrder-rekkefølge) - en tilnærming til dagens automatiske balansering, ikke pikselnøyaktig
+  // lik column-count, men forutsigbar og kompatibel med manuell overstyring. Brukeren kan låse en
+  // gitt seksjon/tekstfelt/bilde til en bestemt spalte via design.columnAssignments (satt i
+  // egenskaps-boksen, se MenuPropertyPanel/onSetColumn) - da hopper den rett til akkurat den
+  // spalten uansett vekt, og resten fordeles rundt den som normalt. En låst spalteindeks som ikke
+  // lenger finnes (f.eks. spalte 3 etter at menyen er satt ned til 2 spalter) ignoreres stille og
+  // faller tilbake til automatisk fordeling, i stedet for å feile.
+  let columnsBlock: string;
+  if (design.columns === 1) {
+    columnsBlock = `<div class="menu-columns" style="flex:1;display:flex;flex-direction:column;justify-content:${sparse ? "space-evenly" : "flex-start"}">${blocksHtml}</div>`;
+  } else {
+    const columnAssignments = design.columnAssignments || {};
+    const buckets: string[][] = Array.from({ length: design.columns }, () => []);
+    const weights = new Array(design.columns).fill(0);
+    menuBlockOrder.forEach((key) => {
+      const pinned = columnAssignments[key];
+      const col = (pinned !== undefined && pinned >= 0 && pinned < design.columns) ? pinned : weights.indexOf(Math.min(...weights));
+      buckets[col].push(key);
+      weights[col] += blockWeight(key);
+    });
+    const columnsHtml = buckets.map((keys) => `<div class="menu-column" style="flex:1;min-width:0">${keys.map(renderBlock).join("")}</div>`).join("");
+    columnsBlock = `<div class="menu-columns" style="display:flex;gap:28px;align-items:flex-start">${columnsHtml}</div>`;
+  }
 
   return `
     <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
@@ -18818,7 +18863,7 @@ function MenuFontPicker({ value, onPick, readOnly }: { value?: string; onPick: (
 // og lar brukeren redigere selve teksten (kontrollert felt, IKKE in-place i previewen - se
 // designbeslutningen i toppen av denne runden) samt font/størrelse/farge, eller skillelinjens
 // synlighet/farge.
-function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice, onPatchImageBlock, onDeleteImageBlock, onSetImageFree, onSetImageFlow }: {
+function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice, onPatchImageBlock, onDeleteImageBlock, onSetImageFree, onSetImageFlow, onSetColumn }: {
   form: MenuDesign;
   selectedKey: string;
   onClose: () => void;
@@ -18853,6 +18898,7 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   onDeleteImageBlock: (id: string) => void;
   onSetImageFree: (id: string) => void;
   onSetImageFlow: (id: string) => void;
+  onSetColumn: (key: string, column: number | undefined) => void;
 }) {
   // "+ Legg til rett" - klikkbar pseudo-rad nederst i hver seksjon i forhåndsvisningen (finnes
   // ikke som ekte MenuItem, kun i editorPreview-HTML-en fra buildMenuHtml, se DEL 18).
@@ -18920,6 +18966,21 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
             ))}
           </div>
         </div>
+        {form.columns > 1 && (() => {
+          const columnKey = `imageblock:${block.id}`;
+          const pinned = (form.columnAssignments || {})[columnKey];
+          return (
+            <div style={{ marginTop: 12 }}>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Spalte</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className={`btn${pinned === undefined ? " active" : ""}`} disabled={readOnly} onClick={() => onSetColumn(columnKey, undefined)}>Automatisk</button>
+                {Array.from({ length: form.columns }, (_, i) => i).map((i) => (
+                  <button key={i} type="button" className={`btn${pinned === i ? " active" : ""}`} disabled={readOnly} onClick={() => onSetColumn(columnKey, i)}>{i + 1}</button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
         <button className="link" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => onSetImageFree(block.id)}>Gi fri plassering (dra/roter/endre størrelse)</button>
         <button className="link danger" style={{ marginTop: 8, display: "block" }} disabled={readOnly} onClick={() => { onDeleteImageBlock(block.id); onClose(); }}>Slett bilde</button>
       </div>
@@ -19051,6 +19112,24 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
           <button type="button" className={`btn${style.underline ? " active" : ""}`} disabled={readOnly} onClick={() => patchTextStyle(selectedKey, { underline: !style.underline })}>Understrek</button>
         </div>
       </div>
+      {(sectionTitleMatch || textBlockMatch) && form.columns > 1 && (() => {
+        // Seksjonens blockOrder-nøkkel er "section:{id}" UTEN ":title" - selve teksten som redigeres
+        // over er "section:{id}:title", men spalteplasseringen gjelder hele seksjonen. For
+        // tekstfelt/overskrifter er selectedKey ("textblock:{id}") allerede den riktige nøkkelen.
+        const columnKey = sectionTitleMatch ? `section:${sectionTitleMatch[1]}` : selectedKey;
+        const pinned = (form.columnAssignments || {})[columnKey];
+        return (
+          <div style={{ marginTop: 12 }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Spalte</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" className={`btn${pinned === undefined ? " active" : ""}`} disabled={readOnly} onClick={() => onSetColumn(columnKey, undefined)}>Automatisk</button>
+              {Array.from({ length: form.columns }, (_, i) => i).map((i) => (
+                <button key={i} type="button" className={`btn${pinned === i ? " active" : ""}`} disabled={readOnly} onClick={() => onSetColumn(columnKey, i)}>{i + 1}</button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       {sectionTitleMatch && (
         <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteSection(sectionTitleMatch[1]); onClose(); }}>Slett seksjon</button>
       )}
@@ -19816,6 +19895,16 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
       imageBlocks: (form.imageBlocks || []).map((b) => b.id === id ? { ...b, placement: "flow" as const } : b),
       blockOrder: [...getMenuBlockOrder(form), `imageblock:${id}`],
     });
+  }
+  // Låser (eller fjerner låsen på) hvilken spalte en seksjon/tekstfelt/innsatt bilde skal havne i
+  // ved 2-3 spalter - se columnAssignments (DEL 1) og fordelingen i buildMenuHtml (DEL 2).
+  // column === undefined fjerner en eksisterende lås (tilbake til automatisk fordeling).
+  function setBlockColumn(key: string, column: number | undefined) {
+    if (!form) return;
+    const next = { ...(form.columnAssignments || {}) };
+    if (column === undefined) delete next[key];
+    else next[key] = column;
+    setForm({ ...form, columnAssignments: next });
   }
   // Mousedown-håndtering for ETT fritt bilde - beregner mm-per-piksel fra previewRef sin faktiske
   // bredde (samme fremgangsmåte som onElementMouseDown i PosterMenuEditor), slik at dra/endre
@@ -20975,6 +21064,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 onDeleteImageBlock={removeImageBlock}
                 onSetImageFree={setImageBlockFree}
                 onSetImageFlow={setImageBlockFlow}
+                onSetColumn={setBlockColumn}
               />
             </div>
           )}
