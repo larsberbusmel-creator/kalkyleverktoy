@@ -18427,7 +18427,7 @@ body{margin:0}
 .menu-price{text-align:center;font-weight:700;margin-top:12px}
 .menu-text-block{margin:8px 0 0;white-space:pre-wrap;break-inside:avoid}
 .menu-page [draggable="true"]:hover{outline:1px dashed #cbd5e1;outline-offset:2px}
-.menu-add-item-row{margin-top:8px;padding:4px 8px;border:1px dashed #cbd5e1;border-radius:6px;color:#64748b;font-size:12px;font-style:italic;cursor:pointer;display:inline-block}
+.menu-add-item-row{margin-top:4px;padding:2px 8px;border:1px dashed #cbd5e1;border-radius:6px;color:#64748b;font-size:12px;font-style:italic;cursor:pointer;display:inline-block}
 .pdf-export .menu-empty-placeholder{visibility:hidden}
 .pdf-export .menu-add-item-row{display:none}
 .menu-footer{text-align:center;margin-top:16px;color:#64748b}
@@ -18494,8 +18494,8 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
   // seksjoner/retter direkte som et praktisk, likeverdig alternativ.
   const totalCount = design.sections.length + design.sections.reduce((sum, s) => sum + s.items.length, 0) + (design.textBlocks || []).length;
   const sparse = totalCount > 0 && totalCount < 9;
-  const sectionGap = sparse ? 40 : 20;
-  const itemGap = sparse ? 16 : 8;
+  const sectionGap = sparse ? 28 : 20;
+  const itemGap = sparse ? 12 : 8;
   // Kun i redigerings-forhåndsvisningen (ALDRI i print/PDF, og ALDRI for en leser uten
   // redigeringstilgang) gjøres seksjonstitler/retter/tekstfelt draggable="true", for
   // dra-og-slipp-omorganisering (se handlePreviewDragStart/-Drop i MenuDesignTab, DEL 20).
@@ -19721,22 +19721,40 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
     const toKey = target?.getAttribute("data-menu-key");
     const fromKey = e.dataTransfer.getData("text/menu-drag-key");
-    if (!toKey || !fromKey || toKey === fromKey) return;
-    const blockKeyOf = (key: string) => {
-      if (key.startsWith("textblock:")) return key;
-      const m = key.match(/^section:(.+):title$/);
-      return m ? `section:${m[1]}` : null;
-    };
-    const fromBlock = blockKeyOf(fromKey);
-    const toBlock = blockKeyOf(toKey);
-    if (fromBlock && toBlock) { reorderBlocks(fromBlock, toBlock); return; }
+    if (!toKey || !fromKey || toKey === fromKey || !form) return;
+
+    // Sjekkes FØRST: bytte plass på to RETTER INNAD I SAMME SEKSJON (uendret oppførsel siden
+    // starten). Må sjekkes før blokk-nivå-oppløsningen under - ellers ville begge slå ut som
+    // "samme seksjon på blokknivå" og bli avvist som en no-op FØR retter-ombyttingen fikk kjøre.
     const itemMatch = (key: string) => key.match(/^item:(.+):name$/);
     const fromItem = itemMatch(fromKey);
     const toItem = itemMatch(toKey);
-    if (fromItem && toItem && form) {
+    if (fromItem && toItem) {
       const section = form.sections.find((s) => s.items.some((it) => it.id === toItem[1]) && s.items.some((it) => it.id === fromItem[1]));
-      if (section) reorderItems(section.id, fromItem[1], toItem[1]);
+      if (section) { reorderItems(section.id, fromItem[1], toItem[1]); return; }
     }
+
+    // Blokk-nivå (seksjoner og tekstfelt om hverandre). UTVIDET fra kun å gjenkjenne et slipp
+    // NØYAKTIG på seksjonstittelen (et alt for lite treffområde i praksis) til å gjenkjenne et
+    // slipp HVOR SOM HELST inni en seksjon (rett/pris/allergener/"+ Legg til rett") som et slipp PÅ
+    // den seksjonen som helhet. Dette er også det som gjør at et tekstfelt nå kan plasseres mellom
+    // to seksjoner selv om man slipper det midt oppi en av dem, ikke bare nøyaktig på tittelen.
+    const blockKeyOf = (key: string) => {
+      if (key.startsWith("textblock:")) return key;
+      const titleMatch = key.match(/^section:(.+):title$/);
+      if (titleMatch) return `section:${titleMatch[1]}`;
+      const addItemMatch = key.match(/^section:(.+):additem$/);
+      if (addItemMatch) return `section:${addItemMatch[1]}`;
+      const itemKeyMatch = key.match(/^item:(.+):(name|price|allergens)$/);
+      if (itemKeyMatch) {
+        const owningSection = form.sections.find((s) => s.items.some((it) => it.id === itemKeyMatch[1]));
+        return owningSection ? `section:${owningSection.id}` : null;
+      }
+      return null;
+    };
+    const fromBlock = blockKeyOf(fromKey);
+    const toBlock = blockKeyOf(toKey);
+    if (fromBlock && toBlock) reorderBlocks(fromBlock, toBlock);
   }
 
   // Importer produkt: ALLE linjene på produktet (uansett itemType - product/recipe/material)
