@@ -471,6 +471,14 @@ type MenuDesign = {
                          // generateMenuThumbnail) - løses til signert URL i rutenett-listevisningen.
   posterElements?: PosterElement[]; // fritt plasserte bilde-/tekstelementer for "poster"-typen.
   posterBackgroundColor?: string; // bakgrunnsfarge for lerretet (poster-typen), default hvit.
+  backgroundMode?: "none" | "color" | "pattern" | "image"; // bakgrunn PÅ SELVE MENYSIDEN (kun
+                              // "text"-menyer - poster har posterBackgroundColor). Udefinert/"none"
+                              // = dagens hvite bakgrunn.
+  backgroundColor?: string; // brukt for "color" (fyller hele siden) OG som "blekk"-farge for
+                              // "pattern" (mønsteret tegnes i denne fargen mot hvit bunn).
+  backgroundPattern?: "dots" | "stripes" | "grid" | "diagonal"; // kun brukt når backgroundMode === "pattern"
+  backgroundImageUrl?: string; // storage path i "documents"-bucketen, kun brukt når backgroundMode === "image"
+  backgroundOpacity?: number; // 0-100. Mangler feltet: 100 for "color", 20 for "pattern"/"image".
   imageBlocks?: MenuImageBlock[]; // bilder satt inn i den VANLIGE tekstmeny-editoren, se
                                   // MenuImageBlock - deltar i blockOrder sammen med seksjoner/
                                   // tekstfelt. IKKE det samme som posterElements (poster-typen).
@@ -487,9 +495,9 @@ type MenuDesign = {
 // "item:{itemId}:name" | "item:{itemId}:description" | "item:{itemId}:price".
 // Nøkler i dividerStyles: sectionId direkte (én skillelinje under hver seksjonstittel).
 // Mangler et element en overstyring, brukes tema/tekststørrelse/standardfarge som i dag.
-type MenuTextStyle = { fontKey?: string; sizePx?: number; color?: string; textAlign?: "left" | "center" | "right" };
+type MenuTextStyle = { fontKey?: string; sizePx?: number; color?: string; textAlign?: "left" | "center" | "right"; bold?: boolean; italic?: boolean; underline?: boolean };
 type MenuDividerStyle = { enabled: boolean; color?: string };
-type MenuTextBlock = { id: string; text: string };
+type MenuTextBlock = { id: string; text: string; kind?: "body" | "heading" }; // "heading" = opprettet via "+ Overskrift" (større/fet som standard) - fullt likestilt med "body" ellers: samme blockOrder, samme dra-og-slipp, samme stil-boks
 type MenuTemplate = { id: string; name: string; columns: 1 | 2 | 3; theme: "harbour" | "standard"; footerText?: string; fontScale?: number; logoSize?: "liten" | "normal" | "stor" };
 
 // Fast standardmal per sted for "+ Ny meny" (fottekst/logo/tema/spalter/
@@ -18418,6 +18426,28 @@ const MENU_PAGE = {
   fontPx: { title: 28, section: 20, body: 14, desc: 13, footer: 12 },
 };
 
+const MENU_BG_PATTERNS: Record<string, (color: string) => { image: string; size: string }> = {
+  dots:     (c) => ({ image: `radial-gradient(${c} 1.4px, transparent 1.4px)`, size: "16px 16px" }),
+  stripes:  (c) => ({ image: `repeating-linear-gradient(0deg, ${c} 0 2px, transparent 2px 14px)`, size: "auto" }),
+  grid:     (c) => ({ image: `linear-gradient(${c} 1px, transparent 1px), linear-gradient(90deg, ${c} 1px, transparent 1px)`, size: "24px 24px" }),
+  diagonal: (c) => ({ image: `repeating-linear-gradient(45deg, ${c} 0 2px, transparent 2px 14px)`, size: "auto" }),
+};
+// Bygger inline-CSS for det usynlige bakgrunnslaget (.menu-page-background, se menuDesignStyleTag)
+// bak all tekst/bilder på selve menysiden. resolvedBackgroundImageUrl er den FERDIG SIGNERTE
+// URL-en for "image"-modus (denne funksjonen bygger en ren streng uten Supabase-tilgang).
+function menuBackgroundCss(design: MenuDesign, resolvedBackgroundImageUrl?: string): string {
+  const mode = design.backgroundMode || "none";
+  if (mode === "none") return "display:none";
+  const opacity = (design.backgroundOpacity ?? (mode === "color" ? 100 : 20)) / 100;
+  if (mode === "color") return `background-color:${design.backgroundColor || "#f1f5f9"};opacity:${opacity}`;
+  if (mode === "pattern") {
+    const pattern = MENU_BG_PATTERNS[design.backgroundPattern || "dots"](design.backgroundColor || "#94a3b8");
+    return `background-image:${pattern.image};background-size:${pattern.size};opacity:${opacity}`;
+  }
+  if (mode === "image" && resolvedBackgroundImageUrl) return `background-image:url('${resolvedBackgroundImageUrl}');background-size:cover;background-position:center;opacity:${opacity}`;
+  return "display:none";
+}
+
 function menuDesignStyleTag(orientation?: "portrait" | "landscape") {
   const pageWidthMm = orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
   const pageHeightMm = orientation === "landscape" ? MENU_PAGE.widthMm : MENU_PAGE.heightMm;
@@ -18441,7 +18471,12 @@ body{margin:0}
 .menu-item-allergens{margin:2px 0 0;font-size:11px}
 .menu-price{text-align:center;font-weight:700;margin-top:12px}
 .menu-text-block{margin:8px 0 0;white-space:pre-wrap;break-inside:avoid}
+.menu-heading{margin:8px 0 0;white-space:pre-wrap;break-inside:avoid;font-weight:700}
+.menu-page-background{position:absolute;inset:0;z-index:-1;pointer-events:none}
 .menu-page [draggable="true"]:hover{outline:1px dashed #cbd5e1;outline-offset:2px}
+[data-menu-block].drag-over{background:rgba(100,116,139,.10);border-radius:4px}
+[data-menu-block].drag-over-before{box-shadow:inset 0 3px 0 0 #2563eb}
+[data-menu-block].drag-over-after{box-shadow:inset 0 -3px 0 0 #2563eb}
 .menu-add-item-row{margin-top:4px;padding:2px 8px;border:1px dashed #cbd5e1;border-radius:6px;color:#64748b;font-size:12px;font-style:italic;cursor:pointer;display:inline-block}
 .pdf-export .menu-empty-placeholder{visibility:hidden}
 .pdf-export .menu-add-item-row{display:none}
@@ -18479,7 +18514,7 @@ function getMenuBlockOrder(design: MenuDesign): string[] {
 // kilde til sannhet i stedet for flere parallelle implementasjoner.
 // resolvedLogoUrl er den FERDIG SIGNERTE URL-en (ikke storage-path), siden
 // denne funksjonen bygger en ren HTML-streng uten tilgang til Supabase-klienten.
-function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean; readOnly?: boolean; resolvedImageUrls?: Record<string, string> }): string {
+function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean; readOnly?: boolean; resolvedImageUrls?: Record<string, string>; resolvedBackgroundImageUrl?: string }): string {
   const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const scale = design.fontScale || 1;
@@ -18496,7 +18531,13 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
     const family = o?.fontKey ? (menuFontFamily(o.fontKey) || fallbackFamily) : fallbackFamily;
     const sizePx = o?.sizePx ? `${o.sizePx}px` : px(fallbackPx);
     const color = o?.color || fallbackColor;
-    return `font-family:${family};font-size:${sizePx}${color ? `;color:${color}` : ""}${o?.textAlign ? `;text-align:${o.textAlign}` : ""}`;
+    const extra = [
+      o?.textAlign ? `text-align:${o.textAlign}` : "",
+      o?.bold ? "font-weight:700" : "",
+      o?.italic ? "font-style:italic" : "",
+      o?.underline ? "text-decoration:underline" : "",
+    ].filter(Boolean).join(";");
+    return `font-family:${family};font-size:${sizePx}${color ? `;color:${color}` : ""}${extra ? `;${extra}` : ""}`;
   }
   function dividerStyleFor(sectionId: string): MenuDividerStyle {
     return (design.dividerStyles || {})[sectionId] || { enabled: true, color: "#111827" };
@@ -18537,13 +18578,13 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
         ? `<div class="menu-empty-placeholder"${dragAttr} data-menu-key="imageblock:${b.id}" style="width:${b.widthPct || 60}%;margin:${marginCss};aspect-ratio:4/3;background:#f1f5f9;border:1px dashed #cbd5e1;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-style:italic;font-size:12px;cursor:grab">Bilde mangler</div>`
         : "";
     }
-    return `<img class="menu-image-block"${dragAttr} data-menu-key="imageblock:${b.id}" src="${src}" style="width:${b.widthPct || 60}%;display:block;margin:${marginCss};${grabStyle}" alt="" />`;
+    return `<img class="menu-image-block"${dragAttr} data-menu-key="imageblock:${b.id}" data-menu-block="imageblock:${b.id}" src="${src}" style="width:${b.widthPct || 60}%;display:block;margin:${marginCss};${grabStyle}" alt="" />`;
   }
 
   function renderSection(s: MenuSection): string {
     const divider = dividerStyleFor(s.id);
     return `
-    <div class="menu-section" style="margin-bottom:${sectionGap}px">
+    <div class="menu-section" data-menu-block="section:${s.id}" style="margin-bottom:${sectionGap}px">
       <h2${dragAttr} data-menu-key="section:${s.id}:title" style="${overriddenStyle(`section:${s.id}:title`, headingFont, MENU_PAGE.fontPx.section)}${grabStyle}">${escapeHtml(s.title)}</h2>
       ${divider.enabled ? `<div class="menu-divider" data-menu-key="section:${s.id}:divider" style="height:2px;background:${divider.color || "#111827"}"></div>` : ""}
       ${s.items.map((it) => `
@@ -18568,17 +18609,21 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
   }
 
   function renderTextBlock(b: MenuTextBlock): string {
+    const isHeading = b.kind === "heading";
+    const cls = isHeading ? "menu-heading" : "menu-text-block";
+    const fallbackFamily = isHeading ? headingFont : bodyFont;
+    const fallbackPx = isHeading ? MENU_PAGE.fontPx.section : MENU_PAGE.fontPx.body;
     if (!b.text.trim()) {
       return opts?.editorPreview
-        ? `<p class="menu-text-block menu-empty-placeholder"${dragAttr} data-menu-key="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, bodyFont, MENU_PAGE.fontPx.body)};color:#94a3b8;font-style:italic;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px;display:inline-block;cursor:grab">+ tekstfelt</p>`
+        ? `<p class="${cls} menu-empty-placeholder"${dragAttr} data-menu-key="textblock:${b.id}" data-menu-block="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, fallbackFamily, fallbackPx)};color:#94a3b8;font-style:italic;border:1px dashed #cbd5e1;border-radius:4px;padding:0 6px;display:inline-block;cursor:grab">${isHeading ? "+ overskrift" : "+ tekstfelt"}</p>`
         : "";
     }
-    return `<p class="menu-text-block"${dragAttr} data-menu-key="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, bodyFont, MENU_PAGE.fontPx.body)}${grabStyle}">${escapeHtml(b.text)}</p>`;
+    return `<p class="${cls}"${dragAttr} data-menu-key="textblock:${b.id}" data-menu-block="textblock:${b.id}" style="${overriddenStyle(`textblock:${b.id}`, fallbackFamily, fallbackPx)}${grabStyle}">${escapeHtml(b.text)}</p>`;
   }
 
   const blocksHtml = getMenuBlockOrder(design).map((key) => {
     if (key === "title") {
-      return `<div class="menu-title"${dragAttr} data-menu-key="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>`;
+      return `<div class="menu-title"${dragAttr} data-menu-key="title" data-menu-block="title" style="${overriddenStyle("title", headingFont, MENU_PAGE.fontPx.title)}">${escapeHtml(design.name)}</div>`;
     }
     if (key.startsWith("section:")) {
       const s = sectionsById[key.slice("section:".length)];
@@ -18601,6 +18646,7 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
 
   return `
     <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
+      <div class="menu-page-background" style="${menuBackgroundCss(design, opts?.resolvedBackgroundImageUrl)}"></div>
       ${resolvedLogoUrl ? `<img class="menu-logo" style="max-height:${logoSize.maxHeightMm}mm;max-width:${logoSize.maxWidthPct}%" src="${resolvedLogoUrl}" alt="Logo" />` : ""}
       <div class="menu-main">
         ${columnsBlock}
@@ -18665,7 +18711,12 @@ async function printMenuDesign(design: MenuDesign) {
     const { data } = await supabase.storage.from("documents").createSignedUrl(b.imageUrl, 60 * 60);
     if (data?.signedUrl) resolvedImageUrls[b.id] = data.signedUrl;
   }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag(design.orientation)}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl, { resolvedImageUrls })}</body></html>`);
+  let resolvedBackgroundImageUrl: string | undefined;
+  if (design.backgroundMode === "image" && design.backgroundImageUrl) {
+    const { data } = await supabase.storage.from("documents").createSignedUrl(design.backgroundImageUrl, 60 * 60);
+    resolvedBackgroundImageUrl = data?.signedUrl;
+  }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag(design.orientation)}</head><body><button onclick="window.print()">Print</button>${buildMenuHtml(design, logoUrl, { resolvedImageUrls, resolvedBackgroundImageUrl })}</body></html>`);
   w.document.close(); w.focus();
 }
 
@@ -18951,6 +19002,14 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
           ))}
         </div>
       </div>
+      <div style={{ marginTop: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Stil</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button type="button" className={`btn${style.bold ? " active" : ""}`} disabled={readOnly} onClick={() => patchTextStyle(selectedKey, { bold: !style.bold })}>Fet</button>
+          <button type="button" className={`btn${style.italic ? " active" : ""}`} disabled={readOnly} onClick={() => patchTextStyle(selectedKey, { italic: !style.italic })}>Kursiv</button>
+          <button type="button" className={`btn${style.underline ? " active" : ""}`} disabled={readOnly} onClick={() => patchTextStyle(selectedKey, { underline: !style.underline })}>Understrek</button>
+        </div>
+      </div>
       {sectionTitleMatch && (
         <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteSection(sectionTitleMatch[1]); onClose(); }}>Slett seksjon</button>
       )}
@@ -19214,10 +19273,19 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const [resolvedLogoUrl, setResolvedLogoUrl] = useState<string | undefined>(undefined);
+  const [resolvedBackgroundImageUrl, setResolvedBackgroundImageUrl] = useState<string | undefined>(undefined);
+  const [bgUploading, setBgUploading] = useState(false);
   // Løser storage-path -> signert URL for hvert bilde satt inn i selve tekstmeny-editoren (se
   // MenuImageBlock/addImageBlock) - samme mønster som resolvedLogoUrl under.
   const [resolvedImageBlockUrls, setResolvedImageBlockUrls] = useState<Record<string, string>>({});
   const previewRef = useRef<HTMLDivElement | null>(null);
+  // DEL 60/76: holder styr på HVILKET DOM-element som sist ble markert som dra-og-slipp-mål, slik
+  // at markeringen kan fjernes igjen uten React-state (unngår re-render for hver dragover-hendelse).
+  const dragOverElRef = useRef<HTMLElement | null>(null);
+  // DEL 73/80: antall sider innholdet faktisk fyller akkurat nå (målt fra forhåndsvisningens
+  // reelle høyde, se måle-effekten under) + sidehøyden i px - kun til det visuelle
+  // sideskille-overlegget i redigeringsvisningen, påvirker ALDRI selve print/PDF-logikken.
+  const [pageGuideInfo, setPageGuideInfo] = useState<{ pages: number; pageHeightPx: number }>({ pages: 1, pageHeightPx: 0 });
   // DEL 35: holder alltid siste menuDesigns-array tilgjengelig for den ASYNKRONE
   // miniatyrbilde-oppdateringen i generateMenuThumbnail under.
   const menuDesignsRef = useRef(menuDesigns);
@@ -19314,6 +19382,20 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     return () => { cancelled = true; };
   }, [form?.logoUrl]);
 
+  // Løser signert URL for sidebakgrunnen (kun relevant når backgroundMode === "image") - samme
+  // mønster som resolvedLogoUrl over.
+  useEffect(() => {
+    setResolvedBackgroundImageUrl(undefined);
+    if (form?.backgroundMode !== "image" || !form?.backgroundImageUrl) return;
+    let cancelled = false;
+    supabase.storage.from("documents").createSignedUrl(form.backgroundImageUrl, 60 * 60).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { console.error("Kunne ikke hente bakgrunnsbilde:", error); return; }
+      if (data?.signedUrl) setResolvedBackgroundImageUrl(data.signedUrl);
+    });
+    return () => { cancelled = true; };
+  }, [form?.backgroundMode, form?.backgroundImageUrl]);
+
   // Løser signerte URL-er for ALLE bildeblokker i den vanlige tekstmeny-editoren (se
   // MenuImageBlock) - samme signert-URL-mønster som logoen over, men for flere bilder samtidig.
   useEffect(() => {
@@ -19326,6 +19408,31 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     })).then((pairs) => { if (!cancelled) setResolvedImageBlockUrls(Object.fromEntries(pairs)); });
     return () => { cancelled = true; };
   }, [(form?.imageBlocks || []).map((b) => `${b.id}:${b.imageUrl}`).join(",")]);
+
+  // DEL 3 (runde 10): rent visuelt hjelpelag i redigeringsforhåndsvisningen som viser hvor
+  // print/PDF faktisk vil bryte til neste A4-side - print/PDF bryter allerede riktig i dag (se
+  // printMenuDesign/downloadMenuAsPdf), dette gjør bare det synlig MENS man redigerer. Måler den
+  // FAKTISKE gjengitte høyden (inkl. alt som flyter utover den "pene" 297mm-boksen) via
+  // ResizeObserver, og regner ut hvor mange hele sider det tilsvarer.
+  useEffect(() => {
+    const node = previewRef.current;
+    if (!node) return;
+    const measure = () => {
+      if (form?.type === "poster") { setPageGuideInfo({ pages: 1, pageHeightPx: 0 }); return; }
+      const widthPx = node.clientWidth || node.getBoundingClientRect().width;
+      const heightPx = node.scrollHeight;
+      if (!widthPx) return;
+      const pageWidthMm = form?.orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
+      const pageHeightMm = form?.orientation === "landscape" ? MENU_PAGE.widthMm : MENU_PAGE.heightMm;
+      const pxPerMm = widthPx / pageWidthMm;
+      const pageHeightPx = pageHeightMm * pxPerMm;
+      if (pageHeightPx > 0) setPageGuideInfo({ pages: Math.max(1, Math.ceil(heightPx / pageHeightPx)), pageHeightPx });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [form?.orientation, form?.type]);
 
   useEffect(() => {
     setResolvedDefaultsLogoUrl(undefined);
@@ -19355,6 +19462,24 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     if (!confirm("Fjerne logoen fra denne menyen?")) return;
     const path = form.logoUrl;
     setForm({ ...form, logoUrl: undefined });
+    await supabase.storage.from("documents").remove([path]).catch(() => {});
+  }
+  async function uploadMenuBackgroundImage(file: File) {
+    setBgUploading(true);
+    try {
+      const path = `menu-backgrounds/${Date.now()}-${file.name}`;
+      const { error } = await supabase.storage.from("documents").upload(path, file);
+      if (error) { alert(`Opplasting feilet: ${error.message}`); return; }
+      setForm((prev) => prev ? { ...prev, backgroundImageUrl: path } : prev);
+    } finally {
+      setBgUploading(false);
+    }
+  }
+  async function removeMenuBackgroundImage() {
+    if (!form?.backgroundImageUrl) return;
+    if (!confirm("Fjerne bakgrunnsbildet fra denne menyen?")) return;
+    const path = form.backgroundImageUrl;
+    setForm({ ...form, backgroundImageUrl: undefined });
     await supabase.storage.from("documents").remove([path]).catch(() => {});
   }
 
@@ -19591,6 +19716,15 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     if (!form) return;
     setForm({ ...form, textBlocks: (form.textBlocks || []).filter((b) => b.id !== id) });
   }
+  // "+ Overskrift" - samme mekanisme som addTextBlock (samme blockOrder/dra-og-slipp/stil-boks),
+  // eneste forskjell er kind: "heading" (større/fet som standard via .menu-heading, se DEL 66).
+  function addHeadingBlock() {
+    if (!form) return;
+    const block: MenuTextBlock = { id: `txt-${Date.now()}`, text: "", kind: "heading" };
+    setForm({ ...form, textBlocks: [...(form.textBlocks || []), block], blockOrder: [...getMenuBlockOrder(form), `textblock:${block.id}`] });
+    setActiveToolPanel(null);
+    setSelectedKey(`textblock:${block.id}`);
+  }
   // Bilder i den VANLIGE tekstmeny-editoren (se MenuImageBlock) - i motsetning til bilder i
   // bilde-plakat-editoren (PosterElement) deltar disse i den lineære blockOrder-rekkefølgen
   // sammen med seksjoner/tekstfelt, samme mønster som addTextBlock/removeTextBlock over.
@@ -19819,8 +19953,31 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     if (!key) return;
     e.dataTransfer.setData("text/menu-drag-key", key);
   }
+  // Fjerner en ev. tidligere markering (klasser satt av handlePreviewDragOver under) - kalles ved
+  // slipp, ved at man drar musen ut av forhåndsvisningen, eller ved at selve dra-operasjonen
+  // avsluttes (Esc, slipp utenfor et gyldig mål, osv).
+  function clearDragOverIndicator() {
+    dragOverElRef.current?.classList.remove("drag-over", "drag-over-before", "drag-over-after");
+    dragOverElRef.current = null;
+  }
+  // Rent visuelt: viser HVOR et element vil havne mens man drar (se .drag-over/-before/-after,
+  // DEL 60) - helt uavhengig av den faktiske treffsone-logikken i handlePreviewDrop (som er
+  // uendret). data-menu-block finnes på hele seksjoner/tekstfelt/overskrifter/bilder (DEL 64-67),
+  // så hele blokken lyser svakt opp og en tynn strek viser om slippet havner før eller etter den,
+  // basert på musepekerens posisjon i forhold til blokkens vertikale midtpunkt.
   function handlePreviewDragOver(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
+    const el = (e.target as HTMLElement).closest("[data-menu-block]") as HTMLElement | null;
+    if (!el) { clearDragOverIndicator(); return; }
+    if (dragOverElRef.current !== el) {
+      clearDragOverIndicator();
+      dragOverElRef.current = el;
+    }
+    const rect = el.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    el.classList.add("drag-over");
+    el.classList.toggle("drag-over-before", before);
+    el.classList.toggle("drag-over-after", !before);
   }
   function reorderBlocks(fromKey: string, toKey: string) {
     if (!form || fromKey === toKey) return;
@@ -19835,6 +19992,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   }
   function handlePreviewDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
+    clearDragOverIndicator();
     const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
     const toKey = target?.getAttribute("data-menu-key");
     const fromKey = e.dataTransfer.getData("text/menu-drag-key");
@@ -20454,6 +20612,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" }}>
             <button className="btn" disabled={readOnly} onClick={addSection}>+ Ny seksjon</button>
             <button className="btn" disabled={readOnly} onClick={addTextBlock}>+ Tekstfelt</button>
+            <button className="btn" disabled={readOnly} onClick={addHeadingBlock}>+ Overskrift</button>
             <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: readOnly ? "default" : "pointer" }}>
               + Bilde
               <input type="file" accept="image/*" disabled={readOnly} style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (file) addImageBlock(file); e.target.value = ""; }} />
@@ -20585,14 +20744,66 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                   </select>
                 </label>
               </div>
+              <div style={{ marginTop: 16 }}>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Bakgrunn</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {(["none", "color", "pattern", "image"] as const).map((m) => (
+                    <button key={m} type="button" className={`btn${(form.backgroundMode || "none") === m ? " active" : ""}`} disabled={readOnly} onClick={() => setForm({ ...form, backgroundMode: m })}>
+                      {m === "none" ? "Ingen" : m === "color" ? "Farge" : m === "pattern" ? "Mønster" : "Bilde"}
+                    </button>
+                  ))}
+                </div>
+                {(form.backgroundMode === "color" || form.backgroundMode === "pattern") && (
+                  <div style={{ marginTop: 8 }}>
+                    <MenuColorPicker
+                      value={form.backgroundColor}
+                      recentColors={data.menuRecentColors || []}
+                      readOnly={readOnly}
+                      onPick={(c) => {
+                        setForm({ ...form, backgroundColor: c });
+                        const next = [c, ...(data.menuRecentColors || []).filter((x) => x !== c)].slice(0, 20);
+                        updateData({ menuRecentColors: next });
+                      }}
+                    />
+                  </div>
+                )}
+                {form.backgroundMode === "pattern" && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                    {(["dots", "stripes", "grid", "diagonal"] as const).map((p) => (
+                      <button key={p} type="button" className={`btn${(form.backgroundPattern || "dots") === p ? " active" : ""}`} disabled={readOnly} onClick={() => setForm({ ...form, backgroundPattern: p })}>
+                        {p === "dots" ? "Prikker" : p === "stripes" ? "Striper" : p === "grid" ? "Rutenett" : "Diagonalt"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {form.backgroundMode === "image" && (
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                    <input type="file" accept="image/*" disabled={readOnly || bgUploading} onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadMenuBackgroundImage(file); e.target.value = ""; }} />
+                    {bgUploading && <span className="muted">Laster opp...</span>}
+                    {form.backgroundImageUrl && <button className="link danger" disabled={readOnly} onClick={removeMenuBackgroundImage}>Fjern bakgrunnsbilde</button>}
+                  </div>
+                )}
+                {(form.backgroundMode && form.backgroundMode !== "none") && (
+                  <label style={{ display: "block", marginTop: 8, maxWidth: 260 }}>
+                    Gjennomsiktighet ({form.backgroundOpacity ?? (form.backgroundMode === "color" ? 100 : 20)}%)
+                    <input type="range" min={0} max={100} disabled={readOnly} value={form.backgroundOpacity ?? (form.backgroundMode === "color" ? 100 : 20)} onChange={(e) => setForm({ ...form, backgroundOpacity: Number(e.target.value) })} style={{ width: "100%" }} />
+                  </label>
+                )}
+              </div>
             </div>
           )}
           <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
-            <div style={{ display: "inline-block", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick} onDragStart={handlePreviewDragStart} onDragOver={handlePreviewDragOver} onDrop={handlePreviewDrop}>
+            <div style={{ display: "inline-block", position: "relative", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick} onDragStart={handlePreviewDragStart} onDragOver={handlePreviewDragOver} onDrop={handlePreviewDrop} onDragLeave={clearDragOverIndicator} onDragEnd={clearDragOverIndicator}>
               <div
                 ref={previewRef}
-                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly, resolvedImageUrls: resolvedImageBlockUrls }) }}
+                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly, resolvedImageUrls: resolvedImageBlockUrls, resolvedBackgroundImageUrl }) }}
               />
+              {pageGuideInfo.pages > 1 && Array.from({ length: pageGuideInfo.pages - 1 }).map((_, i) => (
+                <div key={`pg-line-${i}`} style={{ position: "absolute", left: 0, right: 0, top: (i + 1) * pageGuideInfo.pageHeightPx, height: 0, borderTop: "2px dashed rgba(15,23,42,.35)", boxShadow: "0 10px 14px -8px rgba(15,23,42,.45)", pointerEvents: "none" }} />
+              ))}
+              {pageGuideInfo.pages > 1 && Array.from({ length: pageGuideInfo.pages }).map((_, i) => (
+                <div key={`pg-label-${i}`} style={{ position: "absolute", left: 6, top: i * pageGuideInfo.pageHeightPx + 6, fontSize: 10, color: "#94a3b8", background: "rgba(255,255,255,.85)", padding: "1px 6px", borderRadius: 4, pointerEvents: "none" }}>Side {i + 1}</div>
+              ))}
             </div>
           </div>
           {selectedKey && (
