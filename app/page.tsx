@@ -433,8 +433,17 @@ type PosterElement = {
 type MenuImageBlock = {
   id: string;
   imageUrl: string; // storage path i "documents"-bucketen
-  widthPct?: number; // bredde i prosent av spaltebredden, default 60
-  align?: "left" | "center" | "right"; // default "center"
+  widthPct?: number; // bredde i prosent av spaltebredden, default 60 - brukt KUN når placement er "flow"
+  align?: "left" | "center" | "right"; // default "center" - brukt KUN når placement er "flow"
+  placement?: "flow" | "free"; // "flow" (eller udefinert, for eldre bilder) = dagens oppførsel
+                                // (deltar i blockOrder sammen med seksjoner/tekstfelt). "free" = fri
+                                // XY-plassering OVENPÅ tekstinnholdet (dras/roteres/endres i størrelse
+                                // fritt, samme mekanikk som PosterElement) - deltar IKKE i blockOrder.
+  x?: number; // mm fra venstre kant av siden, kun "free"
+  y?: number; // mm fra toppen av siden, kun "free"
+  width?: number; // mm, kun "free"
+  height?: number; // mm, kun "free"
+  rotationDeg?: number; // kun "free"
 };
 type MenuDesign = {
   id: string;
@@ -18494,7 +18503,10 @@ body{margin:0}
 function getMenuBlockOrder(design: MenuDesign): string[] {
   const sectionKeys = design.sections.map((s) => `section:${s.id}`);
   const textBlockKeys = (design.textBlocks || []).map((b) => `textblock:${b.id}`);
-  const imageBlockKeys = (design.imageBlocks || []).map((b) => `imageblock:${b.id}`);
+  // "free"-plasserte bilder deltar IKKE i den lineære blockOrder - de ligger i et eget lag
+  // ovenpå teksten (se buildMenuHtml/DEL 83 og den frie dra/roter/endre-størrelse-mekanikken i
+  // MenuDesignTab, DEL 86-87).
+  const imageBlockKeys = (design.imageBlocks || []).filter((b) => b.placement !== "free").map((b) => `imageblock:${b.id}`);
   const titleKeys = design.hideTitle ? [] : ["title"];
   const allKeys = new Set([...titleKeys, ...sectionKeys, ...textBlockKeys, ...imageBlockKeys]);
   const fromOrder = (design.blockOrder || []).filter((k) => allKeys.has(k));
@@ -18568,6 +18580,17 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
   const imageBlocksById: Record<string, MenuImageBlock> = {};
   (design.imageBlocks || []).forEach((b) => { imageBlocksById[b.id] = b; });
   const resolvedImageUrls = opts?.resolvedImageUrls || {};
+
+  // "free"-plasserte bilder (se MenuImageBlock/DEL 81) - rendres KUN her når opts.editorPreview
+  // IKKE er satt. I redigeringsvisningen tegner MenuDesignTab dem i stedet som ekte, interaktive
+  // React-elementer ovenpå previewRef, for å kunne tilby dra/roter/endre størrelse (se DEL 86-88).
+  // Print-vinduet og PDF-eksporten bruker derimot denne strengen direkte uten noe React-lag, og
+  // trenger dem tegnet inn her.
+  const freeImagesHtml = opts?.editorPreview ? "" : (design.imageBlocks || []).filter((b) => b.placement === "free").map((b) => {
+    const src = resolvedImageUrls[b.id];
+    if (!src) return "";
+    return `<img class="menu-free-image" src="${src}" style="position:absolute;left:${b.x || 0}mm;top:${b.y || 0}mm;width:${b.width || 80}mm;height:${b.height || 80}mm;object-fit:cover;transform:rotate(${b.rotationDeg || 0}deg);z-index:1" alt="" />`;
+  }).join("");
 
   function renderImageBlock(b: MenuImageBlock): string {
     const src = resolvedImageUrls[b.id];
@@ -18651,6 +18674,7 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
       <div class="menu-main">
         ${columnsBlock}
       </div>
+      ${freeImagesHtml}
       ${design.menuPrice
         ? `<div class="menu-price" data-menu-key="menuPrice" style="${overriddenStyle("menuPrice", bodyFont, MENU_PAGE.fontPx.title, "#111827")}">${escapeHtml(design.menuPrice)}</div>`
         : opts?.editorPreview
@@ -18794,7 +18818,7 @@ function MenuFontPicker({ value, onPick, readOnly }: { value?: string; onPick: (
 // og lar brukeren redigere selve teksten (kontrollert felt, IKKE in-place i previewen - se
 // designbeslutningen i toppen av denne runden) samt font/størrelse/farge, eller skillelinjens
 // synlighet/farge.
-function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice, onPatchImageBlock, onDeleteImageBlock }: {
+function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice, onPatchImageBlock, onDeleteImageBlock, onSetImageFree, onSetImageFlow }: {
   form: MenuDesign;
   selectedKey: string;
   onClose: () => void;
@@ -18827,6 +18851,8 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   onRemoveMenuPrice: () => void;
   onPatchImageBlock: (id: string, patch: Partial<MenuImageBlock>) => void;
   onDeleteImageBlock: (id: string) => void;
+  onSetImageFree: (id: string) => void;
+  onSetImageFlow: (id: string) => void;
 }) {
   // "+ Legg til rett" - klikkbar pseudo-rad nederst i hver seksjon i forhåndsvisningen (finnes
   // ikke som ekte MenuItem, kun i editorPreview-HTML-en fra buildMenuHtml, se DEL 18).
@@ -18860,6 +18886,20 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   if (imageBlockMatch) {
     const block = (form.imageBlocks || []).find((b) => b.id === imageBlockMatch[1]);
     if (!block) return null;
+    if (block.placement === "free") {
+      return (
+        <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
+          <div className="between">
+            <b>Bilde (fri plassering)</b>
+            <button className="link" onClick={onClose}>Lukk</button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Dra bildet for å flytte det. Dra i det blå hjørnet nederst til høyre for å endre størrelse, eller i håndtaket over bildet for å rotere.</p>
+          <button className="btn" style={{ marginTop: 12 }} disabled={readOnly} onClick={() => onPatchImageBlock(block.id, { rotationDeg: 0 })}>Nullstill rotasjon</button>
+          <button className="link" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => onSetImageFlow(block.id)}>Sett tilbake i tekstflyten</button>
+          <button className="link danger" style={{ marginTop: 8, display: "block" }} disabled={readOnly} onClick={() => { onDeleteImageBlock(block.id); onClose(); }}>Slett bilde</button>
+        </div>
+      );
+    }
     return (
       <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
         <div className="between">
@@ -18880,7 +18920,8 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
             ))}
           </div>
         </div>
-        <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteImageBlock(block.id); onClose(); }}>Slett bilde</button>
+        <button className="link" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => onSetImageFree(block.id)}>Gi fri plassering (dra/roter/endre størrelse)</button>
+        <button className="link danger" style={{ marginTop: 8, display: "block" }} disabled={readOnly} onClick={() => { onDeleteImageBlock(block.id); onClose(); }}>Slett bilde</button>
       </div>
     );
   }
@@ -19286,6 +19327,11 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   // reelle høyde, se måle-effekten under) + sidehøyden i px - kun til det visuelle
   // sideskille-overlegget i redigeringsvisningen, påvirker ALDRI selve print/PDF-logikken.
   const [pageGuideInfo, setPageGuideInfo] = useState<{ pages: number; pageHeightPx: number }>({ pages: 1, pageHeightPx: 0 });
+  // DEL 86: dra/endre størrelse/roter-tilstand for FRITT plasserte bilder (MenuImageBlock med
+  // placement:"free") - samme mønster som dragRef i PosterMenuEditor (ekte museposisjon via
+  // mousedown/mousemove/mouseup, IKKE HTML5 dra-og-slipp som resten av tekstmeny-editoren bruker,
+  // siden fri XY-plassering med kontinuerlig visuell tilbakemelding krever det).
+  const freeImageDragRef = useRef<{ id: string; mode: "move" | "resize" | "rotate"; startClientX: number; startClientY: number; startBlock: MenuImageBlock; mmPerPx: number } | null>(null);
   // DEL 35: holder alltid siste menuDesigns-array tilgjengelig for den ASYNKRONE
   // miniatyrbilde-oppdateringen i generateMenuThumbnail under.
   const menuDesignsRef = useRef(menuDesigns);
@@ -19746,6 +19792,62 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     if (!form) return;
     setForm({ ...form, imageBlocks: (form.imageBlocks || []).filter((b) => b.id !== id) });
   }
+  // Gir et bilde fri XY-plassering (dra/roter/endre størrelse ovenpå teksten) - fjernes samtidig
+  // fra blockOrder (frie bilder deltar ikke i den lineære rekkefølgen, se getMenuBlockOrder/DEL 82).
+  // Startposisjon: midt på siden, 80x80mm, ingen rotasjon (samme standardstørrelse som nye bilder
+  // i bilde-plakat-editoren).
+  function setImageBlockFree(id: string) {
+    if (!form) return;
+    const pageWidthMm = form.orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
+    const pageHeightMm = form.orientation === "landscape" ? MENU_PAGE.widthMm : MENU_PAGE.heightMm;
+    const width = 80, height = 80;
+    setForm({
+      ...form,
+      imageBlocks: (form.imageBlocks || []).map((b) => b.id === id ? { ...b, placement: "free" as const, x: Math.round(pageWidthMm / 2 - width / 2), y: Math.round(pageHeightMm / 2 - height / 2), width, height, rotationDeg: 0 } : b),
+      blockOrder: getMenuBlockOrder(form).filter((k) => k !== `imageblock:${id}`),
+    });
+  }
+  // Setter et fritt plassert bilde tilbake i den vanlige tekstflyten (legges bakerst i blockOrder,
+  // samme som når det opprinnelig ble lagt til via addImageBlock).
+  function setImageBlockFlow(id: string) {
+    if (!form) return;
+    setForm({
+      ...form,
+      imageBlocks: (form.imageBlocks || []).map((b) => b.id === id ? { ...b, placement: "flow" as const } : b),
+      blockOrder: [...getMenuBlockOrder(form), `imageblock:${id}`],
+    });
+  }
+  // Mousedown-håndtering for ETT fritt bilde - beregner mm-per-piksel fra previewRef sin faktiske
+  // bredde (samme fremgangsmåte som onElementMouseDown i PosterMenuEditor), slik at dra/endre
+  // størrelse/roter stemmer nøyaktig med sidens virkelige mm-mål uansett zoom/skjermbredde.
+  function onFreeImageMouseDown(e: React.MouseEvent, b: MenuImageBlock, mode: "move" | "resize" | "rotate") {
+    if (readOnly || !form) return;
+    e.stopPropagation();
+    setActiveToolPanel(null);
+    setSelectedKey(`imageblock:${b.id}`);
+    const pageWidthMm = form.orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
+    const rect = previewRef.current?.getBoundingClientRect();
+    const mmPerPx = rect && rect.width > 0 ? pageWidthMm / rect.width : 1;
+    freeImageDragRef.current = { id: b.id, mode, startClientX: e.clientX, startClientY: e.clientY, startBlock: { ...b }, mmPerPx };
+  }
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const d = freeImageDragRef.current; if (!d) return;
+      const dxMm = (e.clientX - d.startClientX) * d.mmPerPx;
+      const dyMm = (e.clientY - d.startClientY) * d.mmPerPx;
+      if (d.mode === "move") {
+        patchImageBlock(d.id, { x: Math.round((d.startBlock.x || 0) + dxMm), y: Math.round((d.startBlock.y || 0) + dyMm) });
+      } else if (d.mode === "resize") {
+        patchImageBlock(d.id, { width: Math.max(10, Math.round((d.startBlock.width || 80) + dxMm)), height: Math.max(10, Math.round((d.startBlock.height || 80) + dyMm)) });
+      } else if (d.mode === "rotate") {
+        patchImageBlock(d.id, { rotationDeg: Math.round((d.startBlock.rotationDeg || 0) + dxMm) });
+      }
+    }
+    function onUp() { freeImageDragRef.current = null; }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [form?.imageBlocks]);
   function hideTitleFromPage() {
     if (!form) return;
     setForm({ ...form, hideTitle: true });
@@ -20794,10 +20896,40 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
           )}
           <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
             <div style={{ display: "inline-block", position: "relative", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick} onDragStart={handlePreviewDragStart} onDragOver={handlePreviewDragOver} onDrop={handlePreviewDrop} onDragLeave={clearDragOverIndicator} onDragEnd={clearDragOverIndicator}>
-              <div
-                ref={previewRef}
-                dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly, resolvedImageUrls: resolvedImageBlockUrls, resolvedBackgroundImageUrl }) }}
-              />
+              {/* previewRef er flyttet OPP hit (fra den indre dangerouslySetInnerHTML-diven) slik at
+                  html2canvas (PDF-eksport/Dokumentbank/miniatyrbilde) fanger BÅDE tekstinnholdet OG
+                  de fritt plasserte bildene under - de kan ikke ligge i samme div som
+                  dangerouslySetInnerHTML. position:relative gir de frie bildene samme
+                  mm-koordinatsystem som selve menysiden. */}
+              <div ref={previewRef} style={{ position: "relative" }}>
+                <div
+                  dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly, resolvedImageUrls: resolvedImageBlockUrls, resolvedBackgroundImageUrl }) }}
+                />
+                {(form.imageBlocks || []).filter((b) => b.placement === "free").map((b) => (
+                  <div
+                    key={b.id}
+                    onMouseDown={(e) => onFreeImageMouseDown(e, b, "move")}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: "absolute", left: `${b.x || 0}mm`, top: `${b.y || 0}mm`, width: `${b.width || 80}mm`, height: `${b.height || 80}mm`,
+                      transform: b.rotationDeg ? `rotate(${b.rotationDeg}deg)` : undefined,
+                      zIndex: 1,
+                      outline: selectedKey === `imageblock:${b.id}` ? "2px solid #2563eb" : "1px dashed transparent",
+                      cursor: readOnly ? "default" : "move",
+                    }}
+                  >
+                    {resolvedImageBlockUrls[b.id]
+                      ? <img src={resolvedImageBlockUrls[b.id]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+                      : <div style={{ width: "100%", height: "100%", background: "#f1f5f9", border: "1px dashed #cbd5e1" }} />}
+                    {!readOnly && selectedKey === `imageblock:${b.id}` && (
+                      <div onMouseDown={(e) => onFreeImageMouseDown(e, b, "resize")} style={{ position: "absolute", right: -6, bottom: -6, width: 12, height: 12, borderRadius: 6, background: "#2563eb", cursor: "nwse-resize" }} />
+                    )}
+                    {!readOnly && selectedKey === `imageblock:${b.id}` && (
+                      <div onMouseDown={(e) => onFreeImageMouseDown(e, b, "rotate")} title="Roter" style={{ position: "absolute", left: "50%", top: -20, width: 10, height: 10, borderRadius: 5, background: "#2563eb", cursor: "grab", transform: "translateX(-50%)" }} />
+                    )}
+                  </div>
+                ))}
+              </div>
               {pageGuideInfo.pages > 1 && Array.from({ length: pageGuideInfo.pages - 1 }).map((_, i) => (
                 <div key={`pg-line-${i}`} style={{ position: "absolute", left: 0, right: 0, top: (i + 1) * pageGuideInfo.pageHeightPx, height: 0, borderTop: "2px dashed rgba(15,23,42,.35)", boxShadow: "0 10px 14px -8px rgba(15,23,42,.45)", pointerEvents: "none" }} />
               ))}
@@ -20841,6 +20973,8 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 onRemoveMenuPrice={removeMenuPrice}
                 onPatchImageBlock={patchImageBlock}
                 onDeleteImageBlock={removeImageBlock}
+                onSetImageFree={setImageBlockFree}
+                onSetImageFlow={setImageBlockFlow}
               />
             </div>
           )}
