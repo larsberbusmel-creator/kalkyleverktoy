@@ -406,6 +406,26 @@ function orderLinkedDocuments(order: Order, documentBank: DocumentBankEntry[]): 
 type MenuItem = { id: string; name: string; description?: string; price?: string; sourceRef?: { type: "product" | "material" | "recipe"; id: string }; allergensText?: string };
 type MenuSection = { id: string; title: string; items: MenuItem[] };
 type MenuCategory = { id: string; name: string };
+// Ett fritt plassert element på en "poster"-type meny (se MenuDesign.type/posterElements og
+// PosterMenuEditor lenger ned) - x/y/width/height er i MILLIMETER, relativt til A4-lerretet
+// (samme MENU_PAGE-mål som brukes for tekstmenyer), IKKE piksler - slik at plasseringen alltid
+// stemmer uansett skjermstørrelse/print/PDF.
+type PosterElement = {
+  id: string;
+  kind: "image" | "text";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotationDeg?: number;
+  zIndex: number;
+  imageUrl?: string; // storage path i "documents"-bucketen (kun kind:"image")
+  text?: string; // kun kind:"text"
+  fontKey?: string;
+  textAlign?: "left" | "center" | "right";
+  color?: string;
+  sizePx?: number;
+};
 type MenuDesign = {
   id: string;
   name: string;
@@ -431,6 +451,16 @@ type MenuDesign = {
   hideTitle?: boolean; // skjuler tittel-blokken PÅ SELVE MENYSIDEN når true - design.name (det
                        // interne navnet på menyen) beholdes uansett og brukes fortsatt i
                        // listevisningen, print-vinduets <title> og Dokumentbank-filnavn.
+  type?: "text" | "poster"; // "text" (eller udefinert, for eldre menyer) = dagens seksjonsbaserte
+                            // meny. "poster" = fri bilde-plakat-type (se PosterMenuEditor under)
+                            // med posterElements i stedet for sections/textBlocks/blockOrder
+                            // (disse settes likevel til tomme arrays for poster-menyer, slik at
+                            // delt logikk som uansett antar dem fortsatt fungerer).
+  thumbnailUrl?: string; // storage path i "documents"-bucketen til et automatisk generert
+                         // miniatyrbilde-PNG av menyen (oppdateres ved hver lagring, se
+                         // generateMenuThumbnail) - løses til signert URL i rutenett-listevisningen.
+  posterElements?: PosterElement[]; // fritt plasserte bilde-/tekstelementer for "poster"-typen.
+  posterBackgroundColor?: string; // bakgrunnsfarge for lerretet (poster-typen), default hvit.
   createdAt: string;
   updatedAt: string;
 };
@@ -18381,7 +18411,7 @@ function menuDesignStyleTag(orientation?: "portrait" | "landscape") {
 @font-face { font-family: "Standard CT"; src: url("/fonts/StandardCTRegularExtd.otf") format("opentype"); font-weight: 400; }
 @page{size:A4${orientation === "landscape" ? " landscape" : ""};margin:0}
 body{margin:0}
-.menu-page{width:${pageWidthMm}mm;height:${pageHeightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
+.menu-page{position:relative;width:${pageWidthMm}mm;height:${pageHeightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
 .menu-logo{object-fit:contain;margin:0 auto 6mm;display:block}
 .menu-title{text-align:center;font-weight:700;margin-bottom:20px}
 .menu-main{flex:1;display:flex;flex-direction:column;min-height:0}
@@ -18551,12 +18581,46 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
   `;
 }
 
+// Bygger INNHOLDET for en "poster"-type meny (se MenuDesign.type/posterElements) - kun brukt av
+// print-vinduet (selve redigeringsflaten, PosterMenuEditor, tegner lerretet med ekte React-JSX for
+// smidig dra-og-slipp - se lenger ned). resolvedImages er en ferdig-løst id -> signert-URL-tabell,
+// siden denne funksjonen bygger en ren HTML-streng uten tilgang til Supabase-klienten.
+function buildPosterHtml(design: MenuDesign, resolvedImages: Record<string, string>): string {
+  const elements = [...(design.posterElements || [])].sort((a, b) => a.zIndex - b.zIndex);
+  const elementsHtml = elements.map((el) => {
+    const base = `position:absolute;left:${el.x}mm;top:${el.y}mm;width:${el.width}mm;height:${el.height}mm;${el.rotationDeg ? `transform:rotate(${el.rotationDeg}deg);` : ""}`;
+    if (el.kind === "image") {
+      const src = resolvedImages[el.id];
+      return src ? `<img class="poster-element" src="${src}" style="${base}object-fit:cover" alt="" />` : "";
+    }
+    const family = menuFontFamily(el.fontKey) || "Arial, Helvetica, sans-serif";
+    return `<div class="poster-element" style="${base}font-family:${family};font-size:${el.sizePx || 20}px;color:${el.color || "#111827"};text-align:${el.textAlign || "left"};white-space:pre-wrap">${escapeHtml(el.text || "")}</div>`;
+  }).join("");
+  return `
+    <div class="menu-page" style="background:${design.posterBackgroundColor || "#ffffff"}">
+      ${elementsHtml}
+    </div>
+  `;
+}
+
 // NB: footer garanteres kun nederst på DEN SISTE siden når menyen er lang
 // nok til å spenne over flere print-sider - en ordentlig "footer på alle
 // sider"-løsning krever egne @page-topp/bunn-marginalier og er bevisst
 // utenfor omfanget her.
 async function printMenuDesign(design: MenuDesign) {
   const w = window.open("", "_blank"); if (!w) return;
+  if (design.type === "poster") {
+    const resolvedImages: Record<string, string> = {};
+    for (const el of design.posterElements || []) {
+      if (el.kind === "image" && el.imageUrl) {
+        const { data } = await supabase.storage.from("documents").createSignedUrl(el.imageUrl, 60 * 60);
+        if (data?.signedUrl) resolvedImages[el.id] = data.signedUrl;
+      }
+    }
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(design.name)}</title>${menuDesignStyleTag(design.orientation)}</head><body><button onclick="window.print()">Print</button>${buildPosterHtml(design, resolvedImages)}</body></html>`);
+    w.document.close(); w.focus();
+    return;
+  }
   let logoUrl: string | undefined;
   if (design.logoUrl) {
     const { data } = await supabase.storage.from("documents").createSignedUrl(design.logoUrl, 60 * 60);
@@ -18836,6 +18900,226 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   );
 }
 
+// Redigeringsflate for "poster"-type menyer (MenuDesign.type === "poster") - fri, dra-og-slipp-
+// basert plassering av bilde-/tekstelementer på et A4-lerret, i stedet for den faste
+// seksjonsbaserte modellen resten av Menyer-editoren bruker. Bruker ekte React-mus-hendelser
+// (mousedown/mousemove/mouseup), IKKE HTML5 dra-og-slipp som resten av editoren - fri XY-
+// plassering med kontinuerlig visuell tilbakemelding krever det. previewRef er DEN SAMME ref-en
+// MenuDesignTab bruker til html2canvas (PDF-eksport/Dokumentbank/miniatyrbilde, se del 1) - ved å
+// rendre lerretet inn i previewRef fungerer alt det UENDRET for poster-menyer også, uten egen kode.
+function PosterMenuEditor({ form, setForm, onCancel, onSave, onPrint, onSaveToDocBank, onDownloadPdf, pdfSaving, pdfDownloading, readOnly, previewRef, recentColors, onRecentColor, historyCount, onUndo }: {
+  form: MenuDesign;
+  setForm: (d: MenuDesign) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onPrint: () => void;
+  onSaveToDocBank: () => void;
+  onDownloadPdf: () => void;
+  pdfSaving: boolean;
+  pdfDownloading: boolean;
+  readOnly: boolean;
+  previewRef: React.RefObject<HTMLDivElement | null>;
+  recentColors: string[];
+  onRecentColor: (c: string) => void;
+  historyCount: number;
+  onUndo: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [resolvedImages, setResolvedImages] = useState<Record<string, string>>({});
+  const dragRef = useRef<{ id: string; mode: "move" | "resize" | "rotate"; startClientX: number; startClientY: number; startEl: PosterElement; mmPerPx: number } | null>(null);
+
+  const pageWidthMm = form.orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
+  const pageHeightMm = form.orientation === "landscape" ? MENU_PAGE.widthMm : MENU_PAGE.heightMm;
+  const elements = form.posterElements || [];
+
+  useEffect(() => {
+    let cancelled = false;
+    const imageEls = elements.filter((el) => el.kind === "image" && el.imageUrl);
+    if (imageEls.length === 0) { setResolvedImages({}); return; }
+    Promise.all(imageEls.map(async (el) => {
+      const { data } = await supabase.storage.from("documents").createSignedUrl(el.imageUrl!, 60 * 60);
+      return [el.id, data?.signedUrl || ""] as const;
+    })).then((pairs) => { if (!cancelled) setResolvedImages(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [JSON.stringify(elements.map((el) => el.kind === "image" ? el.imageUrl : null))]);
+
+  function patchElement(id: string, patch: Partial<PosterElement>) {
+    setForm({ ...form, posterElements: elements.map((el) => el.id === id ? { ...el, ...patch } : el) });
+  }
+  function removeElement(id: string) {
+    setForm({ ...form, posterElements: elements.filter((el) => el.id !== id) });
+    setSelectedId(null);
+  }
+  function bumpZ(id: string, dir: 1 | -1) {
+    const maxZ = Math.max(0, ...elements.map((e) => e.zIndex));
+    const minZ = Math.min(0, ...elements.map((e) => e.zIndex));
+    patchElement(id, { zIndex: dir === 1 ? maxZ + 1 : minZ - 1 });
+  }
+  function addTextElement() {
+    const el: PosterElement = { id: `pel-${Date.now()}`, kind: "text", x: Math.round(pageWidthMm / 2 - 40), y: Math.round(pageHeightMm / 2 - 10), width: 80, height: 20, zIndex: elements.length, text: "Ny tekst", fontKey: "system-sans", textAlign: "center", color: "#111827", sizePx: 20 };
+    setForm({ ...form, posterElements: [...elements, el] });
+    setSelectedId(el.id);
+  }
+  async function addImageElement(file: File) {
+    const path = `poster-${Date.now()}-${file.name}`;
+    const { error } = await supabase.storage.from("documents").upload(path, file);
+    if (error) { alert(`Opplasting feilet: ${error.message}`); return; }
+    const el: PosterElement = { id: `pel-${Date.now()}`, kind: "image", x: Math.round(pageWidthMm / 2 - 40), y: Math.round(pageHeightMm / 2 - 40), width: 80, height: 80, zIndex: elements.length, imageUrl: path };
+    setForm({ ...form, posterElements: [...elements, el] });
+    setSelectedId(el.id);
+  }
+
+  function onElementMouseDown(e: React.MouseEvent, el: PosterElement, mode: "move" | "resize" | "rotate") {
+    if (readOnly) return;
+    e.stopPropagation();
+    setSelectedId(el.id);
+    const rect = previewRef.current?.getBoundingClientRect();
+    const mmPerPx = rect && rect.width > 0 ? pageWidthMm / rect.width : 1;
+    dragRef.current = { id: el.id, mode, startClientX: e.clientX, startClientY: e.clientY, startEl: { ...el }, mmPerPx };
+  }
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const d = dragRef.current; if (!d) return;
+      const dxMm = (e.clientX - d.startClientX) * d.mmPerPx;
+      const dyMm = (e.clientY - d.startClientY) * d.mmPerPx;
+      if (d.mode === "move") {
+        patchElement(d.id, { x: Math.round(d.startEl.x + dxMm), y: Math.round(d.startEl.y + dyMm) });
+      } else if (d.mode === "resize") {
+        patchElement(d.id, { width: Math.max(10, Math.round(d.startEl.width + dxMm)), height: Math.max(10, Math.round(d.startEl.height + dyMm)) });
+      } else if (d.mode === "rotate") {
+        patchElement(d.id, { rotationDeg: Math.round((d.startEl.rotationDeg || 0) + dxMm) });
+      }
+    }
+    function onUp() { dragRef.current = null; }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [elements]);
+
+  const selected = elements.find((el) => el.id === selectedId) || null;
+
+  return (
+    <section className="card">
+      <div className="between">
+        <h2>{form.name || "Ny bilde-plakat"}</h2>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn" onClick={onCancel}>← Tilbake til listen</button>
+          <button className="btn" disabled={historyCount === 0} onClick={onUndo}>↶ Angre</button>
+          <button className="btn" onClick={onPrint}>Print</button>
+          <button className="btn" disabled={readOnly || pdfSaving} onClick={onSaveToDocBank}>{pdfSaving ? "Lagrer..." : "Lagre til Dokumentbanken"}</button>
+          <button className="btn" disabled={pdfDownloading} onClick={onDownloadPdf}>{pdfDownloading ? "Genererer..." : "Last ned PDF"}</button>
+          <button className="btn active" disabled={readOnly} onClick={onSave}>Lagre meny</button>
+        </div>
+      </div>
+      <div className="form-grid two" style={{ marginTop: 12 }}>
+        <label>Navn på meny<input value={form.name} disabled={readOnly} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+        <label>Sideformat
+          <select value={form.orientation || "portrait"} disabled={readOnly} onChange={(e) => setForm({ ...form, orientation: e.target.value as "portrait" | "landscape" })}>
+            <option value="portrait">Stående</option>
+            <option value="landscape">Liggende</option>
+          </select>
+        </label>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Dra et element for å flytte det. Dra i det blå hjørnet nederst til høyre for å endre størrelse, eller i håndtaket over elementet for å rotere.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0", alignItems: "center" }}>
+        <button className="btn" disabled={readOnly} onClick={addTextElement}>+ Tekstboks</button>
+        <label className="btn" style={{ display: "inline-flex", alignItems: "center", cursor: readOnly ? "default" : "pointer" }}>
+          + Bilde
+          <input type="file" accept="image/*" disabled={readOnly} style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (file) addImageElement(file); e.target.value = ""; }} />
+        </label>
+        <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>Bakgrunnsfarge</span>
+        <MenuColorPicker value={form.posterBackgroundColor} recentColors={recentColors} readOnly={readOnly} onPick={(c) => { setForm({ ...form, posterBackgroundColor: c }); onRecentColor(c); }} />
+      </div>
+      <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
+        <div
+          ref={previewRef}
+          onMouseDown={() => setSelectedId(null)}
+          className="menu-page"
+          style={{
+            width: `${pageWidthMm}mm`, height: `${pageHeightMm}mm`, position: "relative", margin: "0 auto", display: "inline-block",
+            background: form.posterBackgroundColor || "#ffffff",
+            boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)",
+          }}
+        >
+          {elements.length === 0 && (
+            <div className="muted" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>Tomt lerret - legg til bilde eller tekstboks over</div>
+          )}
+          {[...elements].sort((a, b) => a.zIndex - b.zIndex).map((el) => (
+            <div
+              key={el.id}
+              onMouseDown={(e) => onElementMouseDown(e, el, "move")}
+              style={{
+                position: "absolute", left: `${el.x}mm`, top: `${el.y}mm`, width: `${el.width}mm`, height: `${el.height}mm`,
+                transform: el.rotationDeg ? `rotate(${el.rotationDeg}deg)` : undefined,
+                outline: selectedId === el.id ? "2px solid #2563eb" : "1px dashed transparent",
+                cursor: readOnly ? "default" : "move",
+              }}
+            >
+              {el.kind === "image" ? (
+                resolvedImages[el.id]
+                  ? <img src={resolvedImages[el.id]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
+                  : <div style={{ width: "100%", height: "100%", background: "#f1f5f9", border: "1px dashed #cbd5e1" }} />
+              ) : (
+                <div style={{ width: "100%", height: "100%", fontFamily: menuFontFamily(el.fontKey), fontSize: el.sizePx || 20, color: el.color || "#111827", textAlign: el.textAlign || "left", whiteSpace: "pre-wrap", pointerEvents: "none", overflow: "hidden" }}>
+                  {el.text}
+                </div>
+              )}
+              {!readOnly && selectedId === el.id && (
+                <div onMouseDown={(e) => onElementMouseDown(e, el, "resize")} style={{ position: "absolute", right: -6, bottom: -6, width: 12, height: 12, borderRadius: 6, background: "#2563eb", cursor: "nwse-resize" }} />
+              )}
+              {!readOnly && selectedId === el.id && (
+                <div onMouseDown={(e) => onElementMouseDown(e, el, "rotate")} title="Roter" style={{ position: "absolute", left: "50%", top: -20, width: 10, height: 10, borderRadius: 5, background: "#2563eb", cursor: "grab", transform: "translateX(-50%)" }} />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      {selected && (
+        <div style={{ position: "fixed", top: 84, right: 24, width: 320, maxWidth: "90vw", maxHeight: "80vh", overflowY: "auto", zIndex: 500 }}>
+          <div className="soft-box" style={{ boxShadow: "0 12px 32px rgba(15,23,42,.22)" }}>
+            <div className="between">
+              <b>{selected.kind === "image" ? "Bilde" : "Tekstboks"}</b>
+              <button className="link" onClick={() => setSelectedId(null)}>Lukk</button>
+            </div>
+            {selected.kind === "text" && (
+              <>
+                <textarea disabled={readOnly} value={selected.text || ""} onChange={(e) => patchElement(selected.id, { text: e.target.value })} rows={3} style={{ width: "100%", marginTop: 8 }} />
+                <div style={{ marginTop: 12 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Font</div>
+                  <MenuFontPicker value={selected.fontKey} readOnly={readOnly} onPick={(fontKey) => patchElement(selected.id, { fontKey })} />
+                </div>
+                <label style={{ display: "block", marginTop: 12 }}>
+                  Tekststørrelse (px)
+                  <input type="number" min={8} max={200} disabled={readOnly} value={selected.sizePx || 20} onChange={(e) => patchElement(selected.id, { sizePx: Number(e.target.value) })} style={{ width: 100 }} />
+                </label>
+                <div style={{ marginTop: 12 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Farge</div>
+                  <MenuColorPicker value={selected.color} recentColors={recentColors} readOnly={readOnly} onPick={(c) => { patchElement(selected.id, { color: c }); onRecentColor(c); }} />
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Justering</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {(["left", "center", "right"] as const).map((a) => (
+                      <button key={a} type="button" className={`btn${(selected.textAlign || "left") === a ? " active" : ""}`} disabled={readOnly} onClick={() => patchElement(selected.id, { textAlign: a })}>
+                        {a === "left" ? "Venstre" : a === "center" ? "Midt" : "Høyre"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button className="btn" disabled={readOnly} onClick={() => bumpZ(selected.id, 1)}>Lag foran</button>
+              <button className="btn" disabled={readOnly} onClick={() => bumpZ(selected.id, -1)}>Lag bak</button>
+            </div>
+            <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => removeElement(selected.id)}>Slett element</button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, isDirty, onDirtyChange, registerSave }: {
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
@@ -18858,6 +19142,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   const [logoUploading, setLogoUploading] = useState(false);
   const [resolvedLogoUrl, setResolvedLogoUrl] = useState<string | undefined>(undefined);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  // DEL 35: holder alltid siste menuDesigns-array tilgjengelig for den ASYNKRONE
+  // miniatyrbilde-oppdateringen i generateMenuThumbnail under.
+  const menuDesignsRef = useRef(menuDesigns);
+  useEffect(() => { menuDesignsRef.current = menuDesigns; }, [menuDesigns]);
   const [editingDefaults, setEditingDefaults] = useState(false);
   const [defaultsForm, setDefaultsForm] = useState<MenuDefaults>(data.menuDefaults || {});
   const [defaultsLogoUploading, setDefaultsLogoUploading] = useState(false);
@@ -18878,6 +19166,37 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   // åpnes nå som flytende bokser (samme visuelle stil som MenuPropertyPanel) fra en kompakt
   // verktøylinje over selve forhåndsvisningen, i stedet for alltid-synlige <details>-bokser.
   const [activeToolPanel, setActiveToolPanel] = useState<"settings" | "logo" | "import" | null>(null);
+
+  // DEL 34: enkel, ikke-lagret angre-funksjon for selve menyredigeringen ("form"). Fanger opp
+  // ENHVER endring av form - uansett hvilken av de mange små funksjonene som gjorde den - ved å
+  // sammenligne forrige og nåværende verdi i en useEffect, i stedet for å pakke inn hvert enkelt
+  // setForm-kall. historyCount er bevisst egen STATE (ikke bare et ref-tall), slik at
+  // "Angre"-knappen faktisk oppdaterer seg reaktivt (en ren ref-mutasjon trigger ikke re-render).
+  const formHistoryRef = useRef<MenuDesign[]>([]);
+  const prevFormRef = useRef<MenuDesign | null>(null);
+  const undoingRef = useRef(false);
+  const [historyCount, setHistoryCount] = useState(0);
+  useEffect(() => {
+    if (undoingRef.current) { undoingRef.current = false; prevFormRef.current = form; return; }
+    if (!prevFormRef.current && form) {
+      formHistoryRef.current = [];
+    } else if (prevFormRef.current && form && prevFormRef.current !== form) {
+      formHistoryRef.current = [...formHistoryRef.current, prevFormRef.current].slice(-30);
+    } else if (!form) {
+      formHistoryRef.current = [];
+    }
+    prevFormRef.current = form;
+    setHistoryCount(formHistoryRef.current.length);
+  }, [form]);
+  function undoForm() {
+    const hist = formHistoryRef.current;
+    if (hist.length === 0) return;
+    const prev = hist[hist.length - 1];
+    formHistoryRef.current = hist.slice(0, -1);
+    undoingRef.current = true;
+    setHistoryCount(formHistoryRef.current.length);
+    setForm(prev);
+  }
 
   // Kategorier for menyer - enkel navngitt liste, delt per sted i databasen (samme mønster som
   // menuRecentColors), opprettes direkte i "Menyer"-listevisningen. Kalt menuDesignCategories i
@@ -19056,6 +19375,31 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     setEditingId("new");
     markClean();
   }
+  // DEL 41: bilde-plakat er en HELT annen menytype (fritt plasserte bilde-/tekstelementer i stedet
+  // for seksjoner) - se PosterMenuEditor lenger ned. sections/textBlocks/blockOrder settes likevel
+  // til tomme arrays slik at delt logikk (saveDesign, duplicateDesign, osv.) fortsatt fungerer.
+  function startNewPoster() {
+    const now = new Date().toISOString();
+    setForm({
+      id: `menu-${Date.now()}`,
+      name: "Ny bilde-plakat",
+      type: "poster",
+      columns: 1,
+      theme: "standard",
+      sections: [],
+      textBlocks: [],
+      blockOrder: [],
+      posterElements: [],
+      posterBackgroundColor: "#ffffff",
+      footerText: "",
+      fontScale: 1,
+      logoSize: "normal",
+      createdAt: now,
+      updatedAt: now,
+    });
+    setEditingId("new");
+    markClean();
+  }
   function startEdit(d: MenuDesign) {
     setForm({ ...d, sections: d.sections.map((s) => ({ ...s, items: s.items.map((it) => ({ ...it })) })) });
     setEditingId(d.id);
@@ -19066,6 +19410,28 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     setEditingId(null);
     setImportSearch("");
     markClean();
+  }
+  // DEL 35: genererer/oppdaterer et lite forhåndsvisningsbilde av menyen ved hver lagring, til bruk
+  // i rutenett-listevisningen (se DEL 36/37). Rent kosmetisk - feiler det (nettverk, html2canvas),
+  // er menyen uansett allerede lagret, så feilen ignoreres stille.
+  function generateMenuThumbnail(designId: string) {
+    const node = previewRef.current;
+    if (!node) return;
+    (async () => {
+      try {
+        const html2canvasMod = await import("html2canvas");
+        const html2canvas = html2canvasMod.default;
+        const canvas = await html2canvas(node, { scale: 0.5, backgroundColor: "#ffffff", useCORS: true });
+        const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.8));
+        if (!blob) return;
+        const path = `thumb-${designId}-${Date.now()}.png`;
+        const { error } = await supabase.storage.from("documents").upload(path, blob, { contentType: "image/png" });
+        if (error) return;
+        updateData({ menuDesigns: menuDesignsRef.current.map((m) => m.id === designId ? { ...m, thumbnailUrl: path } : m) });
+      } catch {
+        // Se kommentar over - stille feil er greit her.
+      }
+    })();
   }
   function saveDesign(): boolean {
     if (!form) return true;
@@ -19084,6 +19450,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     const exists = menuDesigns.some((m) => m.id === toSave.id);
     const next = exists ? menuDesigns.map((m) => m.id === toSave.id ? toSave : m) : [...menuDesigns, toSave];
     updateData({ menuDesigns: next });
+    generateMenuThumbnail(toSave.id);
     cancelEdit();
     return true;
   }
@@ -19631,6 +19998,46 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     return d.source === "menu-editor";
   });
 
+  // DEL 36: løser thumbnailUrl (storage path) til signerte URL-er for HELE menylisten, til bruk i
+  // rutenett-visningen under - samme signert-URL-mønster som logo/dokumentbank ellers i filen.
+  const [menuThumbnailUrls, setMenuThumbnailUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const withThumbs = menuDesigns.filter((m) => m.thumbnailUrl);
+    if (withThumbs.length === 0) { setMenuThumbnailUrls({}); return; }
+    Promise.all(withThumbs.map(async (m) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(m.thumbnailUrl!, 60 * 15);
+      return [m.id, signed?.signedUrl || ""] as const;
+    })).then((pairs) => { if (!cancelled) setMenuThumbnailUrls(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [menuDesigns.map((m) => `${m.id}:${m.thumbnailUrl || ""}`).join(",")]);
+
+  // DEL 37: ett kort i rutenett-listevisningen (miniatyrbilde + navn + kort metainfo + knapper) -
+  // delt mellom "alle kategorier" (gruppert) og ett-kategori-filtrert visning under, i stedet for
+  // å duplisere kort-markup begge steder.
+  function renderMenuCard(d: MenuDesign) {
+    const thumb = menuThumbnailUrls[d.id];
+    return (
+      <div key={d.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff" }}>
+        <div style={{ aspectRatio: "210/297", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+          {thumb ? <img src={thumb} alt={d.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span className="muted" style={{ fontSize: 12, padding: 8, textAlign: "center" }}>{d.type === "poster" ? "Bilde-plakat" : "Ingen forhåndsvisning ennå"}</span>}
+        </div>
+        <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+          <b style={{ fontSize: 13 }}>{d.name}</b>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {d.type === "poster" ? "Bilde-plakat" : `${d.columns} spalte${d.columns > 1 ? "r" : ""} · ${d.theme === "harbour" ? "Harbour" : "Nøytral"} · ${d.sections.length} seksjon${d.sections.length !== 1 ? "er" : ""}`}
+            {d.categoryId && ` · ${(data.menuDesignCategories || []).find((c) => c.id === d.categoryId)?.name || ""}`}
+          </span>
+          <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+            <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
+            <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
+            <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!form) {
     return (
       <>
@@ -19643,6 +20050,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
               <button className="btn" disabled={readOnly} onClick={() => setTemplatePickerOpen((v) => !v)}>Maler</button>
               <button className="btn" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
               <button className="btn active" disabled={readOnly} onClick={startNew}>+ Fra standardmal</button>
+              <button className="btn" disabled={readOnly} onClick={startNewPoster}>+ Ny bilde-plakat</button>
             </div>
           </div>
           {templatePickerOpen && (
@@ -19729,8 +20137,8 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
             <p className="muted">Ingen menyer opprettet ennå.</p>
           ) : categoryFilter === "all" ? (
             // Gruppert per kategori (inkl. en egen "Uten kategori"-gruppe) når ingen bestemt
-            // kategori-filter er valgt - én flat liste blir fort uoversiktlig etter hvert som
-            // antall menyer og kategorier vokser.
+            // kategori-filter er valgt. Hver gruppe vises som et rutenett av miniatyrbilde-kort
+            // (renderMenuCard, DEL 36) i stedet for en flat tekstliste.
             [
               ...(data.menuDesignCategories || []).map((c) => ({ id: c.id, name: c.name })),
               { id: "none", name: "Uten kategori" },
@@ -19740,36 +20148,17 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
               .map(({ group, items }) => (
                 <div key={group.id} style={{ marginTop: 12 }}>
                   <h3 style={{ fontSize: 14, color: "#64748b", margin: "0 0 6px" }}>{group.name}</h3>
-                  {items.map((d) => (
-                    <div key={d.id} className="editable-row">
-                      <span>
-                        <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
-                      </span>
-                      <div>
-                        <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
-                        <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
-                        <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ))
-          ) : (
-            menuDesigns
-              .filter((d) => categoryFilter === "none" ? !d.categoryId : d.categoryId === categoryFilter)
-              .map((d) => (
-                <div key={d.id} className="editable-row">
-                  <span>
-                    <b>{d.name}</b> · {d.columns} spalte{d.columns > 1 ? "r" : ""} · {d.theme === "harbour" ? "Harbour-tema" : "Nøytralt tema"} · {d.sections.length} seksjon{d.sections.length !== 1 ? "er" : ""}
-                    {d.categoryId && ` · ${(data.menuDesignCategories || []).find((c) => c.id === d.categoryId)?.name || ""}`}
-                  </span>
-                  <div>
-                    <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
-                    <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
-                    <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 16 }}>
+                    {items.map(renderMenuCard)}
                   </div>
                 </div>
               ))
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 16 }}>
+              {menuDesigns
+                .filter((d) => categoryFilter === "none" ? !d.categoryId : d.categoryId === categoryFilter)
+                .map(renderMenuCard)}
+            </div>
           )}
         </section>
 
@@ -19882,12 +20271,38 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     );
   }
 
+  // DEL 42: bilde-plakat-menyer redigeres i en HELT egen komponent (PosterMenuEditor, DEL 44) med
+  // fri dra-og-slipp-plassering, i stedet for i den store JSX-blokken under (som er spesifikk for
+  // tekstmenyer - seksjoner/retter/tekstfelt/blockOrder). form.type avgjør hvilken som brukes.
+  if (form.type === "poster") {
+    return (
+      <PosterMenuEditor
+        form={form}
+        setForm={setForm}
+        onCancel={cancelEdit}
+        onSave={saveDesign}
+        onPrint={() => printMenuDesign(form)}
+        onSaveToDocBank={saveDesignToDocumentBank}
+        onDownloadPdf={downloadMenuAsPdf}
+        pdfSaving={pdfSaving}
+        pdfDownloading={pdfDownloading}
+        readOnly={readOnly}
+        previewRef={previewRef}
+        recentColors={data.menuRecentColors || []}
+        onRecentColor={(c) => updateData({ menuRecentColors: [c, ...(data.menuRecentColors || []).filter((rc) => rc !== c)].slice(0, 20) })}
+        historyCount={historyCount}
+        onUndo={undoForm}
+      />
+    );
+  }
+
   return (
     <section className="card">
       <div className="between">
         <h2>{editingId === "new" ? "Ny meny" : "Rediger meny"}</h2>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={cancelEdit}>← Tilbake til listen</button>
+          <button className="btn" disabled={historyCount === 0} onClick={undoForm}>↶ Angre</button>
           <button className="btn" onClick={() => setShowDocBank((v) => !v)}>Dokumentbank</button>
           <button className="btn" onClick={() => printMenuDesign(form)}>Print</button>
           <button className="btn" disabled={readOnly || pdfSaving} onClick={saveDesignToDocumentBank}>{pdfSaving ? "Lagrer..." : "Lagre til Dokumentbanken"}</button>
