@@ -18470,7 +18470,7 @@ function menuDesignStyleTag(orientation?: "portrait" | "landscape") {
 @font-face { font-family: "Standard CT"; src: url("/fonts/StandardCTRegularExtd.otf") format("opentype"); font-weight: 400; }
 @page{size:A4${orientation === "landscape" ? " landscape" : ""};margin:0}
 body{margin:0}
-.menu-page{position:relative;width:${pageWidthMm}mm;height:${pageHeightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
+.menu-page{position:relative;width:${pageWidthMm}mm;min-height:${pageHeightMm}mm;padding:${MENU_PAGE.marginMm}mm;box-sizing:border-box;display:flex;flex-direction:column;color:#111827}
 .menu-logo{object-fit:contain;margin:0 auto 6mm;display:block}
 .menu-title{text-align:center;font-weight:700;margin-bottom:20px}
 .menu-main{flex:1;display:flex;flex-direction:column;min-height:0}
@@ -18491,11 +18491,24 @@ body{margin:0}
 [data-menu-block].drag-over{background:rgba(100,116,139,.10);border-radius:4px}
 [data-menu-block].drag-over-before{box-shadow:inset 0 3px 0 0 #2563eb}
 [data-menu-block].drag-over-after{box-shadow:inset 0 -3px 0 0 #2563eb}
+[data-menu-column].drag-over-column{background:rgba(37,99,235,.06);outline:2px dashed #2563eb;outline-offset:-4px;border-radius:4px}
 .menu-add-item-row{margin-top:4px;padding:2px 8px;border:1px dashed #cbd5e1;border-radius:6px;color:#64748b;font-size:12px;font-style:italic;cursor:pointer;display:inline-block}
 .pdf-export .menu-empty-placeholder{visibility:hidden}
 .pdf-export .menu-add-item-row{display:none}
 .menu-footer{text-align:center;margin-top:16px;color:#64748b}
-@media print{button{display:none}}
+@media print{
+button{display:none}
+/* Flex-containere har generelt dårlig støtte i nettlesere for å brytes korrekt over flere fysiske
+   print-sider (i motsetning til vanlig blokk-flyt). For 1-spalte-menyer (ingen sideliggende
+   spalter å bevare her) faller derfor selve print-utskriften tilbake til vanlig blokk-flyt, slik
+   at en meny med for mye innhold for én side faktisk fortsetter riktig på side 2, 3 osv. i stedet
+   for at innholdet kuttes/forsvinner. Gjelder KUN print (@media print) - selve redigeringsvisningen
+   og PDF-eksporten (html2canvas av den løpende DOM-en, se DEL 1) er uendret. IKKE gjort for 2-3
+   spalter ennå, se BAKGRUNN pkt. 2 og AVSLUTNING pkt. 2 - må testes egen for det tilfellet.
+*/
+.menu-page[data-columns="1"] .menu-main{display:block}
+.menu-page[data-columns="1"] .menu-columns{display:block!important}
+}
 </style>`;
 }
 
@@ -18708,12 +18721,17 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
       buckets[col].push(key);
       weights[col] += blockWeight(key);
     });
-    const columnsHtml = buckets.map((keys) => `<div class="menu-column" style="flex:1;min-width:0">${keys.map(renderBlock).join("")}</div>`).join("");
-    columnsBlock = `<div class="menu-columns" style="display:flex;gap:28px;align-items:flex-start">${columnsHtml}</div>`;
+    // data-menu-column + align-items:stretch (i stedet for det opprinnelige flex-start) gjør at
+    // hver spalte-div faktisk STREKKER seg til samme høyde som den høyeste spalten - uten dette lå
+    // ikke tomrommet man ser under et kortere spalteinnhold faktisk INNI noen spalte sin egen boks
+    // (kun blankt sideareal ved siden av nabospalten), så et slipp der ble stille avvist av
+    // handlePreviewDrop. Se DEL 9 (appendBlockToColumn) for selve slippet i det tomrommet.
+    const columnsHtml = buckets.map((keys, i) => `<div class="menu-column" data-menu-column="${i}" style="flex:1;min-width:0">${keys.map(renderBlock).join("")}</div>`).join("");
+    columnsBlock = `<div class="menu-columns" style="display:flex;gap:28px;align-items:stretch">${columnsHtml}</div>`;
   }
 
   return `
-    <div class="menu-page" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
+    <div class="menu-page" data-columns="${design.columns}" style="font-family:${bodyFont};font-size:${px(MENU_PAGE.fontPx.body)}">
       <div class="menu-page-background" style="${menuBackgroundCss(design, opts?.resolvedBackgroundImageUrl)}"></div>
       ${resolvedLogoUrl ? `<img class="menu-logo" style="max-height:${logoSize.maxHeightMm}mm;max-width:${logoSize.maxWidthPct}%" src="${resolvedLogoUrl}" alt="Logo" />` : ""}
       <div class="menu-main">
@@ -20148,7 +20166,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   // slipp, ved at man drar musen ut av forhåndsvisningen, eller ved at selve dra-operasjonen
   // avsluttes (Esc, slipp utenfor et gyldig mål, osv).
   function clearDragOverIndicator() {
-    dragOverElRef.current?.classList.remove("drag-over", "drag-over-before", "drag-over-after");
+    dragOverElRef.current?.classList.remove("drag-over", "drag-over-before", "drag-over-after", "drag-over-column");
     dragOverElRef.current = null;
   }
   // Rent visuelt: viser HVOR et element vil havne mens man drar (se .drag-over/-before/-after,
@@ -20159,18 +20177,30 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
   function handlePreviewDragOver(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     const el = (e.target as HTMLElement).closest("[data-menu-block]") as HTMLElement | null;
-    if (!el) { clearDragOverIndicator(); return; }
-    if (dragOverElRef.current !== el) {
-      clearDragOverIndicator();
-      dragOverElRef.current = el;
+    if (el) {
+      if (dragOverElRef.current !== el) {
+        clearDragOverIndicator();
+        dragOverElRef.current = el;
+      }
+      const rect = el.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      el.classList.add("drag-over");
+      el.classList.toggle("drag-over-before", before);
+      el.classList.toggle("drag-over-after", !before);
+      return;
     }
-    const rect = el.getBoundingClientRect();
-    const before = e.clientY < rect.top + rect.height / 2;
-    el.classList.add("drag-over");
-    el.classList.toggle("drag-over-before", before);
-    el.classList.toggle("drag-over-after", !before);
+    // Ingen spesifikt blokk-treff - musepekeren er i TOMROMMET under innholdet i en spalte (se
+    // align-items:stretch, DEL 4). Lyser i stedet opp HELE spalten som en enklere "slippes her"-
+    // indikator (se appendBlockToColumn, DEL 9).
+    const columnEl = (e.target as HTMLElement).closest("[data-menu-column]") as HTMLElement | null;
+    if (!columnEl) { clearDragOverIndicator(); return; }
+    if (dragOverElRef.current !== columnEl) {
+      clearDragOverIndicator();
+      dragOverElRef.current = columnEl;
+    }
+    columnEl.classList.add("drag-over-column");
   }
-  function reorderBlocks(fromKey: string, toKey: string) {
+  function reorderBlocks(fromKey: string, toKey: string, pinToColumn?: number) {
     if (!form || fromKey === toKey) return;
     const list = getMenuBlockOrder(form);
     const fromIdx = list.indexOf(fromKey);
@@ -20179,7 +20209,24 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     const next = [...list];
     const [moved] = next.splice(fromIdx, 1);
     next.splice(toIdx, 0, moved);
-    setForm({ ...form, blockOrder: next });
+    // pinToColumn (satt av handlePreviewDrop, DEL 9, når man slipper på en blokk i en spalte-meny)
+    // låser fromKey til SAMME spalte som blokken den slippes på/ved siden av - i SAMME setForm-kall
+    // som selve omorganiseringen, siden to separate setForm-kall i samme synkrone hendelse ikke
+    // ville "sett" hverandres endring (begge ville lest samme, utdaterte `form`).
+    const nextAssignments = pinToColumn === undefined ? form.columnAssignments : { ...(form.columnAssignments || {}), [fromKey]: pinToColumn };
+    setForm({ ...form, blockOrder: next, columnAssignments: nextAssignments });
+  }
+  // Slippes direkte i TOMROMMET i en spalte (under alt innholdet der, men fortsatt inni spaltens
+  // boks - se align-items:stretch, DEL 4) - ingen data-menu-key-treff, men selve spalte-diven blir
+  // truffet. Flytter blokken til ENDEN av blockOrder (havner sist i akkurat den spalten, siden den
+  // greedy fordelingen i buildMenuHtml behandler blockOrder i rekkefølge) og låser den eksplisitt
+  // til spalten via columnAssignments - samme mekanisme som "Spalte 1/2/3"-knappene i
+  // egenskaps-boksen (onSetColumn), bare utløst av selve slippet i stedet.
+  function appendBlockToColumn(key: string, columnIndex: number) {
+    if (!form) return;
+    const next = getMenuBlockOrder(form).filter((k) => k !== key);
+    next.push(key);
+    setForm({ ...form, blockOrder: next, columnAssignments: { ...(form.columnAssignments || {}), [key]: columnIndex } });
   }
   function handlePreviewDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -20187,7 +20234,20 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     const target = (e.target as HTMLElement).closest("[data-menu-key]") as HTMLElement | null;
     const toKey = target?.getAttribute("data-menu-key");
     const fromKey = e.dataTransfer.getData("text/menu-drag-key");
-    if (!toKey || !fromKey || toKey === fromKey || !form) return;
+    if (!fromKey || !form) return;
+
+    // Slipp i TOMROMMET i en spalte (ingen data-menu-key-treff, men selve spalte-diven blir
+    // truffet direkte - se align-items:stretch, DEL 4, som gjør at tomrommet under et kortere
+    // spalteinnhold faktisk er en del av spaltens egen boks). Flyttes til enden av akkurat den
+    // spalten.
+    if (!toKey) {
+      if (form.columns > 1) {
+        const columnEl = (e.target as HTMLElement).closest("[data-menu-column]") as HTMLElement | null;
+        if (columnEl) appendBlockToColumn(fromKey, Number(columnEl.getAttribute("data-menu-column")));
+      }
+      return;
+    }
+    if (toKey === fromKey) return;
 
     // Sjekkes FØRST: bytte plass på to RETTER INNAD I SAMME SEKSJON (uendret oppførsel siden
     // starten). Må sjekkes før blokk-nivå-oppløsningen under - ellers ville begge slå ut som
@@ -20220,7 +20280,16 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     };
     const fromBlock = blockKeyOf(fromKey);
     const toBlock = blockKeyOf(toKey);
-    if (fromBlock && toBlock) reorderBlocks(fromBlock, toBlock);
+    if (fromBlock && toBlock) {
+      // Slippes det på en blokk i en spalte-meny (2-3 spalter), låses fromBlock til SAMME spalte
+      // som toBlock faktisk står i akkurat nå (lest direkte fra DOM-en via data-menu-column, DEL
+      // 4) - dette er det som gjør vanlig dra-og-slipp til den egentlige "flytt til denne
+      // spalten"-handlingen, uten at Lars må bruke spalte-knappene i egenskaps-boksen for det
+      // vanligste tilfellet (dra noe til rett ved siden av noe annet).
+      const toColumnEl = form.columns > 1 ? (e.target as HTMLElement).closest("[data-menu-column]") as HTMLElement | null : null;
+      const toColumnIndex = toColumnEl ? Number(toColumnEl.getAttribute("data-menu-column")) : undefined;
+      reorderBlocks(fromBlock, toBlock, toColumnIndex);
+    }
   }
 
   // Importer produkt: ALLE linjene på produktet (uansett itemType - product/recipe/material)
@@ -20877,6 +20946,13 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 {logoUploading && <span className="muted">Laster opp...</span>}
                 {form.logoUrl && <button className="link danger" disabled={readOnly} onClick={removeMenuLogo}>Fjern logo</button>}
               </div>
+              <label style={{ display: "block", marginTop: 12, maxWidth: 200 }}>Logostørrelse
+                <select value={form.logoSize || "normal"} disabled={readOnly} onChange={(e) => setForm({ ...form, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
+                  <option value="liten">Liten</option>
+                  <option value="normal">Normal</option>
+                  <option value="stor">Stor</option>
+                </select>
+              </label>
             </div>
           )}
 
@@ -20925,13 +21001,6 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                     <option value={0.85}>Liten</option>
                     <option value={1}>Normal</option>
                     <option value={1.2}>Stor</option>
-                  </select>
-                </label>
-                <label>Logostørrelse
-                  <select value={form.logoSize || "normal"} disabled={readOnly} onChange={(e) => setForm({ ...form, logoSize: e.target.value as "liten" | "normal" | "stor" })}>
-                    <option value="liten">Liten</option>
-                    <option value="normal">Normal</option>
-                    <option value="stor">Stor</option>
                   </select>
                 </label>
               </div>
