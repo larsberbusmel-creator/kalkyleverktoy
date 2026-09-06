@@ -404,7 +404,7 @@ function orderLinkedDocuments(order: Order, documentBank: DocumentBankEntry[]): 
 // et fritt lerret - se MenuDesignTab. PER STED (ikke i SHARED_TOP_LEVEL_KEYS),
 // siden ulike restauranter/steder skal kunne ha helt forskjellige menyer.
 type MenuItem = { id: string; name: string; description?: string; price?: string; sourceRef?: { type: "product" | "material" | "recipe"; id: string }; allergensText?: string };
-type MenuSection = { id: string; title: string; items: MenuItem[] };
+type MenuSection = { id: string; title: string; items: MenuItem[]; placement?: "flow" | "free"; x?: number; y?: number; width?: number; rotationDeg?: number };
 type MenuCategory = { id: string; name: string };
 // Ett fritt plassert element på en "poster"-type meny (se MenuDesign.type/posterElements og
 // PosterMenuEditor lenger ned) - x/y/width/height er i MILLIMETER, relativt til A4-lerretet
@@ -18519,7 +18519,7 @@ button{display:none}
 // menyer uten feltet) legges til på slutten i naturlig rekkefølge - garanterer at
 // ingenting forsvinner fra visningen selv om blockOrder er tomt/utdatert/udefinert.
 function getMenuBlockOrder(design: MenuDesign): string[] {
-  const sectionKeys = design.sections.map((s) => `section:${s.id}`);
+  const sectionKeys = design.sections.filter((s) => s.placement !== "free").map((s) => `section:${s.id}`);
   const textBlockKeys = (design.textBlocks || []).map((b) => `textblock:${b.id}`);
   // "free"-plasserte bilder deltar IKKE i den lineære blockOrder - de ligger i et eget lag
   // ovenpå teksten (se buildMenuHtml/DEL 83 og den frie dra/roter/endre-størrelse-mekanikken i
@@ -18544,7 +18544,7 @@ function getMenuBlockOrder(design: MenuDesign): string[] {
 // kilde til sannhet i stedet for flere parallelle implementasjoner.
 // resolvedLogoUrl er den FERDIG SIGNERTE URL-en (ikke storage-path), siden
 // denne funksjonen bygger en ren HTML-streng uten tilgang til Supabase-klienten.
-function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean; readOnly?: boolean; resolvedImageUrls?: Record<string, string>; resolvedBackgroundImageUrl?: string }): string {
+function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { editorPreview?: boolean; readOnly?: boolean; resolvedImageUrls?: Record<string, string>; resolvedBackgroundImageUrl?: string; selectedKey?: string }): string {
   const headingFont = design.theme === "harbour" ? "'Harbour', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const bodyFont = design.theme === "harbour" ? "'Standard CT', Arial, sans-serif" : "Arial, Helvetica, sans-serif";
   const scale = design.fontScale || 1;
@@ -18624,9 +18624,13 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
 
   function renderSection(s: MenuSection): string {
     const divider = dividerStyleFor(s.id);
+    const isFree = s.placement === "free";
+    const blockAttr = isFree ? "" : ` data-menu-block="section:${s.id}"`;
+    const titleDragAttr = isFree ? "" : dragAttr;
+    const titleGrabStyle = isFree ? (opts?.editorPreview && !opts?.readOnly ? ";cursor:move" : "") : grabStyle;
     return `
-    <div class="menu-section" data-menu-block="section:${s.id}" style="margin-bottom:${sectionGap}px">
-      <h2${dragAttr} data-menu-key="section:${s.id}:title" style="${overriddenStyle(`section:${s.id}:title`, headingFont, MENU_PAGE.fontPx.section)}${grabStyle}">${escapeHtml(s.title)}</h2>
+    <div class="menu-section"${blockAttr} style="margin-bottom:${sectionGap}px">
+      <h2${titleDragAttr} data-menu-key="section:${s.id}:title" style="${overriddenStyle(`section:${s.id}:title`, headingFont, MENU_PAGE.fontPx.section)}${titleGrabStyle}">${escapeHtml(s.title)}</h2>
       ${divider.enabled ? `<div class="menu-divider" data-menu-key="section:${s.id}:divider" style="height:2px;background:${divider.color || "#111827"}"></div>` : ""}
       ${s.items.map((it) => `
         <div class="menu-item" style="margin-bottom:${itemGap}px">
@@ -18648,6 +18652,22 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
     </div>
   `;
   }
+
+  // "free"-plasserte SEKSJONER (se MenuSection/DEL 1) - i motsetning til frie bilder (som tegnes
+  // som et eget React-lag OVENPÅ denne HTML-strengen) må seksjoner fortsatt ligge INNI denne
+  // strengen, siden de bruker akkurat den samme klikk-for-å-velge/rediger-rett/legg-til-rett/
+  // dra-om-retter-mekanikken som seksjoner i vanlig tekstflyt. Dra/endre bredde/roter håndteres
+  // av en egen delegert mousedown rett på forhåndsvisnings-wrapperen (handleFreeSectionMouseDown,
+  // DEL 9), som finner håndtakene under via data-free-section-handle.
+  const freeSectionsHtml = design.sections.filter((s) => s.placement === "free").map((s) => {
+    const width = s.width || 200;
+    const showHandles = !!(opts?.editorPreview && !opts?.readOnly && opts?.selectedKey === `section:${s.id}:title`);
+    const handlesHtml = showHandles
+      ? `<div data-free-section-handle="resize" data-free-section-id="${s.id}" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:12px;height:12px;border-radius:6px;background:#2563eb;cursor:ew-resize"></div><div data-free-section-handle="rotate" data-free-section-id="${s.id}" title="Roter" style="position:absolute;left:50%;top:-20px;width:10px;height:10px;border-radius:5px;background:#2563eb;cursor:grab;transform:translateX(-50%)"></div>`
+      : "";
+    const outline = opts?.editorPreview ? (opts?.selectedKey === `section:${s.id}:title` ? "outline:2px solid #2563eb;" : "outline:1px dashed transparent;") : "";
+    return `<div class="menu-free-section" data-free-section-id="${s.id}" style="position:absolute;left:${s.x || 0}mm;top:${s.y || 0}mm;width:${width}mm;${s.rotationDeg ? `transform:rotate(${s.rotationDeg}deg);` : ""}${outline}z-index:1">${renderSection(s)}${handlesHtml}</div>`;
+  }).join("");
 
   function renderTextBlock(b: MenuTextBlock): string {
     const isHeading = b.kind === "heading";
@@ -18738,6 +18758,7 @@ function buildMenuHtml(design: MenuDesign, resolvedLogoUrl?: string, opts?: { ed
         ${columnsBlock}
       </div>
       ${freeImagesHtml}
+      ${freeSectionsHtml}
       ${design.menuPrice
         ? `<div class="menu-price" data-menu-key="menuPrice" style="${overriddenStyle("menuPrice", bodyFont, MENU_PAGE.fontPx.title, "#111827")}">${escapeHtml(design.menuPrice)}</div>`
         : opts?.editorPreview
@@ -18881,7 +18902,7 @@ function MenuFontPicker({ value, onPick, readOnly }: { value?: string; onPick: (
 // og lar brukeren redigere selve teksten (kontrollert felt, IKKE in-place i previewen - se
 // designbeslutningen i toppen av denne runden) samt font/størrelse/farge, eller skillelinjens
 // synlighet/farge.
-function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice, onPatchImageBlock, onDeleteImageBlock, onSetImageFree, onSetImageFlow, onSetColumn }: {
+function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKeyText, isDividerKey, dividerSectionId, getTextStyleOverride, patchTextStyle, getDividerOverride, patchDivider, pickColor, recentColors, readOnly, products, itemDraft, setItemDraft, onAddItem, onDeleteSection, onDeleteItem, onDeleteTextBlock, onRegenerateAllergens, priceFetchSearch, setPriceFetchSearch, onFetchItemPrice, menuPriceFetchSearch, setMenuPriceFetchSearch, onFetchMenuPrice, onHideTitle, onRemoveMenuPrice, onPatchImageBlock, onDeleteImageBlock, onSetImageFree, onSetImageFlow, onSetColumn, onSetSectionFree, onSetSectionFlow, onPatchSection }: {
   form: MenuDesign;
   selectedKey: string;
   onClose: () => void;
@@ -18917,6 +18938,9 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   onSetImageFree: (id: string) => void;
   onSetImageFlow: (id: string) => void;
   onSetColumn: (key: string, column: number | undefined) => void;
+  onSetSectionFree: (id: string) => void;
+  onSetSectionFlow: (id: string) => void;
+  onPatchSection: (id: string, patch: Partial<MenuSection>) => void;
 }) {
   // "+ Legg til rett" - klikkbar pseudo-rad nederst i hver seksjon i forhåndsvisningen (finnes
   // ikke som ekte MenuItem, kun i editorPreview-HTML-en fra buildMenuHtml, se DEL 18).
@@ -19030,6 +19054,7 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
   const style = getTextStyleOverride(selectedKey);
   const isMultiline = selectedKey.endsWith(":description") || selectedKey.endsWith(":allergens") || selectedKey.startsWith("textblock:");
   const sectionTitleMatch = selectedKey.match(/^section:(.+):title$/);
+  const freeSection = sectionTitleMatch ? form.sections.find((s) => s.id === sectionTitleMatch[1]) : undefined;
   const itemNameMatch = selectedKey.match(/^item:(.+):name$/);
   const itemPriceMatch = selectedKey.match(/^item:(.+):price$/);
   const itemAllergensMatch = selectedKey.match(/^item:(.+):allergens$/);
@@ -19130,7 +19155,7 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
           <button type="button" className={`btn${style.underline ? " active" : ""}`} disabled={readOnly} onClick={() => patchTextStyle(selectedKey, { underline: !style.underline })}>Understrek</button>
         </div>
       </div>
-      {(sectionTitleMatch || textBlockMatch) && form.columns > 1 && (() => {
+      {(sectionTitleMatch || textBlockMatch) && freeSection?.placement !== "free" && form.columns > 1 && (() => {
         // Seksjonens blockOrder-nøkkel er "section:{id}" UTEN ":title" - selve teksten som redigeres
         // over er "section:{id}:title", men spalteplasseringen gjelder hele seksjonen. For
         // tekstfelt/overskrifter er selectedKey ("textblock:{id}") allerede den riktige nøkkelen.
@@ -19148,6 +19173,14 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
           </div>
         );
       })()}
+      {sectionTitleMatch && freeSection?.placement === "free" && (
+        <button className="btn" style={{ marginTop: 12 }} disabled={readOnly} onClick={() => onPatchSection(sectionTitleMatch[1], { rotationDeg: 0 })}>Nullstill rotasjon</button>
+      )}
+      {sectionTitleMatch && (
+        <button className="link" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => freeSection?.placement === "free" ? onSetSectionFlow(sectionTitleMatch[1]) : onSetSectionFree(sectionTitleMatch[1])}>
+          {freeSection?.placement === "free" ? "Sett tilbake i tekstflyten" : "Gi fri plassering (dra/roter/endre bredde)"}
+        </button>
+      )}
       {sectionTitleMatch && (
         <button className="link danger" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => { onDeleteSection(sectionTitleMatch[1]); onClose(); }}>Slett seksjon</button>
       )}
@@ -19955,6 +19988,89 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, [form?.imageBlocks]);
+  // Gir en SEKSJON fri XY-plassering (dra/roter/endre bredde) - samme mønster som
+  // setImageBlockFree over, men UTEN høyde (en seksjons høyde følger fortsatt innholdet, se
+  // BAKGRUNN øverst i denne runden). Fjernes samtidig fra blockOrder (frie seksjoner deltar ikke
+  // i den lineære rekkefølgen, se getMenuBlockOrder/DEL 3).
+  function setSectionFree(id: string) {
+    if (!form) return;
+    const pageWidthMm = form.orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
+    const pageHeightMm = form.orientation === "landscape" ? MENU_PAGE.widthMm : MENU_PAGE.heightMm;
+    const width = 200;
+    setForm({
+      ...form,
+      sections: form.sections.map((s) => s.id === id ? { ...s, placement: "free" as const, x: Math.round(pageWidthMm / 2 - width / 2), y: Math.round(pageHeightMm / 2 - 60), width, rotationDeg: 0 } : s),
+      blockOrder: getMenuBlockOrder(form).filter((k) => k !== `section:${id}`),
+    });
+  }
+  // Setter en fritt plassert seksjon tilbake i den vanlige tekstflyten (legges bakerst i
+  // blockOrder, samme som når en helt ny seksjon opprettes).
+  function setSectionFlow(id: string) {
+    if (!form) return;
+    setForm({
+      ...form,
+      sections: form.sections.map((s) => s.id === id ? { ...s, placement: "flow" as const } : s),
+      blockOrder: [...getMenuBlockOrder(form), `section:${id}`],
+    });
+  }
+  function patchSection(id: string, patch: Partial<MenuSection>) {
+    if (!form) return;
+    setForm({ ...form, sections: form.sections.map((s) => s.id === id ? { ...s, ...patch } : s) });
+  }
+  const freeSectionDragRef = useRef<{ id: string; mode: "move" | "resize" | "rotate"; startClientX: number; startClientY: number; startSection: MenuSection; mmPerPx: number } | null>(null);
+  function startFreeSectionDrag(e: React.MouseEvent, id: string, mode: "move" | "resize" | "rotate") {
+    if (readOnly || !form) return;
+    const section = form.sections.find((s) => s.id === id);
+    if (!section) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setActiveToolPanel(null);
+    setSelectedKey(`section:${id}:title`);
+    const pageWidthMm = form.orientation === "landscape" ? MENU_PAGE.heightMm : MENU_PAGE.widthMm;
+    const rect = previewRef.current?.getBoundingClientRect();
+    const mmPerPx = rect && rect.width > 0 ? pageWidthMm / rect.width : 1;
+    freeSectionDragRef.current = { id, mode, startClientX: e.clientX, startClientY: e.clientY, startSection: { ...section }, mmPerPx };
+  }
+  // Delegert mousedown for frie seksjoner - kalles fra SAMME wrapper-div som
+  // handlePreviewClick/-DragStart/-Drop (se onMouseDown i JSX-en, DEL 9). Sjekker FØRST om
+  // museklikket traff et av resize/roter-håndtakene (tegnet inn i buildMenuHtml/DEL 5), deretter
+  // om det traff SELVE TITTELEN til en fri seksjon (brukes som "flytt hele seksjonen"-håndtak,
+  // slik at retter/allergener/"+ Legg til rett" inni seksjonen fortsatt kan klikkes/dras som
+  // normalt uten å starte en flytting av hele seksjonen ved et uhell).
+  function handleFreeSectionMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (readOnly || !form) return;
+    const handleEl = (e.target as HTMLElement).closest("[data-free-section-handle]") as HTMLElement | null;
+    if (handleEl) {
+      const mode = handleEl.getAttribute("data-free-section-handle") as "resize" | "rotate";
+      const id = handleEl.getAttribute("data-free-section-id");
+      if (id) startFreeSectionDrag(e, id, mode);
+      return;
+    }
+    const titleEl = (e.target as HTMLElement).closest('[data-menu-key$=":title"]') as HTMLElement | null;
+    const key = titleEl?.getAttribute("data-menu-key");
+    const sectionId = key?.match(/^section:(.+):title$/)?.[1];
+    if (!sectionId) return;
+    const section = form.sections.find((s) => s.id === sectionId);
+    if (section?.placement === "free") startFreeSectionDrag(e, sectionId, "move");
+  }
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const d = freeSectionDragRef.current; if (!d) return;
+      const dxMm = (e.clientX - d.startClientX) * d.mmPerPx;
+      const dyMm = (e.clientY - d.startClientY) * d.mmPerPx;
+      if (d.mode === "move") {
+        patchSection(d.id, { x: Math.round((d.startSection.x || 0) + dxMm), y: Math.round((d.startSection.y || 0) + dyMm) });
+      } else if (d.mode === "resize") {
+        patchSection(d.id, { width: Math.max(40, Math.round((d.startSection.width || 200) + dxMm)) });
+      } else if (d.mode === "rotate") {
+        patchSection(d.id, { rotationDeg: Math.round((d.startSection.rotationDeg || 0) + dxMm) });
+      }
+    }
+    function onUp() { freeSectionDragRef.current = null; }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [form?.sections]);
   function hideTitleFromPage() {
     if (!form) return;
     setForm({ ...form, hideTitle: true });
@@ -21081,7 +21197,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
             </div>
           )}
           <div style={{ overflowX: "auto", padding: "16px 0", textAlign: "center" }}>
-            <div style={{ display: "inline-block", position: "relative", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onClick={handlePreviewClick} onDragStart={handlePreviewDragStart} onDragOver={handlePreviewDragOver} onDrop={handlePreviewDrop} onDragLeave={clearDragOverIndicator} onDragEnd={clearDragOverIndicator}>
+            <div style={{ display: "inline-block", position: "relative", boxShadow: "0 2px 10px rgba(15,23,42,.15), 0 0 0 1px rgba(15,23,42,.08)", cursor: "default" }} onMouseDown={handleFreeSectionMouseDown} onClick={handlePreviewClick} onDragStart={handlePreviewDragStart} onDragOver={handlePreviewDragOver} onDrop={handlePreviewDrop} onDragLeave={clearDragOverIndicator} onDragEnd={clearDragOverIndicator}>
               {/* previewRef er flyttet OPP hit (fra den indre dangerouslySetInnerHTML-diven) slik at
                   html2canvas (PDF-eksport/Dokumentbank/miniatyrbilde) fanger BÅDE tekstinnholdet OG
                   de fritt plasserte bildene under - de kan ikke ligge i samme div som
@@ -21089,7 +21205,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                   mm-koordinatsystem som selve menysiden. */}
               <div ref={previewRef} style={{ position: "relative" }}>
                 <div
-                  dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly, resolvedImageUrls: resolvedImageBlockUrls, resolvedBackgroundImageUrl }) }}
+                  dangerouslySetInnerHTML={{ __html: menuDesignStyleTag(form.orientation) + buildMenuHtml(form, resolvedLogoUrl, { editorPreview: true, readOnly, resolvedImageUrls: resolvedImageBlockUrls, resolvedBackgroundImageUrl, selectedKey: selectedKey || undefined }) }}
                 />
                 {(form.imageBlocks || []).filter((b) => b.placement === "free").map((b) => (
                   <div
@@ -21162,6 +21278,9 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
                 onSetImageFree={setImageBlockFree}
                 onSetImageFlow={setImageBlockFlow}
                 onSetColumn={setBlockColumn}
+                onSetSectionFree={setSectionFree}
+                onSetSectionFlow={setSectionFlow}
+                onPatchSection={patchSection}
               />
             </div>
           )}
