@@ -18828,6 +18828,19 @@ async function printMenuDesign(design: MenuDesign) {
   w.document.close(); w.focus();
 }
 
+// Skriver ut ETT dokumentbank-dokument direkte fra forsiden (renderDocumentBankCard, DEL 5) -
+// uten å måtte gå via "Åpne" + nettleserens egen PDF-viser først. Bruker samme
+// window.open("", "_blank") + document.write-mønster som printMenuDesign over, men legger
+// dokumentet i en <iframe> og utløser print() når den er ferdig lastet (onload på selve
+// iframe-elementet fungerer uansett opphav, i motsetning til å lese INNHOLDET i iframen).
+async function printDocumentBankEntry(entry: DocumentBankEntry) {
+  const { data: signed, error } = await supabase.storage.from("documents").createSignedUrl(entry.storagePath, 60 * 5);
+  if (error || !signed?.signedUrl) { alert(`Kunne ikke åpne dokumentet: ${error?.message || "ukjent feil"}`); return; }
+  const w = window.open("", "_blank"); if (!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8" /><title>${escapeHtml(entry.name)}</title><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style></head><body><iframe src="${signed.signedUrl}" onload="window.print()"></iframe></body></html>`);
+  w.document.close(); w.focus();
+}
+
 // Delt fargevelger for Menyer-editoren: fast palett (MENU_COLOR_PALETTE) + en native
 // fargevelger for egendefinert farge + en "nylig brukt"-rad. "Nylig brukt" kommer inn som prop
 // (leses fra data.menuRecentColors, delt for HELE stedet i databasen) og onPick kalles med den
@@ -20661,6 +20674,12 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
     if (error || !data?.signedUrl) { alert(`Kunne ikke åpne dokumentet: ${error?.message || "ukjent feil"}`); return; }
     window.open(data.signedUrl, "_blank");
   }
+  async function deleteMenuDocFromBank(entry: DocumentBankEntry) {
+    if (!confirm(`Slette dokumentet "${entry.name}"? Dette kan ikke angres.`)) return;
+    const { error } = await supabase.storage.from("documents").remove([entry.storagePath]);
+    if (error) { alert(`Kunne ikke slette filen: ${error.message}`); return; }
+    updateData({ documentBank: (data.documentBank || []).filter((d) => d.id !== entry.id) });
+  }
   const filteredDocBank = (data.documentBank || []).filter((d) => {
     if (docBankFilter === "all") return true;
     if (docBankFilter === "upload") return (d.source || "upload") === "upload";
@@ -20698,9 +20717,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
             {d.categoryId && ` · ${(data.menuDesignCategories || []).find((c) => c.id === d.categoryId)?.name || ""}`}
           </span>
           <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-            <button className="link" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
-            <button className="link" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
-            <button className="link danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
+            <button className="btn" onClick={() => startEdit(d)}>{readOnly ? "Vis" : "Rediger"}</button>
+            <button className="btn" disabled={readOnly} onClick={() => duplicateDesign(d)}>Dupliser</button>
+            <button className="btn" onClick={() => printMenuDesign(d)}>Skriv ut</button>
+            <button className="btn danger" disabled={readOnly} onClick={() => deleteDesign(d.id)}>Slett</button>
           </div>
         </div>
       </div>
@@ -20721,7 +20741,9 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
           <b style={{ fontSize: 13 }}>{d.name}</b>
           <span className="muted" style={{ fontSize: 12 }}>Lastet opp av: {d.uploadedBy}</span>
           <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-            <button className="link" onClick={() => openDocumentBankEntry(d)}>Åpne</button>
+            <button className="btn" onClick={() => openDocumentBankEntry(d)}>Åpne</button>
+            <button className="btn" onClick={() => printDocumentBankEntry(d)}>Skriv ut</button>
+            <button className="btn danger" disabled={readOnly} onClick={() => deleteMenuDocFromBank(d)}>Slett</button>
           </div>
         </div>
       </div>
@@ -20739,7 +20761,6 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
               <button className="btn" disabled={readOnly} onClick={() => setTemplatePickerOpen((v) => !v)}>Maler</button>
               <button className="btn" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
               <button className="btn active" disabled={readOnly} onClick={startNew}>+ Fra standardmal</button>
-              <button className="btn" disabled={readOnly} onClick={startNewPoster}>+ Ny bilde-plakat</button>
             </div>
           </div>
           {templatePickerOpen && (
