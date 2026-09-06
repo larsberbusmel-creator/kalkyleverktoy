@@ -10532,7 +10532,7 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
           <div className="card">
             <div className="between">
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button className="btn" onClick={() => setPanel("day")}>Dagens produksjon</button>
+                <button className="btn" style={{ background: "#dcfce7", color: "#166534", borderColor: "#86efac" }} onClick={() => setPanel("day")}>Dagens produksjon</button>
                 <button className="btn" onClick={() => setPanel("template")}>Produktmal</button>
                 <button className="btn" onClick={() => setPanel("customers")}>Storkjøkkenkunder</button>
                 <button className={mainPanel === "bakeri" && panel === "pickup" ? "btn active" : "btn"} onClick={() => setPanel("pickup")}>🛍️ Henteordre Storkjøkken</button>
@@ -23316,7 +23316,8 @@ function GlobalStyles() {
   padding: 7px 12px;
   border-radius: 10px;
   border: 1px solid #cbd5f5;
-  background: white;
+  background: #f8fafc;
+  background: color-mix(in srgb, var(--page-color, #64748b) 10%, white);
   color: #0f172a;
   cursor: pointer;
   font-size: 14px;
@@ -23335,11 +23336,12 @@ function GlobalStyles() {
   border-radius: 7px;
   font-size: 13px;
   flex-shrink: 0;
-  background: #eef2ff;
-  background: color-mix(in srgb, var(--page-color, #64748b) 22%, white);
+  background: #e0e7ff;
+  background: color-mix(in srgb, var(--page-color, #64748b) 38%, white);
   }
   .btn:hover {
-  background: #f1f5f9;
+  background: #eef2ff;
+  background: color-mix(in srgb, var(--page-color, #64748b) 18%, white);
   }
   .btn.danger {
   border-color: #fecaca;
