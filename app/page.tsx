@@ -2797,6 +2797,9 @@ function productCost(product: Product, visited: string[] = []) {
   });
 
   const activeTabConfig = tabConfig.find((t) => t.key === tab);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--page-color", activeTabConfig?.color || "#64748b");
+  }, [activeTabConfig?.color]);
 
 return (
   <main style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
@@ -20757,10 +20760,10 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
           <div className="between">
             <h2>Menyer</h2>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" disabled={readOnly} onClick={startEditDefaults}>Standardinnstillinger</button>
-              <button className="btn" disabled={readOnly} onClick={() => setTemplatePickerOpen((v) => !v)}>Maler</button>
-              <button className="btn" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
-              <button className="btn active" disabled={readOnly} onClick={startNew}>+ Fra standardmal</button>
+              <button className="btn" data-icon="⚙️" disabled={readOnly} onClick={startEditDefaults}>Standardinnstillinger</button>
+              <button className="btn" data-icon="🗂️" disabled={readOnly} onClick={() => setTemplatePickerOpen((v) => !v)}>Maler</button>
+              <button className="btn" data-icon="📄" disabled={readOnly} onClick={startNewBlank}>+ Tomt dokument</button>
+              <button className="btn active" data-icon="📑" disabled={readOnly} onClick={startNew}>+ Fra standardmal</button>
             </div>
           </div>
           {templatePickerOpen && (
@@ -20839,7 +20842,7 @@ function MenuDesignTab({ data, updateData, readOnly, userEmail, activeSiteName, 
             </label>
             <div style={{ display: "flex", gap: 8 }}>
               <input value={newCategoryName} disabled={readOnly} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="Ny kategori..." />
-              <button className="btn" disabled={readOnly} onClick={addMenuCategory}>+ Legg til kategori</button>
+              <button className="btn" data-icon="🏷️" disabled={readOnly} onClick={addMenuCategory}>+ Legg til kategori</button>
             </div>
           </div>
 
@@ -23308,13 +23311,33 @@ function GlobalStyles() {
     .between { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
     input, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 10px; padding: 9px 10px; background: white; }
     .btn {
-  padding: 2px 6px;
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 10px;
   border: 1px solid #cbd5f5;
   background: white;
+  color: #0f172a;
   cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  }
+  /* Ikon-firkanten: kun til stede når knappen faktisk har fått et data-icon-attributt (se
+     DEL 3-7 for eksempler) - knapper uten data-icon ser ut akkurat som før, ingen tomt hakk. */
+  .btn[data-icon]::before {
+  content: attr(data-icon);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: 13px;
+  flex-shrink: 0;
+  background: #eef2ff;
+  background: color-mix(in srgb, var(--page-color, #64748b) 22%, white);
   }
   .btn:hover {
   background: #f1f5f9;
@@ -23323,6 +23346,10 @@ function GlobalStyles() {
   border-color: #fecaca;
   color: #b91c1c;
   background: #fef2f2;
+  }
+  .btn.danger[data-icon]::before {
+  background: #fee2e2;
+  background: color-mix(in srgb, #dc2626 22%, white);
   }
   .btn.logout {
   background: #fecaca;   /* lys rød */
@@ -23334,6 +23361,9 @@ function GlobalStyles() {
   background: #fca5a5;
   }
     .btn.active { background: #0f172a; color: white; border-color: #0f172a; }
+    .btn.active[data-icon]::before {
+    background: rgba(255,255,255,.18);
+    }
     .btn:disabled, .btn:disabled:hover { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; opacity: .7; cursor: not-allowed; }
     input:disabled, select:disabled, textarea:disabled { background: #f8fafc; color: #94a3b8; cursor: not-allowed; }
     .list { display: block; width: 100%; text-align: left; border: 1px solid #e2e8f0; background: white; border-radius: 12px; padding: 12px; margin: 8px 0; cursor: pointer; }
