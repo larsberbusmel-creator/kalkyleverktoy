@@ -1657,6 +1657,25 @@ function useFormDirtyTracking(active: boolean, onDirtyChange: (dirty: boolean) =
 export default function Page() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
+  const allTabConfig: { key: Tab; label: string; icon: string; color: string }[] = [
+  { key: "dashboard",  label: "Startside",         icon: "📅", color: "#0ea5e9" },
+  { key: "materials",  label: "Råvarer",            icon: "🥕", color: "#16a34a" },
+  { key: "recipes",    label: "Grunnoppskrifter",   icon: "📖", color: "#7c3aed" },
+  { key: "products",   label: "Produkter",          icon: "🍽", color: "#db2777" },
+  { key: "orders",     label: "Ordre",              icon: "📋", color: "#2563eb" },
+  { key: "production", label: "Produksjon",         icon: "🥖", color: "#ea580c" },
+  { key: "inventory",  label: "Varetelling",        icon: "📦", color: "#0891b2" },
+  { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
+  { key: "eventkalkyle", label: "Eventkalkyle",     icon: "🎪", color: "#c026d3" },
+  { key: "priceAgreements", label: "Avtalepriser",  icon: "🏷️", color: "#65a30d" },
+  { key: "menyer",     label: "Menyer",             icon: "📜", color: "#0284c7" },
+  { key: "reports",    label: "Rapporter",          icon: "📊", color: "#0d9488" },
+  { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
+  { key: "users",      label: "Admin",              icon: "🔑", color: "#9333ea" },
+];
+  useEffect(() => {
+    document.documentElement.style.setProperty("--page-color", allTabConfig.find((t) => t.key === tab)?.color || "#64748b");
+  }, [tab]);
   const [rentalOfferToOpen, setRentalOfferToOpen] = useState<string | null>(null);
   const [orderToOpen, setOrderToOpen] = useState<string | null>(null);
   const [productionDateToOpen, setProductionDateToOpen] = useState<string | null>(null);
@@ -2755,23 +2774,6 @@ function productCost(product: Product, visited: string[] = []) {
     return !!currentUserAccess?.permissions?.[t]?.edit;
   }
 
-  const allTabConfig: { key: Tab; label: string; icon: string; color: string }[] = [
-  { key: "dashboard",  label: "Startside",         icon: "📅", color: "#0ea5e9" },
-  { key: "materials",  label: "Råvarer",            icon: "🥕", color: "#16a34a" },
-  { key: "recipes",    label: "Grunnoppskrifter",   icon: "📖", color: "#7c3aed" },
-  { key: "products",   label: "Produkter",          icon: "🍽", color: "#db2777" },
-  { key: "orders",     label: "Ordre",              icon: "📋", color: "#2563eb" },
-  { key: "production", label: "Produksjon",         icon: "🥖", color: "#ea580c" },
-  { key: "inventory",  label: "Varetelling",        icon: "📦", color: "#0891b2" },
-  { key: "rental",     label: "Leie av lokale",     icon: "🏠", color: "#ca8a04" },
-  { key: "eventkalkyle", label: "Eventkalkyle",     icon: "🎪", color: "#c026d3" },
-  { key: "priceAgreements", label: "Avtalepriser",  icon: "🏷️", color: "#65a30d" },
-  { key: "menyer",     label: "Menyer",             icon: "📜", color: "#0284c7" },
-  { key: "reports",    label: "Rapporter",          icon: "📊", color: "#0d9488" },
-  { key: "settings",   label: "Innstillinger",      icon: "⚙️", color: "#475569" },
-  { key: "users",      label: "Admin",              icon: "🔑", color: "#9333ea" },
-];
-
   const activeSite = data.sites.find((s) => s.id === activeSiteId);
 
   function switchActiveSite(newId: string) {
@@ -2797,9 +2799,6 @@ function productCost(product: Product, visited: string[] = []) {
   });
 
   const activeTabConfig = tabConfig.find((t) => t.key === tab);
-  useEffect(() => {
-    document.documentElement.style.setProperty("--page-color", activeTabConfig?.color || "#64748b");
-  }, [activeTabConfig?.color]);
 
 return (
   <main style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
