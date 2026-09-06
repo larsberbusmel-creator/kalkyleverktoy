@@ -18996,7 +18996,7 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
           </div>
           <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Dra bildet for å flytte det. Dra i det blå hjørnet nederst til høyre for å endre størrelse, eller i håndtaket over bildet for å rotere.</p>
           <button className="btn" style={{ marginTop: 12 }} disabled={readOnly} onClick={() => onPatchImageBlock(block.id, { rotationDeg: 0 })}>Nullstill rotasjon</button>
-          <button className="link" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => onSetImageFlow(block.id)}>Sett tilbake i tekstflyten</button>
+          <button type="button" className="btn active" style={{ marginTop: 16 }} disabled={readOnly} onClick={() => onSetImageFlow(block.id)}>Fri plassering</button>
           <button className="link danger" style={{ marginTop: 8, display: "block" }} disabled={readOnly} onClick={() => { onDeleteImageBlock(block.id); onClose(); }}>Slett bilde</button>
         </div>
       );
@@ -19036,7 +19036,7 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
             </div>
           );
         })()}
-        <button className="link" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => onSetImageFree(block.id)}>Gi fri plassering (dra/roter/endre størrelse)</button>
+        <button type="button" className="btn" style={{ marginTop: 16 }} disabled={readOnly} onClick={() => onSetImageFree(block.id)}>Fri plassering</button>
         <button className="link danger" style={{ marginTop: 8, display: "block" }} disabled={readOnly} onClick={() => { onDeleteImageBlock(block.id); onClose(); }}>Slett bilde</button>
       </div>
     );
@@ -19190,8 +19190,8 @@ function MenuPropertyPanel({ form, selectedKey, onClose, menuKeyText, setMenuKey
         <button className="btn" style={{ marginTop: 12 }} disabled={readOnly} onClick={() => onPatchSection(sectionTitleMatch[1], { rotationDeg: 0 })}>Nullstill rotasjon</button>
       )}
       {sectionTitleMatch && (
-        <button className="link" style={{ marginTop: 16, display: "block" }} disabled={readOnly} onClick={() => freeSection?.placement === "free" ? onSetSectionFlow(sectionTitleMatch[1]) : onSetSectionFree(sectionTitleMatch[1])}>
-          {freeSection?.placement === "free" ? "Sett tilbake i tekstflyten" : "Gi fri plassering (dra/roter/endre bredde)"}
+        <button type="button" className={`btn${freeSection?.placement === "free" ? " active" : ""}`} style={{ marginTop: 16 }} disabled={readOnly} onClick={() => freeSection?.placement === "free" ? onSetSectionFlow(sectionTitleMatch[1]) : onSetSectionFree(sectionTitleMatch[1])}>
+          Fri plassering
         </button>
       )}
       {sectionTitleMatch && (
