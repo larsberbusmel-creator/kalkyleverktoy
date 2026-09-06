@@ -1101,6 +1101,12 @@ function marginTone(margin: number) {
   return "bad";
 }
 
+function marginToneColor(tone: "good" | "warn" | "bad") {
+  if (tone === "good") return "#166534";
+  if (tone === "warn") return "#92400e";
+  return "#b91c1c";
+}
+
 function makeMaterial(id: string, name: string, category: string, unit: Unit, packageSize: number, packagePrice: number, allergens: string[], kcal: number, protein: number, carbs: number, fat: number, kj: number, saturatedFat: number, fiber: number, sugars: number, addedSugar: number, salt: number, isWholegrain = false): Material {
   return {
   id,
@@ -2886,7 +2892,7 @@ return (
         {tab === "recipes"    && <RecipesTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeCost={recipeCost} recipeUnitCost={recipeUnitCost} recipeTotalAmount={recipeTotalAmount} recipeAllergens={recipeAllergens} readOnly={!canEdit("recipes")} isDirty={dirtyTabs.has("recipes")} onDirtyChange={onDirtyChangeFor("recipes")} registerSave={registerSave} />}
         {tab === "products"   && <ProductsTab data={data} updateData={updateData} updateListRpc={updateListRpc} recipeUnitCost={recipeUnitCost} productCost={productCost} productUnitCost={productUnitCost} productAllergens={productAllergens} recommendedPriceIncVat={recommendedPriceIncVat} readOnly={!canEdit("products")} isDirty={dirtyTabs.has("products")} onDirtyChange={onDirtyChangeFor("products")} registerSave={registerSave} />}
         {tab === "orders"     && <OrdersTab data={data} updateData={updateData} updateListRpc={updateListRpc} productAllergens={productAllergens} recipeAllergens={recipeAllergens} setTab={setTab} setRentalOfferToOpen={setRentalOfferToOpen} setEventCalculationToOpen={setEventCalculationToOpen} pendingOrderId={orderToOpen} clearPendingOrderId={() => setOrderToOpen(null)} pendingNewOrder={wantsNewOrder} clearPendingNewOrder={() => setWantsNewOrder(false)} readOnly={!canEdit("orders")} userEmail={userEmail} isSuperadmin={isSuperadmin} isDirty={dirtyTabs.has("orders")} onDirtyChange={onDirtyChangeFor("orders")} registerSave={registerSave} printFlags={printFlags} setPrintFlags={setPrintFlags} selectedAllergens={selectedAllergens} orderSubtotalIncVat={orderSubtotalIncVat} orderDiscountAmount={orderDiscountAmount} orderTotalIncVat={orderTotalIncVat} orderAllergenWarnings={orderAllergenWarnings} printOrder={printOrder} />}
-        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} printFlags={printFlags} setPrintFlags={setPrintFlags} printOrder={printOrder} buildOrderPrintHtml={buildOrderPrintHtml} orderPrintStyleTag={orderPrintStyleTag} />}
+        {tab === "production" && <ProductionTab data={data} updateData={updateData} productAllergens={productAllergens} productCost={productCost} pendingDate={productionDateToOpen} clearPendingDate={() => setProductionDateToOpen(null)} pendingOpenStorkjokkenCustomers={wantsOpenStorkjokkenCustomers} clearPendingOpenStorkjokkenCustomers={() => setWantsOpenStorkjokkenCustomers(false)} readOnly={!canEdit("production")} printFlags={printFlags} setPrintFlags={setPrintFlags} printOrder={printOrder} buildOrderPrintHtml={buildOrderPrintHtml} orderPrintStyleTag={orderPrintStyleTag} />}
         {tab === "inventory"  && <InventoryTab data={data} updateData={updateData} productUnitCost={productUnitCost} updateInventoryRpc={updateInventoryRpc} readOnly={!canEdit("inventory")} siteName={activeSite?.name} />}
         {tab === "rental"     && <RentalTab data={data} updateData={updateData} updateListRpc={updateListRpc} pendingOfferId={rentalOfferToOpen} clearPendingOfferId={() => setRentalOfferToOpen(null)} productAllergens={productAllergens} recipeAllergens={recipeAllergens} readOnly={!canEdit("rental")} userEmail={userEmail} isSuperadmin={isSuperadmin} setTab={setTab} setOrderToOpen={setOrderToOpen} setProductionDateToOpen={setProductionDateToOpen} setWantsNewOrder={setWantsNewOrder} />}
         {tab === "eventkalkyle" && <EventTab data={data} updateData={updateData} updateListRpc={updateListRpc} productUnitCost={productUnitCost} recommendedPriceIncVat={recommendedPriceIncVat} pendingEventId={eventCalculationToOpen} clearPendingEventId={() => setEventCalculationToOpen(null)} readOnly={!canEdit("eventkalkyle")} userEmail={userEmail} canSeeWages={isSuperadmin || !!currentUserAccess?.canSeeWages} />}
@@ -8753,6 +8759,7 @@ function ProductionTab({
   data,
   updateData,
   productAllergens,
+  productCost,
   pendingDate,
   clearPendingDate,
   pendingOpenStorkjokkenCustomers,
@@ -8767,6 +8774,7 @@ function ProductionTab({
   data: AppData;
   updateData: (p: Partial<AppData>) => void;
   productAllergens: (p: Product) => string[];
+  productCost: (p: Product) => number;
   pendingDate?: string | null;
   clearPendingDate?: () => void;
   pendingOpenStorkjokkenCustomers?: boolean;
@@ -8827,6 +8835,8 @@ function ProductionTab({
   const [statsMode, setStatsMode] = useState<"week" | "month" | "year">("month");
   const [statsAnchor, setStatsAnchor] = useState(today());
   const [statsCustomerId, setStatsCustomerId] = useState<string | null>(null);
+  const [statsView, setStatsView] = useState<"customers" | "mostProduced" | "profitability">("customers");
+  const [profitabilityView, setProfitabilityView] = useState<"catalog" | "period">("catalog");
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [customerDraft, setCustomerDraft] = useState<Partial<StorkjokkenCustomer>>({});
   const [fastTransportEnabled, setFastTransportEnabled] = useState(false);
@@ -9421,6 +9431,44 @@ function ProductionTab({
       });
     });
     return sum;
+  }
+
+  function mostProducedProducts(from: string, to: string) {
+    return data.products.map((product) => {
+      let quantity = 0;
+      listDates(from, to).forEach((date) => {
+        const day = productionDays[date];
+        if (!day?.approved) return;
+        const dayQuantities = day.quantities?.[product.id] || {};
+        quantity += Object.values(dayQuantities).reduce((s: number, q) => s + Number(q || 0), 0);
+      });
+      (data.storkjokkenPickupOrders || []).filter((p) => p.productId === product.id && p.date >= from && p.date <= to).forEach((p) => {
+        quantity += Number(p.quantity || 0);
+      });
+      return { productId: product.id, productName: product.name, quantity };
+    }).filter((r) => r.quantity > 0).sort((a, b) => b.quantity - a.quantity);
+  }
+
+  function productProfitability() {
+    return data.products.map((product) => {
+      const priceExVat = product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat);
+      const cost = productCost(product);
+      const marginKr = priceExVat - cost;
+      const marginPercent = marginPercentFrom(priceExVat, cost);
+      return { productId: product.id, productName: product.name, priceExVat, cost, marginKr, marginPercent };
+    }).sort((a, b) => b.marginPercent - a.marginPercent);
+  }
+
+  function productProfitInPeriod(from: string, to: string) {
+    return mostProducedProducts(from, to).map((row) => {
+      const product = data.products.find((p) => p.id === row.productId);
+      if (!product) return null;
+      const priceExVat = product.storkjokkenPriceExVat || exVatFromIncVat(product.customerPrice || 0, data.settings.foodVat);
+      const cost = productCost(product);
+      const marginPerUnit = priceExVat - cost;
+      return { productId: row.productId, productName: row.productName, quantity: row.quantity, marginPerUnit, totalProfit: marginPerUnit * row.quantity };
+    }).filter((x): x is { productId: string; productName: string; quantity: number; marginPerUnit: number; totalProfit: number } => !!x)
+      .sort((a, b) => b.totalProfit - a.totalProfit);
   }
 
   function statsPeriod(mode: "week" | "month" | "year", anchor: string) {
@@ -11401,7 +11449,12 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
 
           {panel === "stats" && (
             <div className="card">
-              {statsCustomerId ? (() => {
+              <div className="chips">
+                <button className={statsView === "customers" ? "btn active" : "btn"} onClick={() => setStatsView("customers")}>Kunder</button>
+                <button className={statsView === "mostProduced" ? "btn active" : "btn"} onClick={() => setStatsView("mostProduced")}>Mest produsert</button>
+                <button className={statsView === "profitability" ? "btn active" : "btn"} onClick={() => setStatsView("profitability")}>Lønnsomhet</button>
+              </div>
+              {statsView === "customers" && (statsCustomerId ? (() => {
                 const statsCustomer = data.storkjokkenCustomers.find((c) => c.id === statsCustomerId);
                 const { from, to } = statsPeriod(statsMode, statsAnchor);
                 const breakdown = customerSalesBreakdown(statsCustomerId, from, to);
@@ -11464,6 +11517,92 @@ ${baseRecipePages}${productPages}${packingPages}${orderPackingPages}${shoppingPa
                       })}
                     </tbody>
                   </table>
+                </>
+              ))}
+              {statsView === "mostProduced" && (() => {
+                const { from, to } = statsPeriod(statsMode, statsAnchor);
+                const rows = mostProducedProducts(from, to);
+                return (
+                  <>
+                    <h3>Mest produserte produkter (alle kunder)</h3>
+                    <div className="chips">
+                      <button className={statsMode === "week" ? "btn active" : "btn"} onClick={() => setStatsMode("week")}>Ukesvis</button>
+                      <button className={statsMode === "month" ? "btn active" : "btn"} onClick={() => setStatsMode("month")}>Månedsvis</button>
+                      <button className={statsMode === "year" ? "btn active" : "btn"} onClick={() => setStatsMode("year")}>Årsvis</button>
+                    </div>
+                    <div className="production-date-row">
+                      <button className="btn" onClick={() => shiftStatsAnchor(-1)}>← Forrige</button>
+                      <div className="production-date-box"><b>{statsPeriod(statsMode, statsAnchor).label}</b></div>
+                      <button className="btn" onClick={() => shiftStatsAnchor(1)}>Neste →</button>
+                    </div>
+                    <table>
+                      <thead><tr><th>Produkt</th><th>Antall produsert</th></tr></thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={r.productId}><td>{r.productName}</td><td>{r.quantity}</td></tr>
+                        ))}
+                        {!rows.length && <tr><td colSpan={2} style={{ color: "#94a3b8" }}>Ingen produksjon i denne perioden.</td></tr>}
+                      </tbody>
+                    </table>
+                  </>
+                );
+              })()}
+              {statsView === "profitability" && (
+                <>
+                  <h3>Lønnsomhet</h3>
+                  <div className="chips">
+                    <button className={profitabilityView === "catalog" ? "btn active" : "btn"} onClick={() => setProfitabilityView("catalog")}>Hele sortimentet</button>
+                    <button className={profitabilityView === "period" ? "btn active" : "btn"} onClick={() => setProfitabilityView("period")}>Faktisk i perioden</button>
+                  </div>
+                  {profitabilityView === "catalog" ? (() => {
+                    const rows = productProfitability();
+                    return (
+                      <table>
+                        <thead><tr><th>Produkt</th><th>Storkjøkkenpris eks.</th><th>Varekost</th><th>Margin kr</th><th>Margin %</th></tr></thead>
+                        <tbody>
+                          {rows.map((r) => (
+                            <tr key={r.productId}>
+                              <td>{r.productName}</td>
+                              <td>{currency(r.priceExVat)}</td>
+                              <td>{currency(r.cost)}</td>
+                              <td>{currency(r.marginKr)}</td>
+                              <td style={{ color: marginToneColor(marginTone(r.marginPercent) as "good" | "warn" | "bad") }}><b>{num(r.marginPercent, 1)} %</b></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    );
+                  })() : (() => {
+                    const { from, to } = statsPeriod(statsMode, statsAnchor);
+                    const rows = productProfitInPeriod(from, to);
+                    const totalProfit = rows.reduce((s, r) => s + r.totalProfit, 0);
+                    return (
+                      <>
+                        <div className="chips">
+                          <button className={statsMode === "week" ? "btn active" : "btn"} onClick={() => setStatsMode("week")}>Ukesvis</button>
+                          <button className={statsMode === "month" ? "btn active" : "btn"} onClick={() => setStatsMode("month")}>Månedsvis</button>
+                          <button className={statsMode === "year" ? "btn active" : "btn"} onClick={() => setStatsMode("year")}>Årsvis</button>
+                        </div>
+                        <div className="production-date-row">
+                          <button className="btn" onClick={() => shiftStatsAnchor(-1)}>← Forrige</button>
+                          <div className="production-date-box"><b>{statsPeriod(statsMode, statsAnchor).label}</b></div>
+                          <button className="btn" onClick={() => shiftStatsAnchor(1)}>Neste →</button>
+                        </div>
+                        <table>
+                          <thead><tr><th>Produkt</th><th>Antall</th><th>Margin/stk</th><th>Sum bidrag</th></tr></thead>
+                          <tbody>
+                            {rows.map((r) => (
+                              <tr key={r.productId}><td>{r.productName}</td><td>{r.quantity}</td><td>{currency(r.marginPerUnit)}</td><td>{currency(r.totalProfit)}</td></tr>
+                            ))}
+                            {!rows.length && <tr><td colSpan={4} style={{ color: "#94a3b8" }}>Ingen produksjon i denne perioden.</td></tr>}
+                          </tbody>
+                          {rows.length > 0 && (
+                            <tfoot><tr className="total"><td colSpan={3}>Sum bidrag</td><td><b>{currency(totalProfit)}</b></td></tr></tfoot>
+                          )}
+                        </table>
+                      </>
+                    );
+                  })()}
                 </>
               )}
             </div>
